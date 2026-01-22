@@ -15,8 +15,12 @@
     "leaflet": "^1.9.4",
     "next": "^15.0.0",
     "react": "^18.2.0",
+    "react-beautiful-dnd": "^13.1.1",
     "react-dom": "^18.2.0",
-    "react-leaflet": "^4.2.1"
+    "react-highlight-words": "^0.20.0",
+    "react-jigsaw-puzzle": "^2.0.0",
+    "react-leaflet": "^4.2.1",
+    "sudoku-core": "^1.0.0"
   },
   "devDependencies": {
     "@types/leaflet": "^1.9.8",
