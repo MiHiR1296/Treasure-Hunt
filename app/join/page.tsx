@@ -143,7 +143,7 @@ export default function JoinPage() {
               value={teamName}
               onChange={(e) => setTeamName(e.target.value)}
               placeholder="e.g., The Explorers"
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-base"
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-base text-gray-900 bg-white"
               disabled={isLoading}
               autoFocus
             />
@@ -161,7 +161,7 @@ export default function JoinPage() {
                     value={member}
                     onChange={(e) => handleMemberChange(index, e.target.value)}
                     placeholder={`Member ${index + 1} name`}
-                    className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-base"
+                    className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-base text-gray-900 bg-white"
                     disabled={isLoading}
                   />
                   {members.length > MIN_MEMBERS && (

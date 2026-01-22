@@ -262,6 +262,79 @@ export default function AdminPage() {
     }
   };
 
+  const handleEditCheckpoint = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingCheckpoint || !selectedHunt) return;
+    setIsLoading(true);
+    try {
+      const checkpointData: any = {
+        title: checkpointTitle,
+        description: checkpointDescription || null,
+        order_index: checkpointOrder,
+        clue_text: checkpointClue,
+        hint_text: checkpointHint || null,
+        unlock_method: checkpointUnlockMethod,
+      };
+      if (checkpointUnlockMethod === 'qr_code') {
+        checkpointData.qr_code_value = checkpointQRCode;
+        checkpointData.manual_code = null;
+        checkpointData.lat = null;
+        checkpointData.lng = null;
+        checkpointData.radius_m = null;
+      } else if (checkpointUnlockMethod === 'manual_code') {
+        checkpointData.manual_code = checkpointManualCode;
+        checkpointData.qr_code_value = null;
+        checkpointData.lat = null;
+        checkpointData.lng = null;
+        checkpointData.radius_m = null;
+      } else if (checkpointUnlockMethod === 'gps') {
+        checkpointData.lat = parseFloat(checkpointLat);
+        checkpointData.lng = parseFloat(checkpointLng);
+        checkpointData.radius_m = parseInt(checkpointRadius) || 50;
+        checkpointData.qr_code_value = null;
+        checkpointData.manual_code = null;
+      }
+      const { error } = await supabase
+        .from('checkpoints')
+        .update(checkpointData)
+        .eq('id', editingCheckpoint.id);
+      if (error) throw error;
+      alert('Checkpoint updated!');
+      setEditingCheckpoint(null);
+      setCheckpointTitle('');
+      setCheckpointDescription('');
+      setCheckpointOrder(1);
+      setCheckpointClue('');
+      setCheckpointHint('');
+      setCheckpointQRCode('');
+      setCheckpointManualCode('');
+      setCheckpointLat('');
+      setCheckpointLng('');
+      setCheckpointRadius('50');
+      loadCheckpoints();
+      loadDashboard();
+    } catch (err: any) {
+      alert(err.message || 'Failed to update checkpoint');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const startEditCheckpoint = (checkpoint: Checkpoint) => {
+    setEditingCheckpoint(checkpoint);
+    setCheckpointTitle(checkpoint.title);
+    setCheckpointDescription(checkpoint.description || '');
+    setCheckpointOrder(checkpoint.order_index);
+    setCheckpointClue(checkpoint.clue_text);
+    setCheckpointHint(checkpoint.hint_text || '');
+    setCheckpointUnlockMethod(checkpoint.unlock_method as 'qr_code' | 'gps' | 'manual_code');
+    setCheckpointQRCode(checkpoint.qr_code_value || '');
+    setCheckpointManualCode(checkpoint.manual_code || '');
+    setCheckpointLat(checkpoint.lat?.toString() || '');
+    setCheckpointLng(checkpoint.lng?.toString() || '');
+    setCheckpointRadius(checkpoint.radius_m?.toString() || '50');
+  };
+
   const handleDeleteCheckpoint = async (id: string) => {
     if (!confirm('Are you sure? This will delete this checkpoint and all progress!')) return;
     try {
@@ -335,7 +408,7 @@ export default function AdminPage() {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 text-gray-900 bg-white"
                 autoFocus
               />
             </div>
@@ -433,7 +506,7 @@ export default function AdminPage() {
                     type="text"
                     value={huntName}
                     onChange={(e) => setHuntName(e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg text-gray-900 bg-white"
                     required
                   />
                 </div>
@@ -442,7 +515,7 @@ export default function AdminPage() {
                   <textarea
                     value={huntDescription}
                     onChange={(e) => setHuntDescription(e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg text-gray-900 bg-white"
                     rows={3}
                   />
                 </div>
@@ -451,7 +524,7 @@ export default function AdminPage() {
                   <select
                     value={huntStatus}
                     onChange={(e) => setHuntStatus(e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg text-gray-900 bg-white"
                   >
                     <option value="draft">Draft</option>
                     <option value="live">Live</option>
@@ -530,8 +603,11 @@ export default function AdminPage() {
               <h2 className="text-xl md:text-2xl font-bold text-gray-900 mb-4">Select Hunt</h2>
               <select
                 value={selectedHunt || ''}
-                onChange={(e) => setSelectedHunt(e.target.value || null)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base"
+                onChange={(e) => {
+                  setSelectedHunt(e.target.value || null);
+                  setEditingCheckpoint(null); // Reset edit mode when changing hunt
+                }}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base text-gray-900 bg-white"
               >
                 <option value="">-- Select a hunt --</option>
                 {hunts.map((hunt) => (
@@ -544,10 +620,12 @@ export default function AdminPage() {
 
             {selectedHunt && (
               <>
-                {/* Create Checkpoint Form */}
+                {/* Create/Edit Checkpoint Form */}
                 <div className="bg-white rounded-2xl shadow-xl p-4 md:p-6">
-                  <h2 className="text-xl md:text-2xl font-bold text-gray-900 mb-4">Create Checkpoint</h2>
-                  <form onSubmit={handleCreateCheckpoint} className="space-y-4">
+                  <h2 className="text-xl md:text-2xl font-bold text-gray-900 mb-4">
+                    {editingCheckpoint ? 'Edit Checkpoint' : 'Create Checkpoint'}
+                  </h2>
+                  <form onSubmit={editingCheckpoint ? handleEditCheckpoint : handleCreateCheckpoint} className="space-y-4">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">Title</label>
@@ -555,7 +633,7 @@ export default function AdminPage() {
                           type="text"
                           value={checkpointTitle}
                           onChange={(e) => setCheckpointTitle(e.target.value)}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base"
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base text-gray-900 bg-white"
                           required
                         />
                       </div>
@@ -565,7 +643,7 @@ export default function AdminPage() {
                           type="number"
                           value={checkpointOrder}
                           onChange={(e) => setCheckpointOrder(parseInt(e.target.value) || 1)}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base"
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base text-gray-900 bg-white"
                           required
                         />
                       </div>
@@ -575,7 +653,7 @@ export default function AdminPage() {
                       <textarea
                         value={checkpointDescription}
                         onChange={(e) => setCheckpointDescription(e.target.value)}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base"
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base text-gray-900 bg-white"
                         rows={2}
                       />
                     </div>
@@ -584,7 +662,7 @@ export default function AdminPage() {
                       <textarea
                         value={checkpointClue}
                         onChange={(e) => setCheckpointClue(e.target.value)}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base"
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base text-gray-900 bg-white"
                         rows={3}
                         required
                         placeholder="The riddle or clue that leads to the next location"
@@ -595,7 +673,7 @@ export default function AdminPage() {
                       <textarea
                         value={checkpointHint}
                         onChange={(e) => setCheckpointHint(e.target.value)}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base"
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base text-gray-900 bg-white"
                         rows={2}
                         placeholder="A helpful hint if teams get stuck"
                       />
@@ -605,7 +683,7 @@ export default function AdminPage() {
                       <select
                         value={checkpointUnlockMethod}
                         onChange={(e) => setCheckpointUnlockMethod(e.target.value as any)}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base"
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base text-gray-900 bg-white"
                       >
                         <option value="qr_code">QR Code</option>
                         <option value="gps">GPS Location</option>
@@ -619,7 +697,7 @@ export default function AdminPage() {
                           type="text"
                           value={checkpointQRCode}
                           onChange={(e) => setCheckpointQRCode(e.target.value)}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base"
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base text-gray-900 bg-white"
                           required
                           placeholder="The value that the QR code should contain"
                         />
@@ -632,7 +710,7 @@ export default function AdminPage() {
                           type="text"
                           value={checkpointManualCode}
                           onChange={(e) => setCheckpointManualCode(e.target.value)}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base"
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base text-gray-900 bg-white"
                           required
                           placeholder="The code players need to enter"
                         />
@@ -647,7 +725,7 @@ export default function AdminPage() {
                             step="any"
                             value={checkpointLat}
                             onChange={(e) => setCheckpointLat(e.target.value)}
-                            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base"
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base text-gray-900 bg-white"
                             required
                             placeholder="19.2433"
                           />
@@ -659,7 +737,7 @@ export default function AdminPage() {
                             step="any"
                             value={checkpointLng}
                             onChange={(e) => setCheckpointLng(e.target.value)}
-                            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base"
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base text-gray-900 bg-white"
                             required
                             placeholder="73.1356"
                           />
@@ -670,20 +748,43 @@ export default function AdminPage() {
                             type="number"
                             value={checkpointRadius}
                             onChange={(e) => setCheckpointRadius(e.target.value)}
-                            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base"
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base text-gray-900 bg-white"
                             required
                             placeholder="50"
                           />
                         </div>
                       </div>
                     )}
-                    <button
-                      type="submit"
-                      disabled={isLoading}
-                      className="w-full md:w-auto bg-indigo-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-indigo-700 disabled:opacity-50 text-base"
-                    >
-                      {isLoading ? 'Creating...' : 'Create Checkpoint'}
-                    </button>
+                    <div className="flex gap-3">
+                      <button
+                        type="submit"
+                        disabled={isLoading}
+                        className="flex-1 md:flex-none bg-indigo-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-indigo-700 disabled:opacity-50 text-base"
+                      >
+                        {isLoading ? (editingCheckpoint ? 'Updating...' : 'Creating...') : (editingCheckpoint ? 'Update Checkpoint' : 'Create Checkpoint')}
+                      </button>
+                      {editingCheckpoint && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingCheckpoint(null);
+                            setCheckpointTitle('');
+                            setCheckpointDescription('');
+                            setCheckpointOrder(1);
+                            setCheckpointClue('');
+                            setCheckpointHint('');
+                            setCheckpointQRCode('');
+                            setCheckpointManualCode('');
+                            setCheckpointLat('');
+                            setCheckpointLng('');
+                            setCheckpointRadius('50');
+                          }}
+                          className="flex-1 md:flex-none bg-gray-500 text-white px-6 py-3 rounded-lg font-semibold hover:bg-gray-600 text-base"
+                        >
+                          Cancel
+                        </button>
+                      )}
+                    </div>
                   </form>
                 </div>
 
@@ -703,12 +804,20 @@ export default function AdminPage() {
                               <p className="text-sm text-gray-500 mt-1">{cp.description}</p>
                             )}
                           </div>
-                          <button
-                            onClick={() => handleDeleteCheckpoint(cp.id)}
-                            className="bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-red-600 w-full sm:w-auto"
-                          >
-                            Delete
-                          </button>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => startEditCheckpoint(cp)}
+                              className="bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-600 w-full sm:w-auto"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => handleDeleteCheckpoint(cp.id)}
+                              className="bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-red-600 w-full sm:w-auto"
+                            >
+                              Delete
+                            </button>
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -735,7 +844,7 @@ export default function AdminPage() {
                       type="text"
                       value={teamName}
                       onChange={(e) => setTeamName(e.target.value)}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg text-gray-900 bg-white"
                       required
                     />
                   </div>
