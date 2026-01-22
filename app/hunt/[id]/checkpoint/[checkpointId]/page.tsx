@@ -151,13 +151,13 @@ export default function CheckpointPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-3 md:p-4">
       <div className="max-w-2xl mx-auto">
-        <div className="bg-white rounded-2xl shadow-xl p-6 md:p-8 space-y-6">
+        <div className="bg-white rounded-2xl shadow-xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">{checkpoint.title}</h1>
+            <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-2">{checkpoint.title}</h1>
             {checkpoint.description && (
-              <p className="text-gray-600 mb-4">{checkpoint.description}</p>
+              <p className="text-sm md:text-base text-gray-600 mb-4">{checkpoint.description}</p>
             )}
           </div>
 
@@ -168,9 +168,9 @@ export default function CheckpointPage() {
           )}
 
           {!isUnlocked ? (
-            <div className="space-y-6">
+            <div className="space-y-4 md:space-y-6">
               <div>
-                <h2 className="text-xl font-semibold text-gray-900 mb-4">
+                <h2 className="text-lg md:text-xl font-semibold text-gray-900 mb-4">
                   Unlock this checkpoint:
                 </h2>
 
@@ -204,7 +204,7 @@ export default function CheckpointPage() {
           <div className="pt-4 border-t">
             <button
               onClick={() => router.push(`/hunt/${huntId}`)}
-              className="text-indigo-600 hover:text-indigo-700 font-semibold"
+              className="text-indigo-600 hover:text-indigo-700 font-semibold text-sm md:text-base"
             >
               ← Back to Hunt
             </button>

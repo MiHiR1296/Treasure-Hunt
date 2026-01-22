@@ -35,11 +35,14 @@ export default function QRScanner({ onScanSuccess, onError }: QRScannerProps) {
       const html5QrCode = new Html5Qrcode('qr-reader');
       scannerRef.current = html5QrCode;
 
+      // Adjust QR box size for mobile
+      const qrboxSize = Math.min(300, window.innerWidth * 0.8);
+      
       await html5QrCode.start(
         { facingMode: 'environment' }, // Use back camera
         {
           fps: 10,
-          qrbox: { width: 250, height: 250 },
+          qrbox: { width: qrboxSize, height: qrboxSize },
         },
         (decodedText) => {
           // Success callback
@@ -87,7 +90,7 @@ export default function QRScanner({ onScanSuccess, onError }: QRScannerProps) {
       {!isScanning && (
         <button
           onClick={startScanning}
-          className="w-full mt-4 bg-indigo-600 text-white py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors"
+          className="w-full mt-4 bg-indigo-600 text-white py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors text-base"
         >
           Start QR Scanner
         </button>
@@ -96,7 +99,7 @@ export default function QRScanner({ onScanSuccess, onError }: QRScannerProps) {
       {isScanning && (
         <button
           onClick={stopScanning}
-          className="w-full mt-4 bg-red-600 text-white py-3 rounded-lg font-semibold hover:bg-red-700 transition-colors"
+          className="w-full mt-4 bg-red-600 text-white py-3 rounded-lg font-semibold hover:bg-red-700 transition-colors text-base"
         >
           Stop Scanner
         </button>
@@ -108,7 +111,7 @@ export default function QRScanner({ onScanSuccess, onError }: QRScannerProps) {
         </div>
       )}
 
-      <p className="mt-4 text-sm text-gray-600 text-center">
+      <p className="mt-4 text-xs md:text-sm text-gray-600 text-center">
         Point your camera at the QR code
       </p>
     </div>

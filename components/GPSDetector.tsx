@@ -85,14 +85,14 @@ export default function GPSDetector({
       {!isWatching ? (
         <button
           onClick={startWatching}
-          className="w-full bg-indigo-600 text-white py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors"
+          className="w-full bg-indigo-600 text-white py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors text-base"
         >
           Enable GPS Detection
         </button>
       ) : (
         <button
           onClick={stopWatching}
-          className="w-full bg-red-600 text-white py-3 rounded-lg font-semibold hover:bg-red-700 transition-colors"
+          className="w-full bg-red-600 text-white py-3 rounded-lg font-semibold hover:bg-red-700 transition-colors text-base"
         >
           Stop GPS Detection
         </button>
@@ -130,7 +130,7 @@ export default function GPSDetector({
         </div>
       )}
 
-      <p className="text-sm text-gray-600 text-center">
+      <p className="text-xs md:text-sm text-gray-600 text-center">
         Make sure location permissions are enabled in your browser
       </p>
     </div>

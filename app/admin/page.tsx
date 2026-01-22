@@ -79,6 +79,19 @@ export default function AdminPage() {
   const [huntDescription, setHuntDescription] = useState('');
   const [huntStatus, setHuntStatus] = useState('draft');
   const [teamName, setTeamName] = useState('');
+  
+  // Checkpoint form states
+  const [checkpointTitle, setCheckpointTitle] = useState('');
+  const [checkpointDescription, setCheckpointDescription] = useState('');
+  const [checkpointOrder, setCheckpointOrder] = useState(1);
+  const [checkpointClue, setCheckpointClue] = useState('');
+  const [checkpointHint, setCheckpointHint] = useState('');
+  const [checkpointUnlockMethod, setCheckpointUnlockMethod] = useState<'qr_code' | 'gps' | 'manual_code'>('manual_code');
+  const [checkpointQRCode, setCheckpointQRCode] = useState('');
+  const [checkpointManualCode, setCheckpointManualCode] = useState('');
+  const [checkpointLat, setCheckpointLat] = useState('');
+  const [checkpointLng, setCheckpointLng] = useState('');
+  const [checkpointRadius, setCheckpointRadius] = useState('50');
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -201,6 +214,54 @@ export default function AdminPage() {
     }
   };
 
+  const handleCreateCheckpoint = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedHunt) {
+      alert('Please select a hunt first');
+      return;
+    }
+    setIsLoading(true);
+    try {
+      const checkpointData: any = {
+        hunt_id: selectedHunt,
+        title: checkpointTitle,
+        description: checkpointDescription || null,
+        order_index: checkpointOrder,
+        clue_text: checkpointClue,
+        hint_text: checkpointHint || null,
+        unlock_method: checkpointUnlockMethod,
+      };
+      if (checkpointUnlockMethod === 'qr_code') {
+        checkpointData.qr_code_value = checkpointQRCode;
+      } else if (checkpointUnlockMethod === 'manual_code') {
+        checkpointData.manual_code = checkpointManualCode;
+      } else if (checkpointUnlockMethod === 'gps') {
+        checkpointData.lat = parseFloat(checkpointLat);
+        checkpointData.lng = parseFloat(checkpointLng);
+        checkpointData.radius_m = parseInt(checkpointRadius) || 50;
+      }
+      const { error } = await supabase.from('checkpoints').insert(checkpointData);
+      if (error) throw error;
+      alert('Checkpoint created!');
+      setCheckpointTitle('');
+      setCheckpointDescription('');
+      setCheckpointOrder(checkpointOrder + 1);
+      setCheckpointClue('');
+      setCheckpointHint('');
+      setCheckpointQRCode('');
+      setCheckpointManualCode('');
+      setCheckpointLat('');
+      setCheckpointLng('');
+      setCheckpointRadius('50');
+      loadCheckpoints();
+      loadDashboard();
+    } catch (err: any) {
+      alert(err.message || 'Failed to create checkpoint');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleDeleteCheckpoint = async (id: string) => {
     if (!confirm('Are you sure? This will delete this checkpoint and all progress!')) return;
     try {
@@ -306,12 +367,12 @@ export default function AdminPage() {
           </div>
 
           {/* Tabs */}
-          <div className="flex gap-2 mt-4 border-b">
+          <div className="flex gap-1 md:gap-2 mt-4 border-b overflow-x-auto">
             {(['dashboard', 'hunts', 'checkpoints', 'teams'] as Tab[]).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
-                className={`px-4 py-2 font-semibold capitalize transition-colors ${
+                className={`px-3 md:px-4 py-2 font-semibold capitalize transition-colors whitespace-nowrap text-sm md:text-base ${
                   activeTab === tab
                     ? 'border-b-2 border-indigo-600 text-indigo-600'
                     : 'text-gray-600 hover:text-gray-900'
@@ -327,26 +388,26 @@ export default function AdminPage() {
         {activeTab === 'dashboard' && (
           <div className="space-y-6">
             {/* Stats Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-              <div className="bg-white rounded-xl shadow-lg p-6">
-                <p className="text-sm text-gray-600">Total Hunts</p>
-                <p className="text-3xl font-bold text-gray-900">{stats.totalHunts}</p>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 md:gap-4">
+              <div className="bg-white rounded-xl shadow-lg p-4 md:p-6">
+                <p className="text-xs md:text-sm text-gray-600">Total Hunts</p>
+                <p className="text-2xl md:text-3xl font-bold text-gray-900">{stats.totalHunts}</p>
               </div>
-              <div className="bg-white rounded-xl shadow-lg p-6">
-                <p className="text-sm text-gray-600">Live Hunts</p>
-                <p className="text-3xl font-bold text-green-600">{stats.liveHunts}</p>
+              <div className="bg-white rounded-xl shadow-lg p-4 md:p-6">
+                <p className="text-xs md:text-sm text-gray-600">Live Hunts</p>
+                <p className="text-2xl md:text-3xl font-bold text-green-600">{stats.liveHunts}</p>
               </div>
-              <div className="bg-white rounded-xl shadow-lg p-6">
-                <p className="text-sm text-gray-600">Total Teams</p>
-                <p className="text-3xl font-bold text-blue-600">{stats.totalTeams}</p>
+              <div className="bg-white rounded-xl shadow-lg p-4 md:p-6">
+                <p className="text-xs md:text-sm text-gray-600">Total Teams</p>
+                <p className="text-2xl md:text-3xl font-bold text-blue-600">{stats.totalTeams}</p>
               </div>
-              <div className="bg-white rounded-xl shadow-lg p-6">
-                <p className="text-sm text-gray-600">Checkpoints</p>
-                <p className="text-3xl font-bold text-purple-600">{stats.totalCheckpoints}</p>
+              <div className="bg-white rounded-xl shadow-lg p-4 md:p-6">
+                <p className="text-xs md:text-sm text-gray-600">Checkpoints</p>
+                <p className="text-2xl md:text-3xl font-bold text-purple-600">{stats.totalCheckpoints}</p>
               </div>
-              <div className="bg-white rounded-xl shadow-lg p-6">
-                <p className="text-sm text-gray-600">Progress Entries</p>
-                <p className="text-3xl font-bold text-orange-600">{stats.totalProgress}</p>
+              <div className="bg-white rounded-xl shadow-lg p-4 md:p-6 col-span-2 md:col-span-1">
+                <p className="text-xs md:text-sm text-gray-600">Progress</p>
+                <p className="text-2xl md:text-3xl font-bold text-orange-600">{stats.totalProgress}</p>
               </div>
             </div>
 
@@ -361,8 +422,8 @@ export default function AdminPage() {
         {activeTab === 'hunts' && (
           <div className="space-y-6">
             {/* Create/Edit Hunt Form */}
-            <div className="bg-white rounded-2xl shadow-xl p-6">
-              <h2 className="text-2xl font-bold text-gray-900 mb-4">
+            <div className="bg-white rounded-2xl shadow-xl p-4 md:p-6">
+              <h2 className="text-xl md:text-2xl font-bold text-gray-900 mb-4">
                 {editingHunt ? 'Edit Hunt' : 'Create New Hunt'}
               </h2>
               <form onSubmit={editingHunt ? handleEditHunt : handleCreateHunt} className="space-y-4">
@@ -424,33 +485,33 @@ export default function AdminPage() {
             </div>
 
             {/* Hunts List */}
-            <div className="bg-white rounded-2xl shadow-xl p-6">
-              <h2 className="text-2xl font-bold text-gray-900 mb-4">All Hunts</h2>
+            <div className="bg-white rounded-2xl shadow-xl p-4 md:p-6">
+              <h2 className="text-xl md:text-2xl font-bold text-gray-900 mb-4">All Hunts</h2>
               <div className="space-y-3">
                 {hunts.map((hunt) => (
-                  <div key={hunt.id} className="p-4 bg-gray-50 rounded-lg flex items-center justify-between">
-                    <div>
-                      <p className="font-semibold text-lg">{hunt.name}</p>
-                      <p className="text-sm text-gray-600">
+                  <div key={hunt.id} className="p-4 bg-gray-50 rounded-lg flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div className="flex-1">
+                      <p className="font-semibold text-base md:text-lg">{hunt.name}</p>
+                      <p className="text-xs md:text-sm text-gray-600">
                         Status: <span className={`font-semibold ${
                           hunt.status === 'live' ? 'text-green-600' :
                           hunt.status === 'completed' ? 'text-gray-600' : 'text-yellow-600'
                         }`}>{hunt.status}</span>
                       </p>
                       {hunt.description && (
-                        <p className="text-sm text-gray-500 mt-1">{hunt.description}</p>
+                        <p className="text-xs md:text-sm text-gray-500 mt-1">{hunt.description}</p>
                       )}
                     </div>
                     <div className="flex gap-2">
                       <button
                         onClick={() => startEditHunt(hunt)}
-                        className="bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-600"
+                        className="flex-1 sm:flex-none bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-600"
                       >
                         Edit
                       </button>
                       <button
                         onClick={() => handleDeleteHunt(hunt.id)}
-                        className="bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-red-600"
+                        className="flex-1 sm:flex-none bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-red-600"
                       >
                         Delete
                       </button>
@@ -465,12 +526,12 @@ export default function AdminPage() {
         {/* Checkpoints Tab */}
         {activeTab === 'checkpoints' && (
           <div className="space-y-6">
-            <div className="bg-white rounded-2xl shadow-xl p-6">
-              <h2 className="text-2xl font-bold text-gray-900 mb-4">Select Hunt</h2>
+            <div className="bg-white rounded-2xl shadow-xl p-4 md:p-6">
+              <h2 className="text-xl md:text-2xl font-bold text-gray-900 mb-4">Select Hunt</h2>
               <select
                 value={selectedHunt || ''}
                 onChange={(e) => setSelectedHunt(e.target.value || null)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base"
               >
                 <option value="">-- Select a hunt --</option>
                 {hunts.map((hunt) => (
@@ -482,32 +543,181 @@ export default function AdminPage() {
             </div>
 
             {selectedHunt && (
-              <div className="bg-white rounded-2xl shadow-xl p-6">
-                <h2 className="text-2xl font-bold text-gray-900 mb-4">Checkpoints</h2>
-                <div className="space-y-3">
-                  {checkpoints.map((cp) => (
-                    <div key={cp.id} className="p-4 bg-gray-50 rounded-lg">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="font-semibold">
-                            {cp.order_index}. {cp.title}
-                          </p>
-                          <p className="text-sm text-gray-600">Method: {cp.unlock_method}</p>
-                          {cp.description && (
-                            <p className="text-sm text-gray-500 mt-1">{cp.description}</p>
-                          )}
-                        </div>
-                        <button
-                          onClick={() => handleDeleteCheckpoint(cp.id)}
-                          className="bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-red-600"
-                        >
-                          Delete
-                        </button>
+              <>
+                {/* Create Checkpoint Form */}
+                <div className="bg-white rounded-2xl shadow-xl p-4 md:p-6">
+                  <h2 className="text-xl md:text-2xl font-bold text-gray-900 mb-4">Create Checkpoint</h2>
+                  <form onSubmit={handleCreateCheckpoint} className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Title</label>
+                        <input
+                          type="text"
+                          value={checkpointTitle}
+                          onChange={(e) => setCheckpointTitle(e.target.value)}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Order Index</label>
+                        <input
+                          type="number"
+                          value={checkpointOrder}
+                          onChange={(e) => setCheckpointOrder(parseInt(e.target.value) || 1)}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base"
+                          required
+                        />
                       </div>
                     </div>
-                  ))}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
+                      <textarea
+                        value={checkpointDescription}
+                        onChange={(e) => setCheckpointDescription(e.target.value)}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base"
+                        rows={2}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Clue Text</label>
+                      <textarea
+                        value={checkpointClue}
+                        onChange={(e) => setCheckpointClue(e.target.value)}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base"
+                        rows={3}
+                        required
+                        placeholder="The riddle or clue that leads to the next location"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Hint Text (Optional)</label>
+                      <textarea
+                        value={checkpointHint}
+                        onChange={(e) => setCheckpointHint(e.target.value)}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base"
+                        rows={2}
+                        placeholder="A helpful hint if teams get stuck"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Unlock Method</label>
+                      <select
+                        value={checkpointUnlockMethod}
+                        onChange={(e) => setCheckpointUnlockMethod(e.target.value as any)}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base"
+                      >
+                        <option value="qr_code">QR Code</option>
+                        <option value="gps">GPS Location</option>
+                        <option value="manual_code">Manual Code</option>
+                      </select>
+                    </div>
+                    {checkpointUnlockMethod === 'qr_code' && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">QR Code Value</label>
+                        <input
+                          type="text"
+                          value={checkpointQRCode}
+                          onChange={(e) => setCheckpointQRCode(e.target.value)}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base"
+                          required
+                          placeholder="The value that the QR code should contain"
+                        />
+                      </div>
+                    )}
+                    {checkpointUnlockMethod === 'manual_code' && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Manual Code</label>
+                        <input
+                          type="text"
+                          value={checkpointManualCode}
+                          onChange={(e) => setCheckpointManualCode(e.target.value)}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base"
+                          required
+                          placeholder="The code players need to enter"
+                        />
+                      </div>
+                    )}
+                    {checkpointUnlockMethod === 'gps' && (
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Latitude</label>
+                          <input
+                            type="number"
+                            step="any"
+                            value={checkpointLat}
+                            onChange={(e) => setCheckpointLat(e.target.value)}
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base"
+                            required
+                            placeholder="19.2433"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Longitude</label>
+                          <input
+                            type="number"
+                            step="any"
+                            value={checkpointLng}
+                            onChange={(e) => setCheckpointLng(e.target.value)}
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base"
+                            required
+                            placeholder="73.1356"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Radius (meters)</label>
+                          <input
+                            type="number"
+                            value={checkpointRadius}
+                            onChange={(e) => setCheckpointRadius(e.target.value)}
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base"
+                            required
+                            placeholder="50"
+                          />
+                        </div>
+                      </div>
+                    )}
+                    <button
+                      type="submit"
+                      disabled={isLoading}
+                      className="w-full md:w-auto bg-indigo-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-indigo-700 disabled:opacity-50 text-base"
+                    >
+                      {isLoading ? 'Creating...' : 'Create Checkpoint'}
+                    </button>
+                  </form>
                 </div>
-              </div>
+
+                {/* List Checkpoints */}
+                <div className="bg-white rounded-2xl shadow-xl p-4 md:p-6">
+                  <h2 className="text-xl md:text-2xl font-bold text-gray-900 mb-4">Checkpoints ({checkpoints.length})</h2>
+                  <div className="space-y-3">
+                    {checkpoints.map((cp) => (
+                      <div key={cp.id} className="p-4 bg-gray-50 rounded-lg">
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                          <div className="flex-1">
+                            <p className="font-semibold text-base">
+                              {cp.order_index}. {cp.title}
+                            </p>
+                            <p className="text-sm text-gray-600">Method: {cp.unlock_method}</p>
+                            {cp.description && (
+                              <p className="text-sm text-gray-500 mt-1">{cp.description}</p>
+                            )}
+                          </div>
+                          <button
+                            onClick={() => handleDeleteCheckpoint(cp.id)}
+                            className="bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-red-600 w-full sm:w-auto"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                    {checkpoints.length === 0 && (
+                      <p className="text-gray-500 text-center py-4">No checkpoints yet. Create one above!</p>
+                    )}
+                  </div>
+                </div>
+              </>
             )}
           </div>
         )}
@@ -516,8 +726,8 @@ export default function AdminPage() {
         {activeTab === 'teams' && (
           <div className="space-y-6">
             {editingTeam && (
-              <div className="bg-white rounded-2xl shadow-xl p-6">
-                <h2 className="text-2xl font-bold text-gray-900 mb-4">Edit Team</h2>
+              <div className="bg-white rounded-2xl shadow-xl p-4 md:p-6">
+                <h2 className="text-xl md:text-2xl font-bold text-gray-900 mb-4">Edit Team</h2>
                 <form onSubmit={handleEditTeam} className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Team Name</label>
@@ -552,37 +762,80 @@ export default function AdminPage() {
               </div>
             )}
 
-            <div className="bg-white rounded-2xl shadow-xl p-6">
-              <h2 className="text-2xl font-bold text-gray-900 mb-4">All Teams ({teams.length})</h2>
+            <div className="bg-white rounded-2xl shadow-xl p-4 md:p-6">
+              <h2 className="text-xl md:text-2xl font-bold text-gray-900 mb-4">All Teams ({teams.length})</h2>
               <div className="space-y-3">
                 {teams.map((team) => (
-                  <div key={team.id} className="p-4 bg-gray-50 rounded-lg flex items-center justify-between">
-                    <div>
-                      <p className="font-semibold text-lg">{team.name}</p>
-                      <p className="text-sm text-gray-500">
-                        Joined: {new Date(team.created_at).toLocaleString()}
-                      </p>
-                    </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => startEditTeam(team)}
-                        className="bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-600"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => handleDeleteTeam(team.id)}
-                        className="bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-red-600"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </div>
+                  <TeamCard key={team.id} team={team} onEdit={startEditTeam} onDelete={handleDeleteTeam} />
                 ))}
               </div>
             </div>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// Team Card component with members
+function TeamCard({ team, onEdit, onDelete }: { team: Team; onEdit: (team: Team) => void; onDelete: (id: string) => void }) {
+  const [members, setMembers] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    loadMembers();
+  }, [team.id]);
+
+  const loadMembers = async () => {
+    try {
+      const { data } = await supabase
+        .from('team_members')
+        .select('*')
+        .eq('team_id', team.id)
+        .order('order_index', { ascending: true });
+      setMembers(data || []);
+    } catch (err) {
+      console.error('Error loading members:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="p-4 bg-gray-50 rounded-lg">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="flex-1">
+          <p className="font-semibold text-base md:text-lg">{team.name}</p>
+          <p className="text-xs md:text-sm text-gray-500">
+            Joined: {new Date(team.created_at).toLocaleString()}
+          </p>
+          {!loading && members.length > 0 && (
+            <div className="mt-2">
+              <p className="text-xs text-gray-600 mb-1">Members ({members.length}):</p>
+              <div className="flex flex-wrap gap-1">
+                {members.map((member, idx) => (
+                  <span key={member.id} className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded">
+                    {member.name}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={() => onEdit(team)}
+            className="flex-1 sm:flex-none bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-600"
+          >
+            Edit
+          </button>
+          <button
+            onClick={() => onDelete(team.id)}
+            className="flex-1 sm:flex-none bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-red-600"
+          >
+            Delete
+          </button>
+        </div>
       </div>
     </div>
   );

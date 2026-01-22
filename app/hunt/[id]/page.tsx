@@ -105,72 +105,72 @@ export default function HuntPage() {
   const completedCount = completedCheckpoints.size;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
-      <div className="max-w-4xl mx-auto space-y-6">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-3 md:p-4">
+      <div className="max-w-4xl mx-auto space-y-4 md:space-y-6">
         {/* Header */}
-        <div className="bg-white rounded-2xl shadow-xl p-6">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">{hunt.name}</h1>
+        <div className="bg-white rounded-2xl shadow-xl p-4 md:p-6">
+          <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-2">{hunt.name}</h1>
           {hunt.description && (
-            <p className="text-gray-600 mb-4">{hunt.description}</p>
+            <p className="text-sm md:text-base text-gray-600 mb-4">{hunt.description}</p>
           )}
-          <div className="flex items-center gap-4 text-sm text-gray-500">
+          <div className="flex items-center gap-4 text-xs md:text-sm text-gray-500">
             <span>Team: <span className="font-semibold">{team.name}</span></span>
           </div>
         </div>
 
         {/* Progress */}
-        <div className="bg-white rounded-2xl shadow-xl p-6">
+        <div className="bg-white rounded-2xl shadow-xl p-4 md:p-6">
           <ProgressBar current={completedCount} total={totalCheckpoints} />
         </div>
 
         {/* Current Checkpoint */}
         {currentCheckpoint ? (
-          <div className="bg-white rounded-2xl shadow-xl p-6">
-            <h2 className="text-2xl font-bold text-gray-900 mb-4">Current Checkpoint</h2>
+          <div className="bg-white rounded-2xl shadow-xl p-4 md:p-6">
+            <h2 className="text-xl md:text-2xl font-bold text-gray-900 mb-4">Current Checkpoint</h2>
             <div className="space-y-4">
               <div>
-                <h3 className="text-xl font-semibold text-gray-800 mb-2">
+                <h3 className="text-lg md:text-xl font-semibold text-gray-800 mb-2">
                   {currentCheckpoint.order_index}. {currentCheckpoint.title}
                 </h3>
                 {currentCheckpoint.description && (
-                  <p className="text-gray-600 mb-4">{currentCheckpoint.description}</p>
+                  <p className="text-sm md:text-base text-gray-600 mb-4">{currentCheckpoint.description}</p>
                 )}
               </div>
               <Link
                 href={`/hunt/${huntId}/checkpoint/${currentCheckpoint.id}`}
-                className="block w-full bg-indigo-600 text-white py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors text-center"
+                className="block w-full bg-indigo-600 text-white py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors text-center text-base"
               >
                 Unlock This Checkpoint →
               </Link>
             </div>
           </div>
         ) : (
-          <div className="bg-green-50 border-2 border-green-200 rounded-2xl shadow-xl p-8 text-center">
-            <h2 className="text-2xl font-bold text-green-900 mb-2">🎉 Congratulations!</h2>
-            <p className="text-green-800">You've completed all checkpoints!</p>
+          <div className="bg-green-50 border-2 border-green-200 rounded-2xl shadow-xl p-6 md:p-8 text-center">
+            <h2 className="text-xl md:text-2xl font-bold text-green-900 mb-2">🎉 Congratulations!</h2>
+            <p className="text-sm md:text-base text-green-800">You've completed all checkpoints!</p>
           </div>
         )}
 
         {/* Quick Actions */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-2 gap-3 md:gap-4">
           <Link
             href={`/hunt/${huntId}/map`}
-            className="bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition-shadow text-center"
+            className="bg-white rounded-xl shadow-lg p-4 md:p-6 hover:shadow-xl transition-shadow text-center"
           >
             <span className="text-2xl mb-2 block">🗺️</span>
-            <span className="font-semibold text-gray-900">View Map</span>
+            <span className="font-semibold text-gray-900 text-sm md:text-base">View Map</span>
           </Link>
           <Link
             href={`/hunt/${huntId}/leaderboard`}
-            className="bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition-shadow text-center"
+            className="bg-white rounded-xl shadow-lg p-4 md:p-6 hover:shadow-xl transition-shadow text-center"
           >
             <span className="text-2xl mb-2 block">🏆</span>
-            <span className="font-semibold text-gray-900">Leaderboard</span>
+            <span className="font-semibold text-gray-900 text-sm md:text-base">Leaderboard</span>
           </Link>
         </div>
 
         {/* Leaderboard Widget */}
-        <div className="bg-white rounded-2xl shadow-xl p-6">
+        <div className="bg-white rounded-2xl shadow-xl p-4 md:p-6">
           <Leaderboard huntId={huntId} totalCheckpoints={totalCheckpoints} compact />
         </div>
       </div>
