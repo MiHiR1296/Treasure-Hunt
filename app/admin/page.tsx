@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import Link from 'next/link';
+import PuzzleChainBuilder, { PuzzleStepConfig } from '@/components/puzzles/PuzzleChainBuilder';
+import { uploadPuzzleImage } from '@/lib/puzzles/storage';
 
 const ADMIN_PASSWORD = typeof window !== 'undefined' 
   ? (process.env.NEXT_PUBLIC_ADMIN_PASSWORD || 'admin123')
@@ -34,6 +36,7 @@ interface Checkpoint {
   lat: number | null;
   lng: number | null;
   radius_m: number;
+  use_puzzle_chain?: boolean;
 }
 
 interface Team {
@@ -92,6 +95,8 @@ export default function AdminPage() {
   const [checkpointLat, setCheckpointLat] = useState('');
   const [checkpointLng, setCheckpointLng] = useState('');
   const [checkpointRadius, setCheckpointRadius] = useState('50');
+  const [usePuzzleChain, setUsePuzzleChain] = useState(false);
+  const [puzzleSteps, setPuzzleSteps] = useState<PuzzleStepConfig[]>([]);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -220,6 +225,10 @@ export default function AdminPage() {
       alert('Please select a hunt first');
       return;
     }
+    if (usePuzzleChain && puzzleSteps.length === 0) {
+      alert('Please add at least one puzzle step');
+      return;
+    }
     setIsLoading(true);
     try {
       const checkpointData: any = {
@@ -230,6 +239,7 @@ export default function AdminPage() {
         clue_text: checkpointClue,
         hint_text: checkpointHint || null,
         unlock_method: checkpointUnlockMethod,
+        use_puzzle_chain: usePuzzleChain,
       };
       if (checkpointUnlockMethod === 'qr_code') {
         checkpointData.qr_code_value = checkpointQRCode;
@@ -240,8 +250,36 @@ export default function AdminPage() {
         checkpointData.lng = parseFloat(checkpointLng);
         checkpointData.radius_m = parseInt(checkpointRadius) || 50;
       }
-      const { error } = await supabase.from('checkpoints').insert(checkpointData);
+      const { data: checkpoint, error } = await supabase.from('checkpoints').insert(checkpointData).select().single();
       if (error) throw error;
+
+      // Save puzzle steps if using puzzle chain
+      if (usePuzzleChain && checkpoint) {
+        for (const step of puzzleSteps) {
+          let imageUrl = step.puzzle_image_url;
+          
+          // Upload image if there's a file
+          if (step.imageFile) {
+            imageUrl = await uploadPuzzleImage(step.imageFile, checkpoint.id, step.id);
+          }
+
+          const stepData: any = {
+            checkpoint_id: checkpoint.id,
+            step_order: step.step_order,
+            puzzle_type: step.puzzle_type,
+            puzzle_config: step.puzzle_config,
+            puzzle_image_url: imageUrl,
+            answer_type: step.answer_type,
+            answer_value: step.answer_value,
+            title: step.title || null,
+            description: step.description || null,
+          };
+
+          const { error: stepError } = await supabase.from('puzzle_steps').insert(stepData);
+          if (stepError) throw stepError;
+        }
+      }
+
       alert('Checkpoint created!');
       setCheckpointTitle('');
       setCheckpointDescription('');
@@ -253,6 +291,8 @@ export default function AdminPage() {
       setCheckpointLat('');
       setCheckpointLng('');
       setCheckpointRadius('50');
+      setUsePuzzleChain(false);
+      setPuzzleSteps([]);
       loadCheckpoints();
       loadDashboard();
     } catch (err: any) {
@@ -265,6 +305,10 @@ export default function AdminPage() {
   const handleEditCheckpoint = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingCheckpoint || !selectedHunt) return;
+    if (usePuzzleChain && puzzleSteps.length === 0) {
+      alert('Please add at least one puzzle step');
+      return;
+    }
     setIsLoading(true);
     try {
       const checkpointData: any = {
@@ -274,6 +318,7 @@ export default function AdminPage() {
         clue_text: checkpointClue,
         hint_text: checkpointHint || null,
         unlock_method: checkpointUnlockMethod,
+        use_puzzle_chain: usePuzzleChain,
       };
       if (checkpointUnlockMethod === 'qr_code') {
         checkpointData.qr_code_value = checkpointQRCode;
@@ -299,6 +344,37 @@ export default function AdminPage() {
         .update(checkpointData)
         .eq('id', editingCheckpoint.id);
       if (error) throw error;
+
+      // Delete existing puzzle steps
+      await supabase.from('puzzle_steps').delete().eq('checkpoint_id', editingCheckpoint.id);
+
+      // Save new puzzle steps if using puzzle chain
+      if (usePuzzleChain) {
+        for (const step of puzzleSteps) {
+          let imageUrl = step.puzzle_image_url;
+          
+          // Upload image if there's a new file
+          if (step.imageFile) {
+            imageUrl = await uploadPuzzleImage(step.imageFile, editingCheckpoint.id, step.id);
+          }
+
+          const stepData: any = {
+            checkpoint_id: editingCheckpoint.id,
+            step_order: step.step_order,
+            puzzle_type: step.puzzle_type,
+            puzzle_config: step.puzzle_config,
+            puzzle_image_url: imageUrl,
+            answer_type: step.answer_type,
+            answer_value: step.answer_value,
+            title: step.title || null,
+            description: step.description || null,
+          };
+
+          const { error: stepError } = await supabase.from('puzzle_steps').insert(stepData);
+          if (stepError) throw stepError;
+        }
+      }
+
       alert('Checkpoint updated!');
       setEditingCheckpoint(null);
       setCheckpointTitle('');
@@ -311,6 +387,8 @@ export default function AdminPage() {
       setCheckpointLat('');
       setCheckpointLng('');
       setCheckpointRadius('50');
+      setUsePuzzleChain(false);
+      setPuzzleSteps([]);
       loadCheckpoints();
       loadDashboard();
     } catch (err: any) {
@@ -320,7 +398,7 @@ export default function AdminPage() {
     }
   };
 
-  const startEditCheckpoint = (checkpoint: Checkpoint) => {
+  const startEditCheckpoint = async (checkpoint: Checkpoint) => {
     setEditingCheckpoint(checkpoint);
     setCheckpointTitle(checkpoint.title);
     setCheckpointDescription(checkpoint.description || '');
@@ -333,6 +411,33 @@ export default function AdminPage() {
     setCheckpointLat(checkpoint.lat?.toString() || '');
     setCheckpointLng(checkpoint.lng?.toString() || '');
     setCheckpointRadius(checkpoint.radius_m?.toString() || '50');
+    setUsePuzzleChain(checkpoint.use_puzzle_chain || false);
+
+    // Load puzzle steps if using puzzle chain
+    if (checkpoint.use_puzzle_chain) {
+      const { data: steps, error } = await supabase
+        .from('puzzle_steps')
+        .select('*')
+        .eq('checkpoint_id', checkpoint.id)
+        .order('step_order', { ascending: true });
+
+      if (!error && steps) {
+        const stepConfigs: PuzzleStepConfig[] = steps.map((step: any) => ({
+          id: step.id,
+          step_order: step.step_order,
+          puzzle_type: step.puzzle_type,
+          puzzle_config: step.puzzle_config || {},
+          puzzle_image_url: step.puzzle_image_url,
+          answer_type: step.answer_type,
+          answer_value: step.answer_value || '',
+          title: step.title || '',
+          description: step.description || '',
+        }));
+        setPuzzleSteps(stepConfigs);
+      }
+    } else {
+      setPuzzleSteps([]);
+    }
   };
 
   const handleDeleteCheckpoint = async (id: string) => {
@@ -658,17 +763,6 @@ export default function AdminPage() {
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Clue Text</label>
-                      <textarea
-                        value={checkpointClue}
-                        onChange={(e) => setCheckpointClue(e.target.value)}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base text-gray-900 bg-white"
-                        rows={3}
-                        required
-                        placeholder="The riddle or clue that leads to the next location"
-                      />
-                    </div>
-                    <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Hint Text (Optional)</label>
                       <textarea
                         value={checkpointHint}
@@ -678,6 +772,44 @@ export default function AdminPage() {
                         placeholder="A helpful hint if teams get stuck"
                       />
                     </div>
+                    <div className="flex items-center gap-2 p-4 bg-indigo-50 border border-indigo-200 rounded-lg">
+                      <input
+                        type="checkbox"
+                        id="usePuzzleChain"
+                        checked={usePuzzleChain}
+                        onChange={(e) => {
+                          setUsePuzzleChain(e.target.checked);
+                          if (!e.target.checked) {
+                            setPuzzleSteps([]);
+                          }
+                        }}
+                        className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                      />
+                      <label htmlFor="usePuzzleChain" className="text-sm font-medium text-gray-700 cursor-pointer">
+                        Use Puzzle Chain (instead of simple text clue)
+                      </label>
+                    </div>
+                    {usePuzzleChain ? (
+                      <div className="p-4 bg-gray-50 border border-gray-300 rounded-lg">
+                        <PuzzleChainBuilder
+                          steps={puzzleSteps}
+                          onChange={setPuzzleSteps}
+                          checkpointId={editingCheckpoint?.id}
+                        />
+                      </div>
+                    ) : (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Clue Text</label>
+                        <textarea
+                          value={checkpointClue}
+                          onChange={(e) => setCheckpointClue(e.target.value)}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base text-gray-900 bg-white"
+                          rows={3}
+                          required={!usePuzzleChain}
+                          placeholder="The riddle or clue that leads to the next location"
+                        />
+                      </div>
+                    )}
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Unlock Method</label>
                       <select
@@ -778,6 +910,8 @@ export default function AdminPage() {
                             setCheckpointLat('');
                             setCheckpointLng('');
                             setCheckpointRadius('50');
+                            setUsePuzzleChain(false);
+                            setPuzzleSteps([]);
                           }}
                           className="flex-1 md:flex-none bg-gray-500 text-white px-6 py-3 rounded-lg font-semibold hover:bg-gray-600 text-base"
                         >

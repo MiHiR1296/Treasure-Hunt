@@ -1,0 +1,86 @@
+'use client';
+
+import { PuzzleStep } from './types';
+import TextClue from './TextClue';
+import JigsawPuzzle from './JigsawPuzzle';
+import SudokuPuzzle from './SudokuPuzzle';
+import CrosswordPuzzle from './CrosswordPuzzle';
+import WordSearchPuzzle from './WordSearchPuzzle';
+import CircularRotatePuzzle from './CircularRotatePuzzle';
+
+interface PuzzleRendererProps {
+  step: PuzzleStep;
+  onSolved?: () => void;
+}
+
+export default function PuzzleRenderer({ step, onSolved }: PuzzleRendererProps) {
+  const config = step.puzzle_config || {};
+
+  switch (step.puzzle_type) {
+    case 'text':
+      return <TextClue clueText={config.text || step.description || 'No clue provided'} />;
+
+    case 'jigsaw':
+      if (!step.puzzle_image_url) {
+        return <div className="text-red-600">Error: No image URL provided for jigsaw puzzle</div>;
+      }
+      return (
+        <JigsawPuzzle
+          imageUrl={step.puzzle_image_url}
+          rows={config.rows || 3}
+          columns={config.columns || 3}
+          onSolved={onSolved}
+        />
+      );
+
+    case 'sudoku':
+      return (
+        <SudokuPuzzle
+          grid={config.grid}
+          solution={config.solution}
+          onSolved={onSolved}
+        />
+      );
+
+    case 'crossword':
+      if (!step.puzzle_image_url) {
+        return <div className="text-red-600">Error: No image URL provided for crossword puzzle</div>;
+      }
+      return (
+        <CrosswordPuzzle
+          imageUrl={step.puzzle_image_url}
+          answers={config.answers || []}
+          onSolved={onSolved}
+        />
+      );
+
+    case 'word_search':
+      if (!step.puzzle_image_url) {
+        return <div className="text-red-600">Error: No image URL provided for word search puzzle</div>;
+      }
+      return (
+        <WordSearchPuzzle
+          imageUrl={step.puzzle_image_url}
+          words={config.words || []}
+          targetWord={config.targetWord}
+          onAllWordsFound={onSolved}
+        />
+      );
+
+    case 'circular_rotate':
+      if (!step.puzzle_image_url) {
+        return <div className="text-red-600">Error: No image URL provided for circular rotation puzzle</div>;
+      }
+      return (
+        <CircularRotatePuzzle
+          imageUrl={step.puzzle_image_url}
+          segments={config.segments || 8}
+          correctRotations={config.correctRotation || []}
+          onSolved={onSolved}
+        />
+      );
+
+    default:
+      return <div className="text-red-600">Unknown puzzle type: {step.puzzle_type}</div>;
+  }
+}

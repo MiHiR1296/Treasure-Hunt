@@ -9,6 +9,14 @@ const nextConfig: NextConfig = {
     // Don't fail build on lint errors during deployment
     ignoreDuringBuilds: true,
   },
+  images: {
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: '**.supabase.co',
+      },
+    ],
+  },
 };
 
 export default nextConfig;

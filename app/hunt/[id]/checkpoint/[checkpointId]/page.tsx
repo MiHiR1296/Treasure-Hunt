@@ -8,6 +8,7 @@ import QRScanner from '@/components/QRScanner';
 import GPSDetector from '@/components/GPSDetector';
 import ManualCodeInput from '@/components/ManualCodeInput';
 import ClueDisplay from '@/components/ClueDisplay';
+import PuzzleChainRenderer from '@/components/puzzles/PuzzleChainRenderer';
 
 interface Checkpoint {
   id: string;
@@ -21,6 +22,7 @@ interface Checkpoint {
   lat: number | null;
   lng: number | null;
   radius_m: number;
+  use_puzzle_chain?: boolean;
 }
 
 export default function CheckpointPage() {
@@ -132,6 +134,12 @@ export default function CheckpointPage() {
     router.push(`/hunt/${huntId}`);
   };
 
+  const handlePuzzleChainComplete = () => {
+    // Puzzle chain completion is handled by PuzzleChainRenderer
+    // Just navigate back to hunt page
+    router.push(`/hunt/${huntId}`);
+  };
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
@@ -193,12 +201,19 @@ export default function CheckpointPage() {
               </div>
             </div>
           ) : (
-            <ClueDisplay
-              checkpointId={checkpointId}
-              clueText={checkpoint.clue_text}
-              hintText={checkpoint.hint_text}
-              onNext={handleNext}
-            />
+            checkpoint.use_puzzle_chain ? (
+              <PuzzleChainRenderer
+                checkpointId={checkpointId}
+                onComplete={handlePuzzleChainComplete}
+              />
+            ) : (
+              <ClueDisplay
+                checkpointId={checkpointId}
+                clueText={checkpoint.clue_text}
+                hintText={checkpoint.hint_text}
+                onNext={handleNext}
+              />
+            )
           )}
 
           <div className="pt-4 border-t">
