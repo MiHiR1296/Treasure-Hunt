@@ -49,10 +49,14 @@ export default function Leaderboard({ huntId, totalCheckpoints, compact = false 
   const loadLeaderboard = async () => {
     try {
       // Get all checkpoints for this hunt
-      const { data: checkpoints } = await supabase
+      const { data: checkpoints, error: checkpointsError } = await supabase
         .from('checkpoints')
         .select('id')
         .eq('hunt_id', huntId);
+
+      if (checkpointsError) {
+        console.error('Error loading checkpoints:', checkpointsError);
+      }
 
       if (!checkpoints || checkpoints.length === 0) {
         setEntries([]);
@@ -62,39 +66,56 @@ export default function Leaderboard({ huntId, totalCheckpoints, compact = false 
 
       const checkpointIds = checkpoints.map((cp) => cp.id);
 
-      // Get all teams
-      const { data: teams } = await supabase.from('teams').select('id, name');
+      // Get all teams that have progress in this hunt (teams that have started)
+      // First get all teams with progress, then get their team info
+      const { data: progressData, error: progressError } = await supabase
+        .from('progress')
+        .select('team_id, checkpoint_id, completed_at, unlocked_at')
+        .in('checkpoint_id', checkpointIds);
 
-      if (!teams) {
+      if (progressError) {
+        console.error('Error loading progress:', progressError);
+      }
+
+      // Get unique team IDs from progress
+      const teamIdsWithProgress = new Set(progressData?.map(p => p.team_id) || []);
+      
+      // Get all teams (or just teams with progress)
+      const { data: teams, error: teamsError } = await supabase
+        .from('teams')
+        .select('id, name');
+
+      if (teamsError) {
+        console.error('Error loading teams:', teamsError);
+      }
+
+      if (!teams || teams.length === 0) {
         setEntries([]);
         setIsLoading(false);
         return;
       }
 
-      // Get progress for all teams and checkpoints in this hunt
-      const { data: progressData } = await supabase
-        .from('progress')
-        .select('team_id, checkpoint_id, completed_at, unlocked_at')
-        .in('checkpoint_id', checkpointIds);
-
-      // Calculate progress for each team
+      // Calculate progress for each team that has started (has progress)
       const teamProgress: Record<string, LeaderboardEntry> = {};
 
       teams.forEach((team) => {
-        const teamProgressData = progressData?.filter((p) => p.team_id === team.id) || [];
-        const completedCheckpoints = teamProgressData.length;
-        const lastCompleted = teamProgressData
-          .map((p) => p.completed_at || p.unlocked_at)
-          .filter(Boolean)
-          .sort()
-          .reverse()[0] || null;
+        // Only include teams that have started (have at least one progress entry)
+        if (teamIdsWithProgress.has(team.id)) {
+          const teamProgressData = progressData?.filter((p) => p.team_id === team.id) || [];
+          const completedCheckpoints = teamProgressData.length;
+          const lastCompleted = teamProgressData
+            .map((p) => p.completed_at || p.unlocked_at)
+            .filter(Boolean)
+            .sort()
+            .reverse()[0] || null;
 
-        teamProgress[team.id] = {
-          team_id: team.id,
-          team_name: team.name,
-          checkpoints_completed: completedCheckpoints,
-          last_completed_at: lastCompleted,
-        };
+          teamProgress[team.id] = {
+            team_id: team.id,
+            team_name: team.name,
+            checkpoints_completed: completedCheckpoints,
+            last_completed_at: lastCompleted,
+          };
+        }
       });
 
       // Sort by checkpoints completed (desc), then by last completed time (asc)

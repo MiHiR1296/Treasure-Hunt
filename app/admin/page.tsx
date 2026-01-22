@@ -118,19 +118,19 @@ export default function AdminPage() {
     try {
       // Load all data
       const [huntsRes, teamsRes, checkpointsRes, progressRes] = await Promise.all([
-        supabase.from('hunts').select('*').order('created_at', { ascending: false }),
-        supabase.from('teams').select('*').order('created_at', { ascending: false }),
-        supabase.from('checkpoints').select('id', { count: 'exact', head: true }),
-        supabase.from('progress').select('id', { count: 'exact', head: true }),
+        supabase.from('hunts').select('*', { count: 'exact' }).order('created_at', { ascending: false }),
+        supabase.from('teams').select('*', { count: 'exact' }).order('created_at', { ascending: false }),
+        supabase.from('checkpoints').select('*', { count: 'exact', head: true }),
+        supabase.from('progress').select('*', { count: 'exact', head: true }),
       ]);
 
       setHunts(huntsRes.data || []);
       setTeams(teamsRes.data || []);
 
       setStats({
-        totalHunts: huntsRes.data?.length || 0,
+        totalHunts: huntsRes.count || huntsRes.data?.length || 0,
         liveHunts: huntsRes.data?.filter(h => h.status === 'live').length || 0,
-        totalTeams: teamsRes.data?.length || 0,
+        totalTeams: teamsRes.count || teamsRes.data?.length || 0,
         totalCheckpoints: checkpointsRes.count || 0,
         totalProgress: progressRes.count || 0,
       });
@@ -852,28 +852,52 @@ function HuntLeaderboard({ hunt }: { hunt: Hunt }) {
 
   const loadLeaderboard = async () => {
     try {
-      const { data: checkpoints } = await supabase
+      const { data: checkpoints, error: checkpointsError } = await supabase
         .from('checkpoints')
         .select('id')
         .eq('hunt_id', hunt.id);
       
+      if (checkpointsError) {
+        console.error('Error loading checkpoints:', checkpointsError);
+      }
+      
       setTotalCheckpoints(checkpoints?.length || 0);
       const checkpointIds = checkpoints?.map(cp => cp.id) || [];
 
-      const { data: teams } = await supabase.from('teams').select('id, name');
-      const { data: progress } = await supabase
+      if (checkpointIds.length === 0) {
+        setLeaderboard([]);
+        return;
+      }
+
+      const { data: teams, error: teamsError } = await supabase.from('teams').select('id, name');
+      
+      if (teamsError) {
+        console.error('Error loading teams:', teamsError);
+      }
+
+      const { data: progress, error: progressError } = await supabase
         .from('progress')
         .select('team_id, checkpoint_id')
         .in('checkpoint_id', checkpointIds);
 
+      if (progressError) {
+        console.error('Error loading progress:', progressError);
+      }
+
+      // Get unique team IDs that have progress
+      const teamIdsWithProgress = new Set(progress?.map(p => p.team_id) || []);
+
       const teamProgress: Record<string, any> = {};
       teams?.forEach((team) => {
-        const completed = progress?.filter(p => p.team_id === team.id).length || 0;
-        teamProgress[team.id] = {
-          team_id: team.id,
-          team_name: team.name,
-          checkpoints_completed: completed,
-        };
+        // Only show teams that have started (have progress)
+        if (teamIdsWithProgress.has(team.id)) {
+          const completed = progress?.filter(p => p.team_id === team.id).length || 0;
+          teamProgress[team.id] = {
+            team_id: team.id,
+            team_name: team.name,
+            checkpoints_completed: completed,
+          };
+        }
       });
 
       const sorted = Object.values(teamProgress).sort((a: any, b: any) => 

@@ -11,7 +11,11 @@ CREATE POLICY "Anyone can delete hunts"
 ON hunts FOR DELETE 
 USING (true);
 
--- Allow updates and deletes on checkpoints (for admin)
+-- Allow inserts, updates and deletes on checkpoints (for admin)
+CREATE POLICY "Anyone can create checkpoints" 
+ON checkpoints FOR INSERT 
+WITH CHECK (true);
+
 CREATE POLICY "Anyone can update checkpoints" 
 ON checkpoints FOR UPDATE 
 USING (true) 
