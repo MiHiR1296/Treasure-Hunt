@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import Image from 'next/image';
 
 interface JigsawPuzzleProps {
   imageUrl: string;
@@ -35,7 +34,7 @@ export default function JigsawPuzzle({
 
   const loadPuzzle = async () => {
     try {
-      const img = new Image();
+      const img = new window.Image();
       img.crossOrigin = 'anonymous';
       img.onload = () => {
         const canvas = document.createElement('canvas');
