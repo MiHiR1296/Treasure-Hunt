@@ -18,8 +18,8 @@ if (typeof window !== 'undefined') {
 interface Checkpoint {
   id: string;
   title: string;
-  lat: number;
-  lng: number;
+  lat: number | null;
+  lng: number | null;
   order_index: number;
   isCompleted?: boolean;
   isCurrent?: boolean;
