@@ -107,20 +107,19 @@ export default function AdminPage() {
       const [huntsRes, teamsRes, checkpointsRes, progressRes] = await Promise.all([
         supabase.from('hunts').select('*').order('created_at', { ascending: false }),
         supabase.from('teams').select('*').order('created_at', { ascending: false }),
-        supabase.from('checkpoints').select('id'),
-        supabase.from('progress').select('id'),
+        supabase.from('checkpoints').select('id', { count: 'exact', head: true }),
+        supabase.from('progress').select('id', { count: 'exact', head: true }),
       ]);
 
       setHunts(huntsRes.data || []);
       setTeams(teamsRes.data || []);
-      setCheckpoints(checkpointsRes.data || []);
 
       setStats({
         totalHunts: huntsRes.data?.length || 0,
         liveHunts: huntsRes.data?.filter(h => h.status === 'live').length || 0,
         totalTeams: teamsRes.data?.length || 0,
-        totalCheckpoints: checkpointsRes.data?.length || 0,
-        totalProgress: progressRes.data?.length || 0,
+        totalCheckpoints: checkpointsRes.count || 0,
+        totalProgress: progressRes.count || 0,
       });
     } catch (err) {
       console.error('Error loading dashboard:', err);
