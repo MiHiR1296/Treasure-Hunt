@@ -2,12 +2,13 @@
 
 import { useState, useEffect } from 'react';
 import dynamic from 'next/dynamic';
+import 'react-jigsaw-puzzle/lib/jigsaw-puzzle.css';
 
 // Dynamically import to avoid SSR issues
 const JigsawPuzzleComponent = dynamic(
-  () => import('react-jigsaw-puzzle').then((mod) => {
+  () => import('react-jigsaw-puzzle/lib').then((mod) => {
     // Handle different export structures
-    return mod.default || mod;
+    return mod.JigsawPuzzle || mod.default || mod;
   }),
   { 
     ssr: false,
