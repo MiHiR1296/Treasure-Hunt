@@ -1,6 +1,9 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import interact from 'interactjs';
+import { generateInterlockingPieces } from '@/lib/puzzles/jigsawGenerator';
+import { PieceShape } from '@/lib/puzzles/jigsawTypes';
 
 interface JigsawPuzzleProps {
   imageUrl: string;
@@ -9,90 +12,96 @@ interface JigsawPuzzleProps {
   onSolved?: () => void;
 }
 
-interface PuzzlePiece {
+interface PiecePosition {
   id: number;
-  correctPosition: number;
-  currentPosition: number;
-  image: string;
+  x: number;
+  y: number;
+  zIndex: number;
+  isPlaced: boolean;
 }
 
-export default function JigsawPuzzle({ 
-  imageUrl, 
-  rows = 3, 
+const SNAP_DISTANCE = 30; // pixels
+const PUZZLE_SCALE = 0.8; // Scale down puzzle for mobile
+
+export default function JigsawPuzzle({
+  imageUrl,
+  rows = 3,
   columns = 3,
-  onSolved 
+  onSolved,
 }: JigsawPuzzleProps) {
-  const [pieces, setPieces] = useState<PuzzlePiece[]>([]);
-  const [isSolved, setIsSolved] = useState(false);
+  const [pieces, setPieces] = useState<PieceShape[]>([]);
+  const [positions, setPositions] = useState<Map<number, PiecePosition>>(new Map());
   const [isLoading, setIsLoading] = useState(true);
-  const [draggedPiece, setDraggedPiece] = useState<number | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [isSolved, setIsSolved] = useState(false);
+  const [draggedPieceId, setDraggedPieceId] = useState<number | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const pieceRefs = useRef<Map<number, HTMLDivElement>>(new Map());
 
   useEffect(() => {
     loadPuzzle();
+    return () => {
+      // Cleanup interact instances
+      interact('.jigsaw-piece').unset();
+    };
   }, [imageUrl, rows, columns]);
+
+  useEffect(() => {
+    if (pieces.length > 0 && positions.size > 0) {
+      // Small delay to ensure DOM is ready
+      const timer = setTimeout(() => {
+        setupInteract();
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [pieces, positions]);
 
   const loadPuzzle = async () => {
     try {
+      setIsLoading(true);
       const img = new window.Image();
       img.crossOrigin = 'anonymous';
+
       img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
+        // Generate interlocking pieces
+        const generatedPieces = generateInterlockingPieces(img, rows, columns);
 
-        canvas.width = img.width;
-        canvas.height = img.height;
-        ctx.drawImage(img, 0, 0);
+        // Calculate puzzle dimensions
+        const containerWidth = containerRef.current?.clientWidth || 600;
+        const scale = Math.min(
+          (containerWidth * PUZZLE_SCALE) / img.width,
+          (containerWidth * PUZZLE_SCALE) / img.height
+        );
+        const puzzleWidth = img.width * scale;
+        const puzzleHeight = img.height * scale;
+        const pieceWidth = puzzleWidth / columns;
+        const pieceHeight = puzzleHeight / rows;
 
-        const pieceWidth = img.width / columns;
-        const pieceHeight = img.height / rows;
-        const newPieces: PuzzlePiece[] = [];
-
-        // Create pieces
-        for (let row = 0; row < rows; row++) {
-          for (let col = 0; col < columns; col++) {
-            const id = row * columns + col;
-            const pieceCanvas = document.createElement('canvas');
-            const pieceCtx = pieceCanvas.getContext('2d');
-            if (!pieceCtx) continue;
-
-            pieceCanvas.width = pieceWidth;
-            pieceCanvas.height = pieceHeight;
-            pieceCtx.drawImage(
-              canvas,
-              col * pieceWidth,
-              row * pieceHeight,
-              pieceWidth,
-              pieceHeight,
-              0,
-              0,
-              pieceWidth,
-              pieceHeight
-            );
-
-            newPieces.push({
-              id,
-              correctPosition: id,
-              currentPosition: id,
-              image: pieceCanvas.toDataURL(),
-            });
-          }
-        }
-
-        // Shuffle pieces
-        const shuffled = [...newPieces].sort(() => Math.random() - 0.5);
-        shuffled.forEach((piece, index) => {
-          piece.currentPosition = index;
+        // Initialize positions (scattered randomly)
+        const initialPositions = new Map<number, PiecePosition>();
+        generatedPieces.forEach((piece, index) => {
+          // Scatter pieces randomly around the container
+          const scatterX = Math.random() * (containerWidth - pieceWidth);
+          const scatterY = Math.random() * 200 + 400; // Below puzzle area
+          
+          initialPositions.set(piece.id, {
+            id: piece.id,
+            x: scatterX,
+            y: scatterY,
+            zIndex: index,
+            isPlaced: false,
+          });
         });
 
-        setPieces(shuffled);
+        setPieces(generatedPieces);
+        setPositions(initialPositions);
         setIsLoading(false);
       };
+
       img.onerror = () => {
         setIsLoading(false);
         console.error('Failed to load puzzle image');
       };
+
       img.src = imageUrl;
     } catch (error) {
       console.error('Error loading puzzle:', error);
@@ -100,41 +109,102 @@ export default function JigsawPuzzle({
     }
   };
 
-  const handleDragStart = (pieceId: number) => {
-    setDraggedPiece(pieceId);
+  const setupInteract = () => {
+    // Clean up existing interact instances
+    interact('.jigsaw-piece').unset();
+    
+    pieces.forEach((piece) => {
+      const element = pieceRefs.current.get(piece.id);
+      if (!element || !containerRef.current) return;
+
+      const containerWidth = containerRef.current.clientWidth;
+      const scale = Math.min(
+        (containerWidth * PUZZLE_SCALE) / (piece.width * columns),
+        (containerWidth * PUZZLE_SCALE) / (piece.height * rows)
+      );
+      const correctX = (piece.col * piece.width * scale) + (containerWidth - piece.width * columns * scale) / 2;
+      const correctY = (piece.row * piece.height * scale) + 20;
+
+      interact(element)
+        .draggable({
+          listeners: {
+            start: () => {
+              setDraggedPieceId(piece.id);
+              // Bring to front
+              setPositions((prev) => {
+                const newPositions = new Map(prev);
+                const pos = newPositions.get(piece.id);
+                if (pos) {
+                  const maxZ = Math.max(...Array.from(newPositions.values()).map(p => p.zIndex));
+                  pos.zIndex = maxZ + 1;
+                }
+                return newPositions;
+              });
+            },
+            move: (event) => {
+              setPositions((prev) => {
+                const newPositions = new Map(prev);
+                const pos = newPositions.get(piece.id);
+                if (pos) {
+                  pos.x += event.dx;
+                  pos.y += event.dy;
+                }
+                return newPositions;
+              });
+            },
+            end: () => {
+              setDraggedPieceId(null);
+              checkSnap(piece.id, correctX, correctY);
+            },
+          },
+          modifiers: [
+            interact.modifiers.restrict({
+              restriction: containerRef.current || 'parent',
+              endOnly: true,
+            }),
+          ],
+        });
+    });
   };
 
-  const handleDragOver = (e: React.DragEvent, targetPosition: number) => {
-    e.preventDefault();
+  const checkSnap = (pieceId: number, correctX: number, correctY: number) => {
+    setPositions((prev) => {
+      const pos = prev.get(pieceId);
+      if (!pos) return prev;
+
+      const distance = Math.sqrt(
+        Math.pow(pos.x - correctX, 2) + Math.pow(pos.y - correctY, 2)
+      );
+
+      if (distance < SNAP_DISTANCE) {
+        // Snap to correct position
+        const newPositions = new Map(prev);
+        const updatedPos = newPositions.get(pieceId);
+        if (updatedPos) {
+          updatedPos.x = correctX;
+          updatedPos.y = correctY;
+          updatedPos.isPlaced = true;
+          
+          // Check if solved after state update
+          setTimeout(() => {
+            checkSolved(newPositions);
+          }, 0);
+          
+          return newPositions;
+        }
+      }
+      return prev;
+    });
   };
 
-  const handleDrop = (e: React.DragEvent, targetPosition: number) => {
-    e.preventDefault();
-    if (draggedPiece === null) return;
+  const checkSolved = (currentPositions?: Map<number, PiecePosition>) => {
+    const positionsToCheck = currentPositions || positions;
+    const allPlaced = pieces.every((piece) => {
+      const pos = positionsToCheck.get(piece.id);
+      return pos?.isPlaced === true;
+    });
 
-    const newPieces = [...pieces];
-    const draggedIndex = newPieces.findIndex(p => p.id === draggedPiece);
-    const targetIndex = newPieces.findIndex(p => p.currentPosition === targetPosition);
-
-    if (draggedIndex !== -1 && targetIndex !== -1) {
-      // Swap positions
-      const temp = newPieces[draggedIndex].currentPosition;
-      newPieces[draggedIndex].currentPosition = newPieces[targetIndex].currentPosition;
-      newPieces[targetIndex].currentPosition = temp;
-
-      setPieces(newPieces);
-      checkSolved(newPieces);
-    }
-
-    setDraggedPiece(null);
-  };
-
-  const checkSolved = (currentPieces: PuzzlePiece[]) => {
-    const solved = currentPieces.every(piece => 
-      piece.currentPosition === piece.correctPosition
-    );
-
-    if (solved && !isSolved) {
+    if (allPlaced && !isSolved) {
       setIsSolved(true);
       if (onSolved) {
         onSolved();
@@ -158,51 +228,98 @@ export default function JigsawPuzzle({
     );
   }
 
-  const pieceWidth = 100 / columns;
-  const pieceHeight = 100 / rows;
+  const containerWidth = containerRef.current?.clientWidth || 600;
+  const scale = Math.min(
+    (containerWidth * PUZZLE_SCALE) / (pieces[0]?.width * columns || 600),
+    (containerWidth * PUZZLE_SCALE) / (pieces[0]?.height * rows || 600)
+  );
+  const puzzleWidth = (pieces[0]?.width || 200) * columns * scale;
+  const puzzleHeight = (pieces[0]?.height || 200) * rows * scale;
 
   return (
     <div className="w-full">
-      <div className="bg-white rounded-lg p-4 border-2 border-gray-200">
-        <div className="relative" style={{ aspectRatio: `${columns}/${rows}` }}>
-          {pieces.map((piece) => {
-            const position = piece.currentPosition;
-            const row = Math.floor(position / columns);
-            const col = position % columns;
+      <div
+        ref={containerRef}
+        className="bg-white rounded-lg p-4 border-2 border-gray-200 relative"
+        style={{
+          touchAction: 'none',
+          userSelect: 'none',
+          minHeight: '400px',
+        }}
+      >
+        {/* Puzzle area (where pieces should go) */}
+        <div
+          className="absolute border-2 border-dashed border-gray-300 rounded-lg bg-gray-50"
+          style={{
+            left: '50%',
+            top: '20px',
+            transform: 'translateX(-50%)',
+            width: `${puzzleWidth}px`,
+            height: `${puzzleHeight}px`,
+            pointerEvents: 'none',
+          }}
+        />
 
-            return (
-              <div
-                key={piece.id}
-                draggable
-                onDragStart={() => handleDragStart(piece.id)}
-                onDragOver={(e) => handleDragOver(e, piece.currentPosition)}
-                onDrop={(e) => handleDrop(e, piece.currentPosition)}
-                className="absolute border border-gray-300 cursor-move hover:border-indigo-500 transition-colors"
+        {/* Render pieces */}
+        {pieces.map((piece) => {
+          const pos = positions.get(piece.id);
+          if (!pos) return null;
+
+          const isDragging = draggedPieceId === piece.id;
+          const containerWidth = containerRef.current?.clientWidth || 600;
+          const correctX = (piece.col * piece.width * scale) + (containerWidth - piece.width * columns * scale) / 2;
+          const correctY = (piece.row * piece.height * scale) + 20; // Offset for puzzle area
+
+          return (
+            <div
+              key={piece.id}
+              ref={(el) => {
+                if (el) pieceRefs.current.set(piece.id, el);
+              }}
+              className="jigsaw-piece absolute cursor-move"
+              style={{
+                left: `${pos.x}px`,
+                top: `${pos.y}px`,
+                width: `${piece.width * scale}px`,
+                height: `${piece.height * scale}px`,
+                zIndex: pos.zIndex,
+                opacity: isDragging ? 0.9 : 1,
+                transform: isDragging ? 'scale(1.05) rotate(2deg)' : 'scale(1) rotate(0deg)',
+                transition: pos.isPlaced ? 'all 0.3s ease' : 'transform 0.1s ease',
+                boxShadow: pos.isPlaced
+                  ? '0 4px 6px rgba(34, 197, 94, 0.3)'
+                  : isDragging
+                  ? '0 8px 16px rgba(0, 0, 0, 0.3)'
+                  : '0 2px 4px rgba(0, 0, 0, 0.1)',
+                willChange: isDragging ? 'transform' : 'auto',
+              }}
+            >
+              <img
+                src={piece.imageData}
+                alt={`Piece ${piece.id}`}
+                className="w-full h-full"
+                draggable={false}
                 style={{
-                  left: `${col * pieceWidth}%`,
-                  top: `${row * pieceHeight}%`,
-                  width: `${pieceWidth}%`,
-                  height: `${pieceHeight}%`,
-                  opacity: draggedPiece === piece.id ? 0.5 : 1,
+                  pointerEvents: 'none',
                 }}
-              >
-                <img
-                  src={piece.image}
-                  alt={`Piece ${piece.id}`}
-                  className="w-full h-full object-cover"
-                  draggable={false}
-                />
-              </div>
-            );
-          })}
-        </div>
-        <p className="text-sm text-gray-600 mt-4 text-center">
-          Drag and drop pieces to solve the puzzle
-        </p>
+              />
+              {pos.isPlaced && (
+                <div className="absolute inset-0 border-2 border-green-500 rounded pointer-events-none" />
+              )}
+            </div>
+          );
+        })}
       </div>
+
+      <p className="text-sm text-gray-600 mt-4 text-center px-4">
+        {isSolved 
+          ? 'Great job! Puzzle completed!'
+          : 'Drag pieces to solve the puzzle. They will snap into place when close to the correct position.'}
+      </p>
+
       {isSolved && (
         <div className="mt-4 bg-green-50 border border-green-200 rounded-lg p-4">
-          <p className="text-green-800 font-semibold">✓ Puzzle solved!</p>
+          <p className="text-green-800 font-semibold text-center">✓ Puzzle solved!</p>
         </div>
       )}
     </div>
