@@ -47,6 +47,7 @@ export default function CheckpointPage() {
   const [showSuccessPopup, setShowSuccessPopup] = useState(false);
   const [showHintsModal, setShowHintsModal] = useState(false);
   const [currentPoints, setCurrentPoints] = useState(20);
+  const [isUnlocking, setIsUnlocking] = useState(false);
 
   useEffect(() => {
     if (!team) {
@@ -97,11 +98,34 @@ export default function CheckpointPage() {
   };
 
   const handleUnlock = async () => {
-    if (!team || !checkpoint) return;
+    if (!team || !checkpoint || isUnlocking) return;
+
+    setIsUnlocking(true);
+    setError('');
+    setShowErrorPopup(false);
 
     try {
       const basePoints = checkpoint.points || 20;
       
+      // Check if progress already exists
+      const { data: existingProgress } = await supabase
+        .from('progress')
+        .select('id')
+        .eq('team_id', team.id)
+        .eq('checkpoint_id', checkpointId)
+        .single();
+
+      if (existingProgress) {
+        // Already unlocked, just show success and redirect
+        console.log('Checkpoint already unlocked, showing success popup');
+        setIsUnlocked(true);
+        setShowSuccessPopup(true);
+        setIsUnlocking(false);
+        return;
+      }
+
+      console.log('Unlocking checkpoint...', { teamId: team.id, checkpointId, basePoints });
+
       // Record progress with initial points (will be updated when completed)
       const { error: progressError } = await supabase
         .from('progress')
@@ -113,13 +137,29 @@ export default function CheckpointPage() {
           hints_used: 0,
         });
 
-      if (progressError) throw progressError;
+      if (progressError) {
+        // If it's a duplicate key error, that's okay - just proceed
+        if (progressError.code === '23505') {
+          console.log('Progress already exists (duplicate key), proceeding...');
+        } else {
+          console.error('Progress insert error:', progressError);
+          throw progressError;
+        }
+      }
+
+      console.log('Checkpoint unlocked successfully!');
+
+      // Update state to reflect unlock
+      setIsUnlocked(true);
 
       // Show success popup, then redirect
       setShowSuccessPopup(true);
     } catch (err: any) {
       console.error('Error unlocking checkpoint:', err);
       setError(err.message || 'Failed to unlock checkpoint');
+      setShowErrorPopup(true);
+    } finally {
+      setIsUnlocking(false);
     }
   };
 
@@ -236,7 +276,7 @@ export default function CheckpointPage() {
               )}
 
               {checkpoint.unlock_method === 'manual_code' && (
-                <ManualCodeInput onCodeSubmit={handleCodeSubmit} />
+                <ManualCodeInput onCodeSubmit={handleCodeSubmit} isLoading={isUnlocking} />
               )}
             </div>
           ) : (
@@ -276,12 +316,19 @@ export default function CheckpointPage() {
             />
           )}
 
-          {showErrorPopup && (
+          {showErrorPopup && !showSuccessPopup && (
             <ErrorPopup
               message="Incorrect code. Please try again."
               onClose={() => setShowErrorPopup(false)}
               onTryAgain={() => setShowErrorPopup(false)}
             />
+          )}
+
+          {error && !showSuccessPopup && !showErrorPopup && (
+            <div className="bg-red-50 border-2 border-red-200 rounded-xl p-4 text-red-700">
+              <p className="font-semibold">Error:</p>
+              <p>{error}</p>
+            </div>
           )}
 
           <div className="pt-4 border-t">
