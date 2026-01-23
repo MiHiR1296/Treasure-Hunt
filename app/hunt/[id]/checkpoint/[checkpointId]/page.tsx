@@ -180,6 +180,35 @@ export default function CheckpointPage() {
             )}
           </div>
 
+          {/* Hints Section - Show before unlocking */}
+          {checkpoint.hint_text && (
+            <div className="bg-yellow-50 border-2 border-yellow-200 rounded-xl p-4 md:p-6">
+              <div className="flex items-start gap-3">
+                <div className="text-2xl">💡</div>
+                <div className="flex-1">
+                  <h3 className="font-semibold text-yellow-900 mb-2">Hints Available</h3>
+                  <p className="text-sm text-yellow-800 mb-3">
+                    This checkpoint has hints available. You can use up to 3 hints, but each hint will deduct 5 points from your total.
+                  </p>
+                  {!isUnlocked && (
+                    <div className="bg-yellow-100 border border-yellow-300 rounded-lg p-3">
+                      <p className="text-sm text-yellow-900 font-medium">
+                        🔒 Unlock this checkpoint to access hints
+                      </p>
+                    </div>
+                  )}
+                  {isUnlocked && (
+                    <div className="bg-green-100 border border-green-300 rounded-lg p-3">
+                      <p className="text-sm text-green-900 font-medium">
+                        ✅ Checkpoint unlocked! Hints are now available below.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           {!isUnlocked ? (
             <div className="space-y-4 md:space-y-6">
               {checkpoint.unlock_method === 'qr_code' && (

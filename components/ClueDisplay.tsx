@@ -25,6 +25,8 @@ export default function ClueDisplay({
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [currentPoints, setCurrentPoints] = useState(checkpointPoints);
   const [showConfetti, setShowConfetti] = useState(false);
+  const [isCompleting, setIsCompleting] = useState(false);
+  const [completionError, setCompletionError] = useState<string | null>(null);
   const { team } = useTeam();
 
   useEffect(() => {
@@ -88,11 +90,27 @@ export default function ClueDisplay({
   };
 
   const handleComplete = async () => {
-    if (!team) return;
+    console.log('handleComplete called', { team, checkpointId, currentPoints, hintsUsed });
+    
+    if (!team) {
+      console.error('No team found');
+      setCompletionError('No team found. Please refresh and try again.');
+      return;
+    }
+
+    if (isCompleting || showConfetti) {
+      console.log('Already completing or completed');
+      return;
+    }
+
+    setIsCompleting(true);
+    setCompletionError(null);
 
     try {
+      console.log('Updating progress in Supabase...');
+      
       // Update progress to mark as completed with final points
-      await supabase
+      const { data, error } = await supabase
         .from('progress')
         .update({
           completed_at: new Date().toISOString(),
@@ -100,21 +118,30 @@ export default function ClueDisplay({
           hints_used: hintsUsed,
         })
         .eq('team_id', team.id)
-        .eq('checkpoint_id', checkpointId);
+        .eq('checkpoint_id', checkpointId)
+        .select();
+
+      if (error) {
+        console.error('Supabase update error:', error);
+        throw error;
+      }
+
+      console.log('Progress updated successfully:', data);
 
       // Trigger confetti
       setShowConfetti(true);
+      setIsCompleting(false);
+      
       // Call onNext after a short delay to show confetti
       setTimeout(() => {
         onNext();
       }, 2000);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error completing checkpoint:', err);
-      // Still proceed even if update fails
-      setShowConfetti(true);
-      setTimeout(() => {
-        onNext();
-      }, 2000);
+      setIsCompleting(false);
+      setCompletionError(err.message || 'Failed to complete checkpoint. Please try again.');
+      
+      // Don't proceed if there's an error - let user retry
     }
   };
 
@@ -191,14 +218,29 @@ export default function ClueDisplay({
         </div>
       )}
 
+      {/* Error Message */}
+      {completionError && (
+        <div className="bg-red-50 border-2 border-red-200 rounded-xl p-4">
+          <p className="text-red-800 font-semibold mb-2">⚠️ Error</p>
+          <p className="text-red-700 text-sm">{completionError}</p>
+          <button
+            onClick={() => setCompletionError(null)}
+            className="mt-2 text-red-600 hover:text-red-800 text-sm font-semibold"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {/* Complete/Next Button - Always visible */}
-      <div className="space-y-3">
+      <div className="space-y-3" style={{ position: 'relative', zIndex: 10 }}>
         <button
           onClick={handleComplete}
-          className="w-full bg-green-600 text-white py-3 rounded-lg font-semibold hover:bg-green-700 transition-colors text-lg disabled:opacity-50 disabled:cursor-not-allowed"
-          disabled={showConfetti}
+          className="w-full bg-green-600 text-white py-3 rounded-lg font-semibold hover:bg-green-700 transition-colors text-lg disabled:opacity-50 disabled:cursor-not-allowed relative z-10"
+          disabled={showConfetti || isCompleting || !team}
+          type="button"
         >
-          {showConfetti ? 'Completing...' : 'Mark as Complete & Next Checkpoint →'}
+          {isCompleting ? 'Completing...' : showConfetti ? 'Completing...' : 'Mark as Complete & Next Checkpoint →'}
         </button>
         <p className="text-xs text-gray-500 text-center">
           Click to mark this checkpoint as completed and proceed to the next one

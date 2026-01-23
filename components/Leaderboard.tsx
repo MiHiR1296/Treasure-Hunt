@@ -8,6 +8,7 @@ interface LeaderboardEntry {
   team_id: string;
   team_name: string;
   checkpoints_completed: number;
+  checkpoints_unlocked: number;
   total_points: number;
   last_completed_at: string | null;
 }
@@ -100,14 +101,15 @@ export default function Leaderboard({ huntId, totalCheckpoints, compact = false 
       const teamProgress: Record<string, LeaderboardEntry> = {};
 
       teams.forEach((team) => {
-        // Only include teams that have started (have at least one progress entry)
+        // Include teams that have started (have at least one progress entry - unlocked or completed)
         if (teamIdsWithProgress.has(team.id)) {
           const teamProgressData = progressData?.filter((p) => p.team_id === team.id) || [];
           const completedCheckpoints = teamProgressData.filter((p) => p.completed_at).length;
+          const unlockedCheckpoints = teamProgressData.filter((p) => p.unlocked_at).length;
           const totalPoints = teamProgressData.reduce((sum, p) => {
             // Only count points from completed checkpoints
             if (p.completed_at && p.points_earned) {
-              return sum + p.points_earned;
+              return sum + (p.points_earned || 0);
             }
             return sum;
           }, 0);
@@ -121,13 +123,14 @@ export default function Leaderboard({ huntId, totalCheckpoints, compact = false 
             team_id: team.id,
             team_name: team.name,
             checkpoints_completed: completedCheckpoints,
+            checkpoints_unlocked: unlockedCheckpoints,
             total_points: totalPoints,
             last_completed_at: lastCompleted,
           };
         }
       });
 
-      // Sort by total points (desc), then by checkpoints completed (desc), then by last completed time (asc)
+      // Sort by total points (desc), then by checkpoints completed (desc), then by unlocked count (desc), then by time (asc)
       const sorted = Object.values(teamProgress).sort((a, b) => {
         // First sort by points
         if (b.total_points !== a.total_points) {
@@ -136,6 +139,10 @@ export default function Leaderboard({ huntId, totalCheckpoints, compact = false 
         // Then by checkpoints completed
         if (b.checkpoints_completed !== a.checkpoints_completed) {
           return b.checkpoints_completed - a.checkpoints_completed;
+        }
+        // Then by unlocked count
+        if (b.checkpoints_unlocked !== a.checkpoints_unlocked) {
+          return b.checkpoints_unlocked - a.checkpoints_unlocked;
         }
         // Finally by time
         if (!a.last_completed_at) return 1;
@@ -200,7 +207,7 @@ export default function Leaderboard({ huntId, totalCheckpoints, compact = false 
                     {entry.total_points} pts
                   </div>
                   <div className="text-xs text-gray-600">
-                    {entry.checkpoints_completed} / {totalCheckpoints}
+                    {entry.checkpoints_completed} completed • {entry.checkpoints_unlocked} unlocked
                   </div>
                 </div>
               </div>
