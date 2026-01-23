@@ -118,6 +118,7 @@ export default function CheckpointPage() {
 
     if (decodedText === checkpoint.qr_code_value) {
       setError(''); // Clear any previous errors
+      setShowErrorPopup(false); // Close error popup if open
       handleUnlock();
     } else {
       setShowErrorPopup(true);
@@ -129,6 +130,7 @@ export default function CheckpointPage() {
 
     if (code.toLowerCase() === checkpoint.manual_code?.toLowerCase()) {
       setError(''); // Clear any previous errors
+      setShowErrorPopup(false); // Close error popup if open
       handleUnlock();
     } else {
       setShowErrorPopup(true);
