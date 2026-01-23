@@ -26,9 +26,6 @@ export default function ManualCodeInput({ onCodeSubmit, isLoading }: ManualCodeI
   return (
     <form onSubmit={handleSubmit} className="w-full space-y-4">
       <div>
-        <label htmlFor="code" className="block text-sm font-medium text-gray-700 mb-2">
-          Enter the code found at this location
-        </label>
         <input
           id="code"
           type="text"
