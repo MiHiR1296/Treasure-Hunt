@@ -9,6 +9,7 @@ import GPSDetector from '@/components/GPSDetector';
 import ManualCodeInput from '@/components/ManualCodeInput';
 import ClueDisplay from '@/components/ClueDisplay';
 import PuzzleChainRenderer from '@/components/puzzles/PuzzleChainRenderer';
+import ErrorPopup from '@/components/ErrorPopup';
 
 interface Checkpoint {
   id: string;
@@ -23,6 +24,7 @@ interface Checkpoint {
   lng: number | null;
   radius_m: number;
   use_puzzle_chain?: boolean;
+  points?: number;
 }
 
 export default function CheckpointPage() {
@@ -36,6 +38,7 @@ export default function CheckpointPage() {
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
+  const [showErrorPopup, setShowErrorPopup] = useState(false);
 
   useEffect(() => {
     if (!team) {
@@ -88,13 +91,17 @@ export default function CheckpointPage() {
     if (!team || !checkpoint) return;
 
     try {
-      // Record progress
+      const basePoints = checkpoint.points || 20;
+      
+      // Record progress with initial points (will be updated when completed)
       const { error: progressError } = await supabase
         .from('progress')
         .insert({
           team_id: team.id,
           checkpoint_id: checkpointId,
           unlocked_at: new Date().toISOString(),
+          points_earned: basePoints, // Start with full points, will deduct for hints
+          hints_used: 0,
         });
 
       if (progressError) throw progressError;
@@ -110,9 +117,10 @@ export default function CheckpointPage() {
     if (!checkpoint) return;
 
     if (decodedText === checkpoint.qr_code_value) {
+      setError(''); // Clear any previous errors
       handleUnlock();
     } else {
-      setError('Invalid QR code. Please scan the correct code for this checkpoint.');
+      setShowErrorPopup(true);
     }
   };
 
@@ -120,9 +128,10 @@ export default function CheckpointPage() {
     if (!checkpoint) return;
 
     if (code.toLowerCase() === checkpoint.manual_code?.toLowerCase()) {
+      setError(''); // Clear any previous errors
       handleUnlock();
     } else {
-      setError('Incorrect code. Please try again.');
+      setShowErrorPopup(true);
     }
   };
 
@@ -169,36 +178,24 @@ export default function CheckpointPage() {
             )}
           </div>
 
-          {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
-              {error}
-            </div>
-          )}
-
           {!isUnlocked ? (
             <div className="space-y-4 md:space-y-6">
-              <div>
-                <h2 className="text-lg md:text-xl font-semibold text-gray-900 mb-4">
-                  Unlock this checkpoint:
-                </h2>
+              {checkpoint.unlock_method === 'qr_code' && (
+                <QRScanner onScanSuccess={handleQRScan} onError={() => setShowErrorPopup(true)} />
+              )}
 
-                {checkpoint.unlock_method === 'qr_code' && (
-                  <QRScanner onScanSuccess={handleQRScan} onError={setError} />
-                )}
+              {checkpoint.unlock_method === 'gps' && checkpoint.lat && checkpoint.lng && (
+                <GPSDetector
+                  targetLat={checkpoint.lat}
+                  targetLng={checkpoint.lng}
+                  radiusMeters={checkpoint.radius_m}
+                  onUnlock={handleGPSUnlock}
+                />
+              )}
 
-                {checkpoint.unlock_method === 'gps' && checkpoint.lat && checkpoint.lng && (
-                  <GPSDetector
-                    targetLat={checkpoint.lat}
-                    targetLng={checkpoint.lng}
-                    radiusMeters={checkpoint.radius_m}
-                    onUnlock={handleGPSUnlock}
-                  />
-                )}
-
-                {checkpoint.unlock_method === 'manual_code' && (
-                  <ManualCodeInput onCodeSubmit={handleCodeSubmit} />
-                )}
-              </div>
+              {checkpoint.unlock_method === 'manual_code' && (
+                <ManualCodeInput onCodeSubmit={handleCodeSubmit} />
+              )}
             </div>
           ) : (
             checkpoint.use_puzzle_chain ? (
@@ -209,11 +206,19 @@ export default function CheckpointPage() {
             ) : (
               <ClueDisplay
                 checkpointId={checkpointId}
-                clueText={checkpoint.clue_text}
                 hintText={checkpoint.hint_text}
                 onNext={handleNext}
+                checkpointPoints={checkpoint.points || 20}
               />
             )
+          )}
+
+          {showErrorPopup && (
+            <ErrorPopup
+              message="Incorrect code. Please try again."
+              onClose={() => setShowErrorPopup(false)}
+              onTryAgain={() => setShowErrorPopup(false)}
+            />
           )}
 
           <div className="pt-4 border-t">

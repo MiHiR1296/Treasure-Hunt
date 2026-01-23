@@ -1,82 +1,204 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { useTeam } from '@/lib/context/TeamContext';
+import { calculatePoints, canUseHint, getRemainingPointsAfterHint } from '@/lib/utils/points';
+import HintConfirmationDialog from './HintConfirmationDialog';
+import Confetti from './Confetti';
 
 interface ClueDisplayProps {
   checkpointId: string;
-  clueText: string;
   hintText?: string | null;
   onNext: () => void;
+  checkpointPoints?: number;
 }
 
 export default function ClueDisplay({
   checkpointId,
-  clueText,
   hintText,
   onNext,
+  checkpointPoints = 20,
 }: ClueDisplayProps) {
+  const [hintsUsed, setHintsUsed] = useState(0);
   const [showHint, setShowHint] = useState(false);
-  const [hintRequested, setHintRequested] = useState(false);
+  const [showConfirmation, setShowConfirmation] = useState(false);
+  const [currentPoints, setCurrentPoints] = useState(checkpointPoints);
+  const [showConfetti, setShowConfetti] = useState(false);
   const { team } = useTeam();
 
-  const handleRequestHint = async () => {
-    if (!team || !hintText || hintRequested) return;
+  useEffect(() => {
+    loadHintUsage();
+  }, [checkpointId, team]);
+
+  const loadHintUsage = async () => {
+    if (!team) return;
 
     try {
-      // Record hint request
-      await supabase.from('hint_requests').insert({
-        team_id: team.id,
-        checkpoint_id: checkpointId,
-      });
-
-      // Update progress to increment hints_used
-      await supabase
+      const { data: progressData } = await supabase
         .from('progress')
-        .update({ hints_used: 1 })
+        .select('hints_used, points_earned')
         .eq('team_id', team.id)
-        .eq('checkpoint_id', checkpointId);
+        .eq('checkpoint_id', checkpointId)
+        .single();
 
-      setShowHint(true);
-      setHintRequested(true);
+      if (progressData) {
+        const used = progressData.hints_used || 0;
+        setHintsUsed(used);
+        // Calculate current points based on hints used
+        const points = calculatePoints(checkpointPoints, used);
+        setCurrentPoints(points.pointsEarned);
+      }
     } catch (err) {
-      console.error('Error requesting hint:', err);
+      // No progress yet, use default
     }
   };
 
+  const handleRequestHint = () => {
+    if (!canUseHint(hintsUsed)) {
+      return;
+    }
+    setShowConfirmation(true);
+  };
+
+  const handleConfirmHint = async () => {
+    if (!team || !hintText) return;
+
+    try {
+      const newHintsUsed = hintsUsed + 1;
+      const newPoints = getRemainingPointsAfterHint(currentPoints);
+
+      // Update progress
+      await supabase
+        .from('progress')
+        .update({
+          hints_used: newHintsUsed,
+          points_earned: newPoints,
+        })
+        .eq('team_id', team.id)
+        .eq('checkpoint_id', checkpointId);
+
+      setHintsUsed(newHintsUsed);
+      setCurrentPoints(newPoints);
+      setShowHint(true);
+      setShowConfirmation(false);
+    } catch (err) {
+      console.error('Error using hint:', err);
+    }
+  };
+
+  const handleComplete = async () => {
+    if (!team) return;
+
+    try {
+      // Update progress to mark as completed with final points
+      await supabase
+        .from('progress')
+        .update({
+          completed_at: new Date().toISOString(),
+          points_earned: currentPoints,
+          hints_used: hintsUsed,
+        })
+        .eq('team_id', team.id)
+        .eq('checkpoint_id', checkpointId);
+
+      // Trigger confetti
+      setShowConfetti(true);
+      // Call onNext after a short delay to show confetti
+      setTimeout(() => {
+        onNext();
+      }, 2000);
+    } catch (err) {
+      console.error('Error completing checkpoint:', err);
+      // Still proceed even if update fails
+      setShowConfetti(true);
+      setTimeout(() => {
+        onNext();
+      }, 2000);
+    }
+  };
+
+  const hintsAvailable = 3 - hintsUsed;
+  const pointsCalculation = calculatePoints(checkpointPoints, hintsUsed);
+
   return (
     <div className="w-full space-y-6">
-      <div className="bg-gradient-to-br from-indigo-50 to-blue-50 border-2 border-indigo-200 rounded-xl p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-3">Your Clue:</h3>
-        <p className="text-gray-800 text-lg leading-relaxed whitespace-pre-line">
-          {clueText}
-        </p>
+      <Confetti trigger={showConfetti} />
+
+      {/* Points Display */}
+      <div className="bg-gradient-to-r from-indigo-500 to-purple-600 rounded-xl p-4 text-white">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm opacity-90">Points for this checkpoint</p>
+            <p className="text-3xl font-bold">{currentPoints}</p>
+          </div>
+          {hintsUsed > 0 && (
+            <div className="text-right">
+              <p className="text-sm opacity-90">Hints used</p>
+              <p className="text-2xl font-bold">{hintsUsed} / 3</p>
+            </div>
+          )}
+        </div>
+        {currentPoints < checkpointPoints && (
+          <p className="text-xs mt-2 opacity-75">
+            Started with {checkpointPoints} points • {hintsUsed * 5} points deducted for hints
+          </p>
+        )}
       </div>
 
-      {hintText && !showHint && (
-        <button
-          onClick={handleRequestHint}
-          disabled={hintRequested}
-          className="w-full bg-yellow-500 text-white py-3 rounded-lg font-semibold hover:bg-yellow-600 transition-colors disabled:opacity-50"
-        >
-          💡 Need a Hint?
-        </button>
+      {/* Hint Section */}
+      {hintText && hintsAvailable > 0 && !showHint && (
+        <div className="bg-yellow-50 border-2 border-yellow-200 rounded-xl p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-semibold text-yellow-900 mb-1">
+                💡 Need a Hint?
+              </p>
+              <p className="text-sm text-yellow-700">
+                {hintsAvailable} hint{hintsAvailable !== 1 ? 's' : ''} available
+              </p>
+            </div>
+            <button
+              onClick={handleRequestHint}
+              className="px-4 py-2 bg-yellow-500 text-white rounded-lg font-semibold hover:bg-yellow-600 transition-colors"
+            >
+              Use Hint (-5 pts)
+            </button>
+          </div>
+        </div>
       )}
 
       {showHint && hintText && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-6">
-          <h4 className="text-md font-semibold text-yellow-900 mb-2">💡 Hint:</h4>
+        <div className="bg-yellow-50 border-2 border-yellow-200 rounded-xl p-6">
+          <h4 className="text-lg font-semibold text-yellow-900 mb-2">💡 Hint:</h4>
           <p className="text-yellow-800">{hintText}</p>
         </div>
       )}
 
+      {hintsAvailable === 0 && !showHint && (
+        <div className="bg-gray-100 border border-gray-300 rounded-xl p-4 text-center">
+          <p className="text-gray-600">No hints remaining (3/3 used)</p>
+        </div>
+      )}
+
+      {/* Next Button */}
       <button
-        onClick={onNext}
-        className="w-full bg-green-600 text-white py-3 rounded-lg font-semibold hover:bg-green-700 transition-colors"
+        onClick={handleComplete}
+        className="w-full bg-green-600 text-white py-3 rounded-lg font-semibold hover:bg-green-700 transition-colors text-lg"
       >
-        I've Solved It - Show Next Checkpoint
+        Next Checkpoint →
       </button>
+
+      {/* Confirmation Dialog */}
+      {showConfirmation && (
+        <HintConfirmationDialog
+          currentPoints={currentPoints}
+          hintsUsed={hintsUsed}
+          hintsAvailable={hintsAvailable}
+          onConfirm={handleConfirmHint}
+          onCancel={() => setShowConfirmation(false)}
+        />
+      )}
     </div>
   );
 }

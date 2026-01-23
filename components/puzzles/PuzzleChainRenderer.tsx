@@ -99,10 +99,33 @@ export default function PuzzleChainRenderer({ checkpointId, onComplete }: Puzzle
 
       // Check if this is the last step
       if (currentStepIndex === steps.length - 1) {
-        // Mark checkpoint as completed
+        // Get current progress to calculate points
+        const { data: progressData } = await supabase
+          .from('progress')
+          .select('hints_used')
+          .eq('team_id', team.id)
+          .eq('checkpoint_id', checkpointId)
+          .single();
+
+        // Get checkpoint points
+        const { data: checkpointData } = await supabase
+          .from('checkpoints')
+          .select('points')
+          .eq('id', checkpointId)
+          .single();
+
+        const basePoints = checkpointData?.points || 20;
+        const hintsUsed = progressData?.hints_used || 0;
+        const pointsEarned = Math.max(0, basePoints - hintsUsed * 5);
+
+        // Mark checkpoint as completed with points
         const { error: checkpointError } = await supabase
           .from('progress')
-          .update({ completed_at: new Date().toISOString() })
+          .update({
+            completed_at: new Date().toISOString(),
+            points_earned: pointsEarned,
+            hints_used: hintsUsed,
+          })
           .eq('team_id', team.id)
           .eq('checkpoint_id', checkpointId);
 

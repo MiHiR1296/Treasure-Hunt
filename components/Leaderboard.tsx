@@ -8,6 +8,7 @@ interface LeaderboardEntry {
   team_id: string;
   team_name: string;
   checkpoints_completed: number;
+  total_points: number;
   last_completed_at: string | null;
 }
 
@@ -70,7 +71,7 @@ export default function Leaderboard({ huntId, totalCheckpoints, compact = false 
       // First get all teams with progress, then get their team info
       const { data: progressData, error: progressError } = await supabase
         .from('progress')
-        .select('team_id, checkpoint_id, completed_at, unlocked_at')
+        .select('team_id, checkpoint_id, completed_at, unlocked_at, points_earned')
         .in('checkpoint_id', checkpointIds);
 
       if (progressError) {
@@ -103,6 +104,7 @@ export default function Leaderboard({ huntId, totalCheckpoints, compact = false 
         if (teamIdsWithProgress.has(team.id)) {
           const teamProgressData = progressData?.filter((p) => p.team_id === team.id) || [];
           const completedCheckpoints = teamProgressData.length;
+          const totalPoints = teamProgressData.reduce((sum, p) => sum + (p.points_earned || 0), 0);
           const lastCompleted = teamProgressData
             .map((p) => p.completed_at || p.unlocked_at)
             .filter(Boolean)
@@ -113,16 +115,23 @@ export default function Leaderboard({ huntId, totalCheckpoints, compact = false 
             team_id: team.id,
             team_name: team.name,
             checkpoints_completed: completedCheckpoints,
+            total_points: totalPoints,
             last_completed_at: lastCompleted,
           };
         }
       });
 
-      // Sort by checkpoints completed (desc), then by last completed time (asc)
+      // Sort by total points (desc), then by checkpoints completed (desc), then by last completed time (asc)
       const sorted = Object.values(teamProgress).sort((a, b) => {
+        // First sort by points
+        if (b.total_points !== a.total_points) {
+          return b.total_points - a.total_points;
+        }
+        // Then by checkpoints completed
         if (b.checkpoints_completed !== a.checkpoints_completed) {
           return b.checkpoints_completed - a.checkpoints_completed;
         }
+        // Finally by time
         if (!a.last_completed_at) return 1;
         if (!b.last_completed_at) return -1;
         return new Date(a.last_completed_at).getTime() - new Date(b.last_completed_at).getTime();
@@ -181,9 +190,12 @@ export default function Leaderboard({ huntId, totalCheckpoints, compact = false 
                   </span>
                 </div>
                 <div className="text-right">
-                  <span className="font-semibold text-gray-700">
+                  <div className="font-semibold text-gray-900">
+                    {entry.total_points} pts
+                  </div>
+                  <div className="text-xs text-gray-600">
                     {entry.checkpoints_completed} / {totalCheckpoints}
-                  </span>
+                  </div>
                 </div>
               </div>
             </div>

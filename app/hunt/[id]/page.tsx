@@ -7,6 +7,7 @@ import { supabase } from '@/lib/supabase/client';
 import { useTeam } from '@/lib/context/TeamContext';
 import ProgressBar from '@/components/ProgressBar';
 import Leaderboard from '@/components/Leaderboard';
+import GameTips from '@/components/GameTips';
 
 interface Checkpoint {
   id: string;
@@ -34,6 +35,7 @@ export default function HuntPage() {
   const [completedCheckpoints, setCompletedCheckpoints] = useState<Set<string>>(new Set());
   const [currentCheckpoint, setCurrentCheckpoint] = useState<Checkpoint | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [newlyCompleted, setNewlyCompleted] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!teamLoading && !team) {
@@ -45,6 +47,13 @@ export default function HuntPage() {
       loadHuntData();
     }
   }, [team, teamLoading, huntId, router]);
+
+  // Check for newly completed checkpoints on mount (after returning from checkpoint)
+  useEffect(() => {
+    if (team && checkpoints.length > 0) {
+      checkForNewCompletions();
+    }
+  }, [team, checkpoints]);
 
   const loadHuntData = async () => {
     try {
@@ -72,7 +81,7 @@ export default function HuntPage() {
       if (team) {
         const { data: progressData } = await supabase
           .from('progress')
-          .select('checkpoint_id')
+          .select('checkpoint_id, completed_at')
           .eq('team_id', team.id);
 
         const completed = new Set(progressData?.map((p) => p.checkpoint_id) || []);
@@ -86,6 +95,38 @@ export default function HuntPage() {
       console.error('Error loading hunt:', err);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const checkForNewCompletions = async () => {
+    if (!team) return;
+
+    try {
+      const { data: progressData } = await supabase
+        .from('progress')
+        .select('checkpoint_id, completed_at')
+        .eq('team_id', team.id)
+        .not('completed_at', 'is', null);
+
+      const newlyCompletedSet = new Set<string>();
+      progressData?.forEach((p) => {
+        // Check if completed recently (within last 10 seconds)
+        const completedTime = new Date(p.completed_at).getTime();
+        const now = Date.now();
+        if (now - completedTime < 10000) {
+          newlyCompletedSet.add(p.checkpoint_id);
+        }
+      });
+
+      if (newlyCompletedSet.size > 0) {
+        setNewlyCompleted(newlyCompletedSet);
+        // Clear animation after 3 seconds
+        setTimeout(() => {
+          setNewlyCompleted(new Set());
+        }, 3000);
+      }
+    } catch (err) {
+      console.error('Error checking completions:', err);
     }
   };
 
@@ -123,9 +164,45 @@ export default function HuntPage() {
           <ProgressBar current={completedCount} total={totalCheckpoints} />
         </div>
 
+        {/* Completed Checkpoints List */}
+        {checkpoints
+          .filter((cp) => completedCheckpoints.has(cp.id))
+          .map((cp) => (
+            <div
+              key={cp.id}
+              className={`bg-white rounded-2xl shadow-xl p-4 md:p-6 transition-all duration-500 ${
+                newlyCompleted.has(cp.id)
+                  ? 'animate-checkmark-in border-2 border-green-400'
+                  : 'border border-gray-200'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                {newlyCompleted.has(cp.id) ? (
+                  <div className="text-3xl animate-bounce">✅</div>
+                ) : (
+                  <div className="text-2xl">✓</div>
+                )}
+                <div className="flex-1">
+                  <h3 className="text-lg md:text-xl font-semibold text-gray-800 line-through opacity-60">
+                    {cp.order_index}. {cp.title}
+                  </h3>
+                  {cp.description && (
+                    <p className="text-sm text-gray-500 line-through opacity-60">{cp.description}</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+
         {/* Current Checkpoint */}
         {currentCheckpoint ? (
-          <div className="bg-white rounded-2xl shadow-xl p-4 md:p-6">
+          <div
+            className={`bg-white rounded-2xl shadow-xl p-4 md:p-6 transition-all duration-500 ${
+              newlyCompleted.size > 0
+                ? 'animate-fade-in-scale border-2 border-indigo-400'
+                : ''
+            }`}
+          >
             <h2 className="text-xl md:text-2xl font-bold text-gray-900 mb-4">Current Checkpoint</h2>
             <div className="space-y-4">
               <div>
@@ -140,7 +217,7 @@ export default function HuntPage() {
                 href={`/hunt/${huntId}/checkpoint/${currentCheckpoint.id}`}
                 className="block w-full bg-indigo-600 text-white py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors text-center text-base"
               >
-                Unlock This Checkpoint →
+                Start →
               </Link>
             </div>
           </div>
@@ -152,17 +229,10 @@ export default function HuntPage() {
         )}
 
         {/* Quick Actions */}
-        <div className="grid grid-cols-2 gap-3 md:gap-4">
-          <Link
-            href={`/hunt/${huntId}/map`}
-            className="bg-white rounded-xl shadow-lg p-4 md:p-6 hover:shadow-xl transition-shadow text-center"
-          >
-            <span className="text-2xl mb-2 block">🗺️</span>
-            <span className="font-semibold text-gray-900 text-sm md:text-base">View Map</span>
-          </Link>
+        <div className="flex justify-center">
           <Link
             href={`/hunt/${huntId}/leaderboard`}
-            className="bg-white rounded-xl shadow-lg p-4 md:p-6 hover:shadow-xl transition-shadow text-center"
+            className="bg-white rounded-xl shadow-lg p-4 md:p-6 hover:shadow-xl transition-shadow text-center min-w-[200px]"
           >
             <span className="text-2xl mb-2 block">🏆</span>
             <span className="font-semibold text-gray-900 text-sm md:text-base">Leaderboard</span>
@@ -173,7 +243,41 @@ export default function HuntPage() {
         <div className="bg-white rounded-2xl shadow-xl p-4 md:p-6">
           <Leaderboard huntId={huntId} totalCheckpoints={totalCheckpoints} compact />
         </div>
+
+        {/* Game Tips */}
+        <GameTips />
       </div>
+      <style jsx>{`
+        @keyframes checkmark-in {
+          0% {
+            transform: scale(0);
+            opacity: 0;
+          }
+          50% {
+            transform: scale(1.2);
+          }
+          100% {
+            transform: scale(1);
+            opacity: 1;
+          }
+        }
+        @keyframes fade-in-scale {
+          0% {
+            transform: scale(0.8);
+            opacity: 0;
+          }
+          100% {
+            transform: scale(1);
+            opacity: 1;
+          }
+        }
+        .animate-checkmark-in {
+          animation: checkmark-in 0.6s ease-out;
+        }
+        .animate-fade-in-scale {
+          animation: fade-in-scale 0.5s ease-out;
+        }
+      `}</style>
     </div>
   );
 }

@@ -37,6 +37,7 @@ interface Checkpoint {
   lng: number | null;
   radius_m: number;
   use_puzzle_chain?: boolean;
+  points?: number;
 }
 
 interface Team {
@@ -95,6 +96,7 @@ export default function AdminPage() {
   const [checkpointLat, setCheckpointLat] = useState('');
   const [checkpointLng, setCheckpointLng] = useState('');
   const [checkpointRadius, setCheckpointRadius] = useState('50');
+  const [checkpointPoints, setCheckpointPoints] = useState('20');
   const [usePuzzleChain, setUsePuzzleChain] = useState(false);
   const [puzzleSteps, setPuzzleSteps] = useState<PuzzleStepConfig[]>([]);
 
@@ -240,6 +242,7 @@ export default function AdminPage() {
         hint_text: checkpointHint || null,
         unlock_method: checkpointUnlockMethod,
         use_puzzle_chain: usePuzzleChain,
+        points: 20, // Default points
       };
       if (checkpointUnlockMethod === 'qr_code') {
         checkpointData.qr_code_value = checkpointQRCode;
@@ -291,6 +294,7 @@ export default function AdminPage() {
       setCheckpointLat('');
       setCheckpointLng('');
       setCheckpointRadius('50');
+      setCheckpointPoints('20');
       setUsePuzzleChain(false);
       setPuzzleSteps([]);
       loadCheckpoints();
@@ -319,6 +323,7 @@ export default function AdminPage() {
         hint_text: checkpointHint || null,
         unlock_method: checkpointUnlockMethod,
         use_puzzle_chain: usePuzzleChain,
+        points: 20, // Default points
       };
       if (checkpointUnlockMethod === 'qr_code') {
         checkpointData.qr_code_value = checkpointQRCode;
@@ -380,6 +385,7 @@ export default function AdminPage() {
       setCheckpointTitle('');
       setCheckpointDescription('');
       setCheckpointOrder(1);
+      setCheckpointPoints('20');
       setCheckpointClue('');
       setCheckpointHint('');
       setCheckpointQRCode('');
@@ -387,6 +393,7 @@ export default function AdminPage() {
       setCheckpointLat('');
       setCheckpointLng('');
       setCheckpointRadius('50');
+      setCheckpointPoints('20');
       setUsePuzzleChain(false);
       setPuzzleSteps([]);
       loadCheckpoints();
@@ -411,6 +418,7 @@ export default function AdminPage() {
     setCheckpointLat(checkpoint.lat?.toString() || '');
     setCheckpointLng(checkpoint.lng?.toString() || '');
     setCheckpointRadius(checkpoint.radius_m?.toString() || '50');
+    setCheckpointPoints(checkpoint.points?.toString() || '20');
     setUsePuzzleChain(checkpoint.use_puzzle_chain || false);
 
     // Load puzzle steps if using puzzle chain
@@ -568,23 +576,23 @@ export default function AdminPage() {
             {/* Stats Cards */}
             <div className="grid grid-cols-2 md:grid-cols-5 gap-3 md:gap-4">
               <div className="bg-white rounded-xl shadow-lg p-4 md:p-6">
-                <p className="text-xs md:text-sm text-gray-600">Total Hunts</p>
+                <p className="text-xs md:text-sm text-gray-800 font-medium">Total Hunts</p>
                 <p className="text-2xl md:text-3xl font-bold text-gray-900">{stats.totalHunts}</p>
               </div>
               <div className="bg-white rounded-xl shadow-lg p-4 md:p-6">
-                <p className="text-xs md:text-sm text-gray-600">Live Hunts</p>
+                <p className="text-xs md:text-sm text-gray-800 font-medium">Live Hunts</p>
                 <p className="text-2xl md:text-3xl font-bold text-green-600">{stats.liveHunts}</p>
               </div>
               <div className="bg-white rounded-xl shadow-lg p-4 md:p-6">
-                <p className="text-xs md:text-sm text-gray-600">Total Teams</p>
+                <p className="text-xs md:text-sm text-gray-800 font-medium">Total Teams</p>
                 <p className="text-2xl md:text-3xl font-bold text-blue-600">{stats.totalTeams}</p>
               </div>
               <div className="bg-white rounded-xl shadow-lg p-4 md:p-6">
-                <p className="text-xs md:text-sm text-gray-600">Checkpoints</p>
+                <p className="text-xs md:text-sm text-gray-800 font-medium">Checkpoints</p>
                 <p className="text-2xl md:text-3xl font-bold text-purple-600">{stats.totalCheckpoints}</p>
               </div>
               <div className="bg-white rounded-xl shadow-lg p-4 md:p-6 col-span-2 md:col-span-1">
-                <p className="text-xs md:text-sm text-gray-600">Progress</p>
+                <p className="text-xs md:text-sm text-gray-800 font-medium">Progress</p>
                 <p className="text-2xl md:text-3xl font-bold text-orange-600">{stats.totalProgress}</p>
               </div>
             </div>
@@ -733,7 +741,7 @@ export default function AdminPage() {
                   <form onSubmit={editingCheckpoint ? handleEditCheckpoint : handleCreateCheckpoint} className="space-y-4">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Title</label>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Question</label>
                         <input
                           type="text"
                           value={checkpointTitle}
@@ -742,19 +750,29 @@ export default function AdminPage() {
                           required
                         />
                       </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Order Index</label>
-                        <input
-                          type="number"
-                          value={checkpointOrder}
-                          onChange={(e) => setCheckpointOrder(parseInt(e.target.value) || 1)}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base text-gray-900 bg-white"
-                          required
-                        />
-                      </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Order Index</label>
+                      <input
+                        type="number"
+                        value={checkpointOrder}
+                        onChange={(e) => setCheckpointOrder(parseInt(e.target.value) || 1)}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base text-gray-900 bg-white"
+                        required
+                      />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Points (default: 20)</label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={checkpointPoints}
+                        onChange={(e) => setCheckpointPoints(e.target.value)}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base text-gray-900 bg-white"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
                       <textarea
                         value={checkpointDescription}
                         onChange={(e) => setCheckpointDescription(e.target.value)}
@@ -1048,13 +1066,13 @@ function TeamCard({ team, onEdit, onDelete }: { team: Team; onEdit: (team: Team)
     <div className="p-4 bg-gray-50 rounded-lg">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div className="flex-1">
-          <p className="font-semibold text-base md:text-lg">{team.name}</p>
-          <p className="text-xs md:text-sm text-gray-500">
+          <p className="font-semibold text-base md:text-lg text-gray-900">{team.name}</p>
+          <p className="text-xs md:text-sm text-gray-700">
             Joined: {new Date(team.created_at).toLocaleString()}
           </p>
           {!loading && members.length > 0 && (
             <div className="mt-2">
-              <p className="text-xs text-gray-600 mb-1">Members ({members.length}):</p>
+              <p className="text-xs text-gray-800 mb-1">Members ({members.length}):</p>
               <div className="flex flex-wrap gap-1">
                 {members.map((member, idx) => (
                   <span key={member.id} className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded">
@@ -1172,7 +1190,7 @@ function HuntLeaderboard({ hunt }: { hunt: Hunt }) {
             <div key={entry.team_id} className="p-3 bg-gray-50 rounded-lg flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <span className="text-lg font-bold">{medal}</span>
-                <span className="font-semibold">{entry.team_name}</span>
+                <span className="font-semibold text-gray-900">{entry.team_name}</span>
               </div>
               <span className="font-semibold text-gray-700">
                 {entry.checkpoints_completed} / {totalCheckpoints}
