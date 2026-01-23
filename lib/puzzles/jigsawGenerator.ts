@@ -136,11 +136,6 @@ export function generateInterlockingPieces(
       // Get tab pattern for this piece
       const tabPattern = generateTabPattern(row, col, rows, columns);
       
-      // Create mask path
-      const mask = new Path2D();
-      const maskCtx = document.createElement('canvas').getContext('2d');
-      if (!maskCtx) continue;
-      
       // Create piece canvas (slightly larger to accommodate tabs)
       const padding = Math.max(pieceWidth, pieceHeight) * TAB_SIZE * 1.5;
       const pieceCanvas = document.createElement('canvas');
@@ -150,11 +145,12 @@ export function generateInterlockingPieces(
       if (!pieceCtx) continue;
       
       // Create clipping path with tabs/notches
-      const clipPath = new Path2D();
       const clipX = padding;
       const clipY = padding;
       const clipW = pieceWidth;
       const clipH = pieceHeight;
+      
+      const clipPath = new Path2D();
       
       // Create clipping path with tabs/notches
       // Top edge
@@ -201,14 +197,7 @@ export function generateInterlockingPieces(
       
       // Apply clipping and draw piece
       pieceCtx.save();
-      // Use the path for clipping
-      const clipPathForCtx = new Path2D();
-      createEdgePath(clipPathForCtx, clipX, clipY, clipX + clipW, clipY, tabPattern.top);
-      createEdgePath(clipPathForCtx, clipX + clipW, clipY, clipX + clipW, clipY + clipH, tabPattern.right);
-      createEdgePath(clipPathForCtx, clipX + clipW, clipY + clipH, clipX, clipY + clipH, tabPattern.bottom);
-      createEdgePath(clipPathForCtx, clipX, clipY + clipH, clipX, clipY, tabPattern.left);
-      clipPathForCtx.closePath();
-      pieceCtx.clip(clipPathForCtx);
+      pieceCtx.clip(clipPath);
       
       // Draw the piece image with offset to account for padding
       pieceCtx.drawImage(
@@ -245,7 +234,7 @@ export function generateInterlockingPieces(
         correctPosition: { row, col },
         tabs,
         imageData: pieceCanvas.toDataURL(),
-        mask: clipPath,
+        mask: new Path2D(), // Path2D can't be serialized, create empty for type compatibility
         width: pieceWidth,
         height: pieceHeight,
         offsetX,
