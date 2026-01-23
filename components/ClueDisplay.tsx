@@ -9,14 +9,18 @@ import Confetti from './Confetti';
 
 interface ClueDisplayProps {
   checkpointId: string;
-  hintText?: string | null;
+  hint1?: string | null;
+  hint2?: string | null;
+  hint3?: string | null;
   onNext: () => void;
   checkpointPoints?: number;
 }
 
 export default function ClueDisplay({
   checkpointId,
-  hintText,
+  hint1,
+  hint2,
+  hint3,
   onNext,
   checkpointPoints = 20,
 }: ClueDisplayProps) {
@@ -64,7 +68,7 @@ export default function ClueDisplay({
   };
 
   const handleConfirmHint = async () => {
-    if (!team || !hintText) return;
+    if (!team) return;
 
     try {
       const newHintsUsed = hintsUsed + 1;
@@ -146,7 +150,12 @@ export default function ClueDisplay({
   };
 
   const hintsAvailable = 3 - hintsUsed;
-  const pointsCalculation = calculatePoints(checkpointPoints, hintsUsed);
+  const hints = [
+    { id: 1, text: hint1, used: hintsUsed >= 1 },
+    { id: 2, text: hint2, used: hintsUsed >= 2 },
+    { id: 3, text: hint3, used: hintsUsed >= 3 },
+  ].filter(h => h.text);
+  const hasHints = hints.length > 0;
 
   return (
     <div className="w-full space-y-6">
@@ -173,46 +182,59 @@ export default function ClueDisplay({
         )}
       </div>
 
-      {/* Hint Section - Always show if hintText exists */}
-      {hintText && (
-        <>
-          {hintsAvailable > 0 && !showHint && (
-            <div className="bg-yellow-50 border-2 border-yellow-200 rounded-xl p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-semibold text-yellow-900 mb-1">
-                    💡 Need a Hint?
-                  </p>
-                  <p className="text-sm text-yellow-700">
-                    {hintsAvailable} hint{hintsAvailable !== 1 ? 's' : ''} available
-                  </p>
+      {/* Hints Section */}
+      {hasHints && (
+        <div className="space-y-3">
+          {hints.map((hint, index) => (
+            <div
+              key={hint.id}
+              className={`border-2 rounded-xl p-4 ${
+                hint.used
+                  ? 'bg-yellow-50 border-yellow-300'
+                  : 'bg-gray-50 border-gray-200'
+              }`}
+            >
+              <div className="flex items-start justify-between">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="font-semibold text-gray-900">Hint {hint.id}</span>
+                    {hint.used && (
+                      <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded">
+                        Used
+                      </span>
+                    )}
+                  </div>
+                  {hint.used ? (
+                    <p className="text-gray-800">{hint.text}</p>
+                  ) : (
+                    <div className="space-y-2">
+                      <p className="text-gray-600 text-sm">
+                        This hint costs 5 points to reveal.
+                      </p>
+                      {hintsAvailable > 0 && (
+                        <button
+                          onClick={handleRequestHint}
+                          className="px-4 py-2 bg-yellow-500 text-white rounded-lg font-semibold hover:bg-yellow-600 transition-colors text-sm"
+                        >
+                          Use Hint {hint.id} (-5 pts)
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
-                <button
-                  onClick={handleRequestHint}
-                  className="px-4 py-2 bg-yellow-500 text-white rounded-lg font-semibold hover:bg-yellow-600 transition-colors"
-                >
-                  Use Hint (-5 pts)
-                </button>
               </div>
             </div>
-          )}
+          ))}
 
-          {showHint && (
-            <div className="bg-yellow-50 border-2 border-yellow-200 rounded-xl p-6">
-              <h4 className="text-lg font-semibold text-yellow-900 mb-2">💡 Hint:</h4>
-              <p className="text-yellow-800">{hintText}</p>
-            </div>
-          )}
-
-          {hintsAvailable === 0 && !showHint && hintText && (
+          {hintsAvailable === 0 && (
             <div className="bg-gray-100 border border-gray-300 rounded-xl p-4 text-center">
               <p className="text-gray-600">No hints remaining (3/3 used)</p>
             </div>
           )}
-        </>
+        </div>
       )}
 
-      {!hintText && (
+      {!hasHints && (
         <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4 text-center">
           <p className="text-blue-800">No hints available for this checkpoint</p>
         </div>

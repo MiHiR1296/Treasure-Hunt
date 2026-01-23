@@ -50,6 +50,8 @@ export default function Leaderboard({ huntId, totalCheckpoints, compact = false 
 
   const loadLeaderboard = async () => {
     try {
+      console.log('Loading leaderboard for hunt:', huntId);
+      
       // Get all checkpoints for this hunt
       const { data: checkpoints, error: checkpointsError } = await supabase
         .from('checkpoints')
@@ -58,15 +60,22 @@ export default function Leaderboard({ huntId, totalCheckpoints, compact = false 
 
       if (checkpointsError) {
         console.error('Error loading checkpoints:', checkpointsError);
+        setEntries([]);
+        setIsLoading(false);
+        return;
       }
 
+      console.log('Checkpoints found:', checkpoints?.length || 0);
+
       if (!checkpoints || checkpoints.length === 0) {
+        console.log('No checkpoints found for this hunt');
         setEntries([]);
         setIsLoading(false);
         return;
       }
 
       const checkpointIds = checkpoints.map((cp) => cp.id);
+      console.log('Checkpoint IDs:', checkpointIds);
 
       // Get all teams that have progress in this hunt (teams that have started)
       // First get all teams with progress, then get their team info
@@ -79,8 +88,11 @@ export default function Leaderboard({ huntId, totalCheckpoints, compact = false 
         console.error('Error loading progress:', progressError);
       }
 
+      console.log('Progress data found:', progressData?.length || 0, progressData);
+
       // Get unique team IDs from progress
       const teamIdsWithProgress = new Set(progressData?.map(p => p.team_id) || []);
+      console.log('Team IDs with progress:', Array.from(teamIdsWithProgress));
       
       // Get all teams (or just teams with progress)
       const { data: teams, error: teamsError } = await supabase
@@ -89,9 +101,15 @@ export default function Leaderboard({ huntId, totalCheckpoints, compact = false 
 
       if (teamsError) {
         console.error('Error loading teams:', teamsError);
+        setEntries([]);
+        setIsLoading(false);
+        return;
       }
 
+      console.log('All teams found:', teams?.length || 0, teams);
+
       if (!teams || teams.length === 0) {
+        console.log('No teams found in database');
         setEntries([]);
         setIsLoading(false);
         return;
@@ -130,6 +148,8 @@ export default function Leaderboard({ huntId, totalCheckpoints, compact = false 
         }
       });
 
+      console.log('Team progress calculated:', Object.keys(teamProgress).length, teamProgress);
+
       // Sort by total points (desc), then by checkpoints completed (desc), then by unlocked count (desc), then by time (asc)
       const sorted = Object.values(teamProgress).sort((a, b) => {
         // First sort by points
@@ -150,9 +170,11 @@ export default function Leaderboard({ huntId, totalCheckpoints, compact = false 
         return new Date(a.last_completed_at).getTime() - new Date(b.last_completed_at).getTime();
       });
 
+      console.log('Sorted entries:', sorted.length, sorted);
       setEntries(sorted);
     } catch (err) {
       console.error('Error loading leaderboard:', err);
+      setEntries([]);
     } finally {
       setIsLoading(false);
     }

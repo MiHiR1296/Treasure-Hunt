@@ -36,6 +36,7 @@ export default function HuntPage() {
   const [currentCheckpoint, setCurrentCheckpoint] = useState<Checkpoint | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [newlyCompleted, setNewlyCompleted] = useState<Set<string>>(new Set());
+  const [teamPoints, setTeamPoints] = useState(0);
 
   useEffect(() => {
     if (!teamLoading && !team) {
@@ -81,11 +82,17 @@ export default function HuntPage() {
       if (team) {
         const { data: progressData } = await supabase
           .from('progress')
-          .select('checkpoint_id, completed_at')
+          .select('checkpoint_id, completed_at, points_earned')
           .eq('team_id', team.id);
 
         const completed = new Set(progressData?.map((p) => p.checkpoint_id) || []);
         setCompletedCheckpoints(completed);
+
+        // Calculate total team points from completed checkpoints
+        const totalPoints = progressData
+          ?.filter((p) => p.completed_at)
+          .reduce((sum, p) => sum + (p.points_earned || 0), 0) || 0;
+        setTeamPoints(totalPoints);
 
         // Find current checkpoint (first incomplete)
         const current = checkpointsData?.find((cp) => !completed.has(cp.id));
@@ -155,7 +162,9 @@ export default function HuntPage() {
             <p className="text-sm md:text-base text-gray-600 mb-4">{hunt.description}</p>
           )}
           <div className="flex items-center gap-4 text-xs md:text-sm text-gray-500">
-            <span>Team: <span className="font-semibold">{team.name}</span></span>
+            <span>Team: <span className="font-semibold text-gray-900">{team.name}</span></span>
+            <span>•</span>
+            <span>Points: <span className="font-semibold text-indigo-600">{teamPoints}</span></span>
           </div>
         </div>
 

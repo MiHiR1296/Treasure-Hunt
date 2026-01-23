@@ -28,8 +28,11 @@ interface Checkpoint {
   title: string;
   description: string | null;
   order_index: number;
-  clue_text: string;
-  hint_text: string | null;
+  clue_text?: string; // Kept for backward compatibility, not used in UI
+  hint_text?: string | null; // Kept for backward compatibility, not used in UI
+  hint_1?: string | null;
+  hint_2?: string | null;
+  hint_3?: string | null;
   unlock_method: string;
   qr_code_value: string | null;
   manual_code: string | null;
@@ -88,8 +91,9 @@ export default function AdminPage() {
   const [checkpointTitle, setCheckpointTitle] = useState('');
   const [checkpointDescription, setCheckpointDescription] = useState('');
   const [checkpointOrder, setCheckpointOrder] = useState(1);
-  const [checkpointClue, setCheckpointClue] = useState('');
-  const [checkpointHint, setCheckpointHint] = useState('');
+  const [checkpointHint1, setCheckpointHint1] = useState('');
+  const [checkpointHint2, setCheckpointHint2] = useState('');
+  const [checkpointHint3, setCheckpointHint3] = useState('');
   const [checkpointUnlockMethod, setCheckpointUnlockMethod] = useState<'qr_code' | 'gps' | 'manual_code'>('manual_code');
   const [checkpointQRCode, setCheckpointQRCode] = useState('');
   const [checkpointManualCode, setCheckpointManualCode] = useState('');
@@ -238,11 +242,12 @@ export default function AdminPage() {
         title: checkpointTitle,
         description: checkpointDescription || null,
         order_index: checkpointOrder,
-        clue_text: checkpointClue,
-        hint_text: checkpointHint || null,
+        hint_1: checkpointHint1 || null,
+        hint_2: checkpointHint2 || null,
+        hint_3: checkpointHint3 || null,
         unlock_method: checkpointUnlockMethod,
         use_puzzle_chain: usePuzzleChain,
-        points: 20, // Default points
+        points: parseInt(checkpointPoints) || 20,
       };
       if (checkpointUnlockMethod === 'qr_code') {
         checkpointData.qr_code_value = checkpointQRCode;
@@ -287,8 +292,9 @@ export default function AdminPage() {
       setCheckpointTitle('');
       setCheckpointDescription('');
       setCheckpointOrder(checkpointOrder + 1);
-      setCheckpointClue('');
-      setCheckpointHint('');
+      setCheckpointHint1('');
+      setCheckpointHint2('');
+      setCheckpointHint3('');
       setCheckpointQRCode('');
       setCheckpointManualCode('');
       setCheckpointLat('');
@@ -319,11 +325,12 @@ export default function AdminPage() {
         title: checkpointTitle,
         description: checkpointDescription || null,
         order_index: checkpointOrder,
-        clue_text: checkpointClue,
-        hint_text: checkpointHint || null,
+        hint_1: checkpointHint1 || null,
+        hint_2: checkpointHint2 || null,
+        hint_3: checkpointHint3 || null,
         unlock_method: checkpointUnlockMethod,
         use_puzzle_chain: usePuzzleChain,
-        points: 20, // Default points
+        points: parseInt(checkpointPoints) || 20,
       };
       if (checkpointUnlockMethod === 'qr_code') {
         checkpointData.qr_code_value = checkpointQRCode;
@@ -386,14 +393,14 @@ export default function AdminPage() {
       setCheckpointDescription('');
       setCheckpointOrder(1);
       setCheckpointPoints('20');
-      setCheckpointClue('');
-      setCheckpointHint('');
+      setCheckpointHint1('');
+      setCheckpointHint2('');
+      setCheckpointHint3('');
       setCheckpointQRCode('');
       setCheckpointManualCode('');
       setCheckpointLat('');
       setCheckpointLng('');
       setCheckpointRadius('50');
-      setCheckpointPoints('20');
       setUsePuzzleChain(false);
       setPuzzleSteps([]);
       loadCheckpoints();
@@ -410,8 +417,9 @@ export default function AdminPage() {
     setCheckpointTitle(checkpoint.title);
     setCheckpointDescription(checkpoint.description || '');
     setCheckpointOrder(checkpoint.order_index);
-    setCheckpointClue(checkpoint.clue_text);
-    setCheckpointHint(checkpoint.hint_text || '');
+    setCheckpointHint1(checkpoint.hint_1 || '');
+    setCheckpointHint2(checkpoint.hint_2 || '');
+    setCheckpointHint3(checkpoint.hint_3 || '');
     setCheckpointUnlockMethod(checkpoint.unlock_method as 'qr_code' | 'gps' | 'manual_code');
     setCheckpointQRCode(checkpoint.qr_code_value || '');
     setCheckpointManualCode(checkpoint.manual_code || '');
@@ -791,15 +799,46 @@ export default function AdminPage() {
                         rows={2}
                       />
                     </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Hint Text (Optional)</label>
-                      <textarea
-                        value={checkpointHint}
-                        onChange={(e) => setCheckpointHint(e.target.value)}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base text-gray-900 bg-white"
-                        rows={2}
-                        placeholder="A helpful hint if teams get stuck"
-                      />
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Hint 1 (Costs 5 points)
+                        </label>
+                        <textarea
+                          value={checkpointHint1}
+                          onChange={(e) => setCheckpointHint1(e.target.value)}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base text-gray-900 bg-white"
+                          rows={2}
+                          placeholder="First hint for this checkpoint"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Hint 2 (Costs 5 points)
+                        </label>
+                        <textarea
+                          value={checkpointHint2}
+                          onChange={(e) => setCheckpointHint2(e.target.value)}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base text-gray-900 bg-white"
+                          rows={2}
+                          placeholder="Second hint for this checkpoint"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Hint 3 (Costs 5 points)
+                        </label>
+                        <textarea
+                          value={checkpointHint3}
+                          onChange={(e) => setCheckpointHint3(e.target.value)}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base text-gray-900 bg-white"
+                          rows={2}
+                          placeholder="Third hint for this checkpoint"
+                        />
+                      </div>
+                      <p className="text-xs text-gray-500">
+                        Each hint costs 5 points. Teams can use up to 3 hints per checkpoint.
+                      </p>
                     </div>
                     <div className="flex items-center gap-2 p-4 bg-indigo-50 border border-indigo-200 rounded-lg">
                       <input
@@ -815,27 +854,15 @@ export default function AdminPage() {
                         className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
                       />
                       <label htmlFor="usePuzzleChain" className="text-sm font-medium text-gray-700 cursor-pointer">
-                        Use Puzzle Chain (instead of simple text clue)
+                        Use Puzzle Chain (instead of simple question)
                       </label>
                     </div>
-                    {usePuzzleChain ? (
+                    {usePuzzleChain && (
                       <div className="p-4 bg-gray-50 border border-gray-300 rounded-lg">
                         <PuzzleChainBuilder
                           steps={puzzleSteps}
                           onChange={setPuzzleSteps}
                           checkpointId={editingCheckpoint?.id}
-                        />
-                      </div>
-                    ) : (
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Clue Text</label>
-                        <textarea
-                          value={checkpointClue}
-                          onChange={(e) => setCheckpointClue(e.target.value)}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base text-gray-900 bg-white"
-                          rows={3}
-                          required={!usePuzzleChain}
-                          placeholder="The riddle or clue that leads to the next location"
                         />
                       </div>
                     )}
@@ -932,8 +959,9 @@ export default function AdminPage() {
                             setCheckpointTitle('');
                             setCheckpointDescription('');
                             setCheckpointOrder(1);
-                            setCheckpointClue('');
-                            setCheckpointHint('');
+                            setCheckpointHint1('');
+                            setCheckpointHint2('');
+                            setCheckpointHint3('');
                             setCheckpointQRCode('');
                             setCheckpointManualCode('');
                             setCheckpointLat('');

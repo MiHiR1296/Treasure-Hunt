@@ -10,13 +10,18 @@ import ManualCodeInput from '@/components/ManualCodeInput';
 import ClueDisplay from '@/components/ClueDisplay';
 import PuzzleChainRenderer from '@/components/puzzles/PuzzleChainRenderer';
 import ErrorPopup from '@/components/ErrorPopup';
+import SuccessPopup from '@/components/SuccessPopup';
+import HintsModal from '@/components/HintsModal';
 
 interface Checkpoint {
   id: string;
   title: string;
   description: string | null;
-  clue_text: string;
-  hint_text: string | null;
+  clue_text?: string; // Kept for backward compatibility
+  hint_text?: string | null; // Kept for backward compatibility
+  hint_1?: string | null;
+  hint_2?: string | null;
+  hint_3?: string | null;
   unlock_method: 'qr_code' | 'gps' | 'manual_code';
   qr_code_value: string | null;
   manual_code: string | null;
@@ -39,6 +44,9 @@ export default function CheckpointPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [showErrorPopup, setShowErrorPopup] = useState(false);
+  const [showSuccessPopup, setShowSuccessPopup] = useState(false);
+  const [showHintsModal, setShowHintsModal] = useState(false);
+  const [currentPoints, setCurrentPoints] = useState(20);
 
   useEffect(() => {
     if (!team) {
@@ -60,6 +68,7 @@ export default function CheckpointPage() {
 
       if (fetchError) throw fetchError;
       setCheckpoint(data);
+      setCurrentPoints(data.points || 20);
     } catch (err: any) {
       console.error('Error loading checkpoint:', err);
       setError(err.message || 'Failed to load checkpoint');
@@ -106,11 +115,17 @@ export default function CheckpointPage() {
 
       if (progressError) throw progressError;
 
-      setIsUnlocked(true);
+      // Show success popup, then redirect
+      setShowSuccessPopup(true);
     } catch (err: any) {
       console.error('Error unlocking checkpoint:', err);
       setError(err.message || 'Failed to unlock checkpoint');
     }
+  };
+
+  const handleSuccessPopupClose = () => {
+    setShowSuccessPopup(false);
+    router.push(`/hunt/${huntId}`);
   };
 
   const handleQRScan = (decodedText: string) => {
@@ -169,43 +184,39 @@ export default function CheckpointPage() {
     );
   }
 
+  const hasHints = checkpoint.hint_1 || checkpoint.hint_2 || checkpoint.hint_3;
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-3 md:p-4">
       <div className="max-w-2xl mx-auto">
-        <div className="bg-white rounded-2xl shadow-xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
-          <div>
+        <div className="bg-white rounded-2xl shadow-xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6 relative">
+          {/* Points Display - Top Right */}
+          <div className="absolute top-4 right-4">
+            <div className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white px-4 py-2 rounded-lg shadow-lg">
+              <p className="text-xs opacity-90">Points</p>
+              <p className="text-2xl font-bold">{currentPoints}</p>
+            </div>
+          </div>
+
+          <div className="pr-24">
             <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-2">{checkpoint.title}</h1>
             {checkpoint.description && (
               <p className="text-sm md:text-base text-gray-600 mb-4">{checkpoint.description}</p>
             )}
           </div>
 
-          {/* Hints Section - Show before unlocking */}
-          {checkpoint.hint_text && (
-            <div className="bg-yellow-50 border-2 border-yellow-200 rounded-xl p-4 md:p-6">
-              <div className="flex items-start gap-3">
-                <div className="text-2xl">💡</div>
-                <div className="flex-1">
-                  <h3 className="font-semibold text-yellow-900 mb-2">Hints Available</h3>
-                  <p className="text-sm text-yellow-800 mb-3">
-                    This checkpoint has hints available. You can use up to 3 hints, but each hint will deduct 5 points from your total.
-                  </p>
-                  {!isUnlocked && (
-                    <div className="bg-yellow-100 border border-yellow-300 rounded-lg p-3">
-                      <p className="text-sm text-yellow-900 font-medium">
-                        🔒 Unlock this checkpoint to access hints
-                      </p>
-                    </div>
-                  )}
-                  {isUnlocked && (
-                    <div className="bg-green-100 border border-green-300 rounded-lg p-3">
-                      <p className="text-sm text-green-900 font-medium">
-                        ✅ Checkpoint unlocked! Hints are now available below.
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </div>
+          {/* Show Hints Button - Before Unlock */}
+          {hasHints && !isUnlocked && (
+            <div className="bg-yellow-50 border-2 border-yellow-200 rounded-xl p-4">
+              <button
+                onClick={() => setShowHintsModal(true)}
+                className="w-full bg-yellow-500 text-white py-3 rounded-lg font-semibold hover:bg-yellow-600 transition-colors text-base"
+              >
+                💡 Show Hints for This Checkpoint
+              </button>
+              <p className="text-xs text-yellow-700 mt-2 text-center">
+                Each hint costs 5 points. You can use up to 3 hints.
+              </p>
             </div>
           )}
 
@@ -237,11 +248,32 @@ export default function CheckpointPage() {
             ) : (
               <ClueDisplay
                 checkpointId={checkpointId}
-                hintText={checkpoint.hint_text}
+                hint1={checkpoint.hint_1}
+                hint2={checkpoint.hint_2}
+                hint3={checkpoint.hint_3}
                 onNext={handleNext}
                 checkpointPoints={checkpoint.points || 20}
               />
             )
+          )}
+
+          {showSuccessPopup && (
+            <SuccessPopup
+              message="Checkpoint Unlocked!"
+              onClose={handleSuccessPopupClose}
+            />
+          )}
+
+          {showHintsModal && (
+            <HintsModal
+              checkpointId={checkpointId}
+              hint1={checkpoint.hint_1}
+              hint2={checkpoint.hint_2}
+              hint3={checkpoint.hint_3}
+              checkpointPoints={checkpoint.points || 20}
+              onClose={() => setShowHintsModal(false)}
+              onPointsUpdate={setCurrentPoints}
+            />
           )}
 
           {showErrorPopup && (
