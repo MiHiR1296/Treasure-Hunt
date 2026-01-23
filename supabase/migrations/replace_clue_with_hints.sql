@@ -1,6 +1,10 @@
 -- Replace clue_text and hint_text with 3 separate hint columns
 -- Run this in Supabase SQL Editor
 
+-- Make clue_text nullable (we're no longer using it)
+ALTER TABLE checkpoints 
+  ALTER COLUMN clue_text DROP NOT NULL;
+
 -- Add 3 hint columns
 ALTER TABLE checkpoints 
   ADD COLUMN IF NOT EXISTS hint_1 text,
