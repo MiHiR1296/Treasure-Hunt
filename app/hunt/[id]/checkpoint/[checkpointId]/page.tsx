@@ -183,11 +183,18 @@ export default function CheckpointPage() {
   const handleCodeSubmit = (code: string) => {
     if (!checkpoint) return;
 
-    if (code.toLowerCase() === checkpoint.manual_code?.toLowerCase()) {
+    // Trim and normalize both codes for comparison
+    const enteredCode = code.trim().toLowerCase();
+    const expectedCode = checkpoint.manual_code?.trim().toLowerCase();
+
+    console.log('Code comparison:', { enteredCode, expectedCode, match: enteredCode === expectedCode });
+
+    if (enteredCode === expectedCode) {
       setError(''); // Clear any previous errors
       setShowErrorPopup(false); // Close error popup if open
       handleUnlock();
     } else {
+      console.log('Code mismatch - showing error popup');
       setShowErrorPopup(true);
     }
   };
