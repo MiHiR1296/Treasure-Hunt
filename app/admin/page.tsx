@@ -543,13 +543,24 @@ export default function AdminPage() {
         {/* Header */}
         <div className="bg-white rounded-2xl shadow-xl p-6 mb-6">
           <div className="flex items-center justify-between">
-            <h1 className="text-3xl font-bold text-gray-900">Admin Panel</h1>
-            <button
-              onClick={() => setIsAuthenticated(false)}
-              className="text-red-600 hover:text-red-700 font-semibold"
-            >
-              Logout
-            </button>
+            <div>
+              <h1 className="text-3xl font-bold text-gray-900">Admin Panel</h1>
+              <p className="text-sm text-gray-600 mt-1">Manage hunts, checkpoints, and teams</p>
+            </div>
+            <div className="flex gap-3 items-center">
+              <Link
+                href="/"
+                className="text-indigo-600 hover:text-indigo-700 font-semibold"
+              >
+                ← Back to Home
+              </Link>
+              <button
+                onClick={() => setIsAuthenticated(false)}
+                className="text-red-600 hover:text-red-700 font-semibold"
+              >
+                Logout
+              </button>
+            </div>
           </div>
 
           {/* Tabs */}
