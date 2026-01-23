@@ -146,48 +146,64 @@ export default function ClueDisplay({
         )}
       </div>
 
-      {/* Hint Section */}
-      {hintText && hintsAvailable > 0 && !showHint && (
-        <div className="bg-yellow-50 border-2 border-yellow-200 rounded-xl p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="font-semibold text-yellow-900 mb-1">
-                💡 Need a Hint?
-              </p>
-              <p className="text-sm text-yellow-700">
-                {hintsAvailable} hint{hintsAvailable !== 1 ? 's' : ''} available
-              </p>
+      {/* Hint Section - Always show if hintText exists */}
+      {hintText && (
+        <>
+          {hintsAvailable > 0 && !showHint && (
+            <div className="bg-yellow-50 border-2 border-yellow-200 rounded-xl p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-semibold text-yellow-900 mb-1">
+                    💡 Need a Hint?
+                  </p>
+                  <p className="text-sm text-yellow-700">
+                    {hintsAvailable} hint{hintsAvailable !== 1 ? 's' : ''} available
+                  </p>
+                </div>
+                <button
+                  onClick={handleRequestHint}
+                  className="px-4 py-2 bg-yellow-500 text-white rounded-lg font-semibold hover:bg-yellow-600 transition-colors"
+                >
+                  Use Hint (-5 pts)
+                </button>
+              </div>
             </div>
-            <button
-              onClick={handleRequestHint}
-              className="px-4 py-2 bg-yellow-500 text-white rounded-lg font-semibold hover:bg-yellow-600 transition-colors"
-            >
-              Use Hint (-5 pts)
-            </button>
-          </div>
+          )}
+
+          {showHint && (
+            <div className="bg-yellow-50 border-2 border-yellow-200 rounded-xl p-6">
+              <h4 className="text-lg font-semibold text-yellow-900 mb-2">💡 Hint:</h4>
+              <p className="text-yellow-800">{hintText}</p>
+            </div>
+          )}
+
+          {hintsAvailable === 0 && !showHint && hintText && (
+            <div className="bg-gray-100 border border-gray-300 rounded-xl p-4 text-center">
+              <p className="text-gray-600">No hints remaining (3/3 used)</p>
+            </div>
+          )}
+        </>
+      )}
+
+      {!hintText && (
+        <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4 text-center">
+          <p className="text-blue-800">No hints available for this checkpoint</p>
         </div>
       )}
 
-      {showHint && hintText && (
-        <div className="bg-yellow-50 border-2 border-yellow-200 rounded-xl p-6">
-          <h4 className="text-lg font-semibold text-yellow-900 mb-2">💡 Hint:</h4>
-          <p className="text-yellow-800">{hintText}</p>
-        </div>
-      )}
-
-      {hintsAvailable === 0 && !showHint && (
-        <div className="bg-gray-100 border border-gray-300 rounded-xl p-4 text-center">
-          <p className="text-gray-600">No hints remaining (3/3 used)</p>
-        </div>
-      )}
-
-      {/* Next Button */}
-      <button
-        onClick={handleComplete}
-        className="w-full bg-green-600 text-white py-3 rounded-lg font-semibold hover:bg-green-700 transition-colors text-lg"
-      >
-        Next Checkpoint →
-      </button>
+      {/* Complete/Next Button - Always visible */}
+      <div className="space-y-3">
+        <button
+          onClick={handleComplete}
+          className="w-full bg-green-600 text-white py-3 rounded-lg font-semibold hover:bg-green-700 transition-colors text-lg disabled:opacity-50 disabled:cursor-not-allowed"
+          disabled={showConfetti}
+        >
+          {showConfetti ? 'Completing...' : 'Mark as Complete & Next Checkpoint →'}
+        </button>
+        <p className="text-xs text-gray-500 text-center">
+          Click to mark this checkpoint as completed and proceed to the next one
+        </p>
+      </div>
 
       {/* Confirmation Dialog */}
       {showConfirmation && (
