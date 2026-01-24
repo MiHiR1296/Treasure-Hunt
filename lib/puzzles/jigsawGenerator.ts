@@ -191,42 +191,42 @@ export function generateInterlockingPieces(
       
       clipPath.closePath();
       
-      // Calculate the source region from the original image
-      // We need the piece area plus padding on all sides for tabs
+      // Use clip() method - this is the standard approach for jigsaw puzzles
+      // First, set up the clipping region
+      pieceCtx.save();
+      pieceCtx.clip(clipPath);
+      
+      // Now draw the image - it will be automatically clipped to the piece shape
+      // Calculate source region (piece area + padding for tabs that extend beyond)
       const sourceX = Math.max(0, offsetX - padding);
       const sourceY = Math.max(0, offsetY - padding);
-      const sourceWidth = Math.min(image.width - sourceX, pieceWidth + padding * 2);
-      const sourceHeight = Math.min(image.height - sourceY, pieceHeight + padding * 2);
+      const sourceEndX = Math.min(image.width, offsetX + pieceWidth + padding);
+      const sourceEndY = Math.min(image.height, offsetY + pieceHeight + padding);
+      const sourceWidth = sourceEndX - sourceX;
+      const sourceHeight = sourceEndY - sourceY;
       
-      // Calculate where to draw this image portion in the piece canvas
-      // The piece's center (at padding, padding) should align with the image's piece center (at offsetX, offsetY)
+      // Calculate destination - align the piece center with image piece center
+      // The piece center in canvas is at (padding, padding)
+      // The piece center in image is at (offsetX + pieceWidth/2, offsetY + pieceHeight/2)
+      // So we need to draw the image so these centers align
       const destX = padding - (offsetX - sourceX);
       const destY = padding - (offsetY - sourceY);
       
-      // Step 1: Draw the image portion to the piece canvas
-      // Draw the exact image region that corresponds to this piece (with padding for tabs)
+      // Draw the image portion - it will be clipped to the piece shape automatically
       pieceCtx.drawImage(
         fullCanvas,
-        sourceX,           // Source X in original image
-        sourceY,           // Source Y in original image
-        sourceWidth,       // Source width
-        sourceHeight,      // Source height
-        destX,             // Destination X in piece canvas
-        destY,           // Destination Y in piece canvas
-        sourceWidth,       // Destination width (same as source)
-        sourceHeight       // Destination height (same as source)
+        sourceX,
+        sourceY,
+        sourceWidth,
+        sourceHeight,
+        destX,
+        destY,
+        sourceWidth,
+        sourceHeight
       );
       
-      // Step 2: Apply clipping mask using the piece path
-      // This will show only the piece shape (with tabs), hiding the rest
-      pieceCtx.save();
-      pieceCtx.globalCompositeOperation = 'destination-in';
-      pieceCtx.fillStyle = 'black';
-      pieceCtx.fill(clipPath);
+      // Restore context (removes clip)
       pieceCtx.restore();
-      
-      // Step 3: Reset composite operation and draw outline
-      pieceCtx.globalCompositeOperation = 'source-over';
       pieceCtx.strokeStyle = '#e5e7eb';
       pieceCtx.lineWidth = 1;
       pieceCtx.stroke(clipPath);
