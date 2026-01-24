@@ -195,36 +195,35 @@ export function generateInterlockingPieces(
       
       clipPath.closePath();
       
-      // Draw the piece image first, then clip
-      // We need to draw the full image area that this piece covers, including padding for tabs
-      const sourceStartX = Math.max(0, offsetX - padding);
-      const sourceStartY = Math.max(0, offsetY - padding);
-      const sourceEndX = Math.min(image.width, offsetX + pieceWidth + padding);
-      const sourceEndY = Math.min(image.height, offsetY + pieceHeight + padding);
-      const sourceWidth = sourceEndX - sourceStartX;
-      const sourceHeight = sourceEndY - sourceStartY;
+      // Draw the piece image with proper clipping
+      // First, draw the image portion that corresponds to this piece
+      // We need to account for padding when extracting from source
+      const sourceX = Math.max(0, offsetX - padding);
+      const sourceY = Math.max(0, offsetY - padding);
+      const sourceWidth = Math.min(image.width - sourceX, pieceWidth + padding * 2);
+      const sourceHeight = Math.min(image.height - sourceY, pieceHeight + padding * 2);
       
-      // Draw the full image portion first (before clipping)
+      // Draw the image to fill the entire canvas (including padding area)
       pieceCtx.drawImage(
         fullCanvas,
-        sourceStartX,
-        sourceStartY,
+        sourceX,
+        sourceY,
         sourceWidth,
         sourceHeight,
-        Math.max(0, padding - (offsetX - sourceStartX)),
-        Math.max(0, padding - (offsetY - sourceStartY)),
-        sourceWidth,
-        sourceHeight
+        0, // Draw from top-left of canvas
+        0,
+        pieceCanvas.width, // Fill entire canvas
+        pieceCanvas.height
       );
       
-      // Now apply clipping to show only the piece shape
+      // Now apply the clip path to mask the image to the piece shape
       pieceCtx.save();
       pieceCtx.globalCompositeOperation = 'destination-in';
       pieceCtx.fillStyle = 'black';
       pieceCtx.fill(clipPath);
       pieceCtx.restore();
       
-      // Reset composite operation
+      // Reset composite operation for outline drawing
       pieceCtx.globalCompositeOperation = 'source-over';
       
       // Draw outline for better visibility
