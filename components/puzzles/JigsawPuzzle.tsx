@@ -133,8 +133,6 @@ export default function JigsawPuzzle({
       interact(element)
         .draggable({
           // Better mobile touch support
-          allowFrom: null,
-          ignoreFrom: null,
           listeners: {
             start: () => {
               setDraggedPieceId(piece.id);
