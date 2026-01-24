@@ -126,8 +126,9 @@ export default function Leaderboard({ huntId, totalCheckpoints, compact = false 
           const unlockedCheckpoints = teamProgressData.filter((p) => p.unlocked_at).length;
           const totalPoints = teamProgressData.reduce((sum, p) => {
             // Only count points from completed checkpoints
-            if (p.completed_at && p.points_earned !== null && p.points_earned !== undefined) {
-              return sum + p.points_earned;
+            // Handle both null/undefined and 0 values correctly
+            if (p.completed_at && p.points_earned != null) {
+              return sum + (p.points_earned || 0);
             }
             return sum;
           }, 0);

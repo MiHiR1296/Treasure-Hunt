@@ -153,25 +153,39 @@ export default function JoinPage() {
         return;
       }
 
-      // Create user and link to team
-      const { data: newUser, error: userError } = await supabase
+      // Check if user with same name and team already exists
+      const { data: existingUser, error: existingUserError } = await supabase
         .from('users')
-        .insert({
-          name: userName.trim(),
-          team_id: team.id
-        })
         .select('id, name, team_id')
-        .single();
+        .eq('name', userName.trim())
+        .eq('team_id', team.id)
+        .maybeSingle();
 
-      if (userError) {
-        // If users table doesn't exist yet, continue without user
-        console.warn('Could not create user:', userError);
+      let userToSet = existingUser;
+
+      // If user doesn't exist, create a new one
+      if (!existingUser && !existingUserError) {
+        const { data: newUser, error: userError } = await supabase
+          .from('users')
+          .insert({
+            name: userName.trim(),
+            team_id: team.id
+          })
+          .select('id, name, team_id')
+          .single();
+
+        if (userError) {
+          // If users table doesn't exist yet, continue without user
+          console.warn('Could not create user:', userError);
+        } else {
+          userToSet = newUser;
+        }
       }
 
       // Store in context
       setTeam({ id: team.id, name: team.name });
-      if (newUser) {
-        setUser(newUser);
+      if (userToSet) {
+        setUser(userToSet);
       }
 
       // Redirect to hunts list

@@ -174,87 +174,96 @@ export default function HuntPage() {
           <ProgressBar current={completedCount} total={totalCheckpoints} />
         </div>
 
-        {/* Team Members */}
-        <TeamMembersDisplay />
+        {/* Two-column layout: Checkpoints on left, Leaderboard + Team Members on right */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
+          {/* Left column: Checkpoints */}
+          <div className="lg:col-span-2 space-y-4 md:space-y-6">
+            {/* Completed Checkpoints List */}
+            {checkpoints
+              .filter((cp) => completedCheckpoints.has(cp.id))
+              .map((cp) => (
+                <div
+                  key={cp.id}
+                  className={`bg-white rounded-2xl shadow-xl p-4 md:p-6 transition-all duration-500 ${
+                    newlyCompleted.has(cp.id)
+                      ? 'animate-checkmark-in border-2 border-green-400'
+                      : 'border border-gray-200'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    {newlyCompleted.has(cp.id) ? (
+                      <div className="text-3xl animate-bounce">✅</div>
+                    ) : (
+                      <div className="text-2xl">✓</div>
+                    )}
+                    <div className="flex-1">
+                      <h3 className="text-lg md:text-xl font-semibold text-gray-800 line-through opacity-60">
+                        {cp.order_index}. {cp.title}
+                      </h3>
+                      {cp.description && (
+                        <p className="text-sm text-gray-500 line-through opacity-60">{cp.description}</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
 
-        {/* Completed Checkpoints List */}
-        {checkpoints
-          .filter((cp) => completedCheckpoints.has(cp.id))
-          .map((cp) => (
-            <div
-              key={cp.id}
-              className={`bg-white rounded-2xl shadow-xl p-4 md:p-6 transition-all duration-500 ${
-                newlyCompleted.has(cp.id)
-                  ? 'animate-checkmark-in border-2 border-green-400'
-                  : 'border border-gray-200'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                {newlyCompleted.has(cp.id) ? (
-                  <div className="text-3xl animate-bounce">✅</div>
-                ) : (
-                  <div className="text-2xl">✓</div>
-                )}
-                <div className="flex-1">
-                  <h3 className="text-lg md:text-xl font-semibold text-gray-800 line-through opacity-60">
-                    {cp.order_index}. {cp.title}
-                  </h3>
-                  {cp.description && (
-                    <p className="text-sm text-gray-500 line-through opacity-60">{cp.description}</p>
-                  )}
+            {/* Current Checkpoint */}
+            {currentCheckpoint ? (
+              <div
+                className={`bg-white rounded-2xl shadow-xl p-4 md:p-6 transition-all duration-500 ${
+                  newlyCompleted.size > 0
+                    ? 'animate-fade-in-scale border-2 border-indigo-400'
+                    : ''
+                }`}
+              >
+                <h2 className="text-xl md:text-2xl font-bold text-gray-900 mb-4">Current Checkpoint</h2>
+                <div className="space-y-4">
+                  <div>
+                    <h3 className="text-lg md:text-xl font-semibold text-gray-800 mb-2">
+                      {currentCheckpoint.order_index}. {currentCheckpoint.title}
+                    </h3>
+                    {currentCheckpoint.description && (
+                      <p className="text-sm md:text-base text-gray-600 mb-4">{currentCheckpoint.description}</p>
+                    )}
+                  </div>
+                  <Link
+                    href={`/hunt/${huntId}/checkpoint/${currentCheckpoint.id}`}
+                    className="block w-full bg-indigo-600 text-white py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors text-center text-base"
+                  >
+                    Start →
+                  </Link>
                 </div>
               </div>
-            </div>
-          ))}
-
-        {/* Current Checkpoint */}
-        {currentCheckpoint ? (
-          <div
-            className={`bg-white rounded-2xl shadow-xl p-4 md:p-6 transition-all duration-500 ${
-              newlyCompleted.size > 0
-                ? 'animate-fade-in-scale border-2 border-indigo-400'
-                : ''
-            }`}
-          >
-            <h2 className="text-xl md:text-2xl font-bold text-gray-900 mb-4">Current Checkpoint</h2>
-            <div className="space-y-4">
-              <div>
-                <h3 className="text-lg md:text-xl font-semibold text-gray-800 mb-2">
-                  {currentCheckpoint.order_index}. {currentCheckpoint.title}
-                </h3>
-                {currentCheckpoint.description && (
-                  <p className="text-sm md:text-base text-gray-600 mb-4">{currentCheckpoint.description}</p>
-                )}
+            ) : (
+              <div className="bg-green-50 border-2 border-green-200 rounded-2xl shadow-xl p-6 md:p-8 text-center">
+                <h2 className="text-xl md:text-2xl font-bold text-green-900 mb-2">🎉 Congratulations!</h2>
+                <p className="text-sm md:text-base text-green-800">You've completed all checkpoints!</p>
               </div>
+            )}
+
+            {/* Quick Actions */}
+            <div className="flex justify-center">
               <Link
-                href={`/hunt/${huntId}/checkpoint/${currentCheckpoint.id}`}
-                className="block w-full bg-indigo-600 text-white py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors text-center text-base"
+                href={`/hunt/${huntId}/leaderboard`}
+                className="bg-white rounded-xl shadow-lg p-4 md:p-6 hover:shadow-xl transition-shadow text-center min-w-[200px]"
               >
-                Start →
+                <span className="text-2xl mb-2 block">🏆</span>
+                <span className="font-semibold text-gray-900 text-sm md:text-base">Leaderboard</span>
               </Link>
             </div>
           </div>
-        ) : (
-          <div className="bg-green-50 border-2 border-green-200 rounded-2xl shadow-xl p-6 md:p-8 text-center">
-            <h2 className="text-xl md:text-2xl font-bold text-green-900 mb-2">🎉 Congratulations!</h2>
-            <p className="text-sm md:text-base text-green-800">You've completed all checkpoints!</p>
+
+          {/* Right column: Leaderboard + Team Members */}
+          <div className="lg:col-span-1 space-y-4 md:space-y-6">
+            {/* Leaderboard Widget */}
+            <div className="bg-white rounded-2xl shadow-xl p-4 md:p-6">
+              <Leaderboard huntId={huntId} totalCheckpoints={totalCheckpoints} compact />
+            </div>
+
+            {/* Team Members */}
+            <TeamMembersDisplay />
           </div>
-        )}
-
-        {/* Quick Actions */}
-        <div className="flex justify-center">
-          <Link
-            href={`/hunt/${huntId}/leaderboard`}
-            className="bg-white rounded-xl shadow-lg p-4 md:p-6 hover:shadow-xl transition-shadow text-center min-w-[200px]"
-          >
-            <span className="text-2xl mb-2 block">🏆</span>
-            <span className="font-semibold text-gray-900 text-sm md:text-base">Leaderboard</span>
-          </Link>
-        </div>
-
-        {/* Leaderboard Widget */}
-        <div className="bg-white rounded-2xl shadow-xl p-4 md:p-6">
-          <Leaderboard huntId={huntId} totalCheckpoints={totalCheckpoints} compact />
         </div>
 
         {/* Game Tips */}

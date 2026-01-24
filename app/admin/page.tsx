@@ -1469,20 +1469,11 @@ function HuntLeaderboard({ hunt }: { hunt: Hunt }) {
 
       const { data: progress, error: progressError } = await supabase
         .from('progress')
-        .select('team_id, checkpoint_id, completed_at, unlocked_at, points_earned, user_id, individual_points_earned')
+        .select('team_id, checkpoint_id, completed_at, unlocked_at, points_earned')
         .in('checkpoint_id', checkpointIds);
 
       if (progressError) {
         console.error('Error loading progress:', progressError);
-      }
-
-      // Get all users for teams with progress
-      const { data: allUsers, error: usersError } = await supabase
-        .from('users')
-        .select('id, name, team_id');
-      
-      if (usersError) {
-        console.error('Error loading users:', usersError);
       }
 
       // Get unique team IDs that have progress
@@ -1497,31 +1488,12 @@ function HuntLeaderboard({ hunt }: { hunt: Hunt }) {
           const unlockedCheckpoints = teamProgressData.filter((p) => p.unlocked_at).length;
           const totalPoints = teamProgressData.reduce((sum, p) => {
             // Only count points from completed checkpoints
-            if (p.completed_at && p.points_earned !== null && p.points_earned !== undefined) {
-              return sum + p.points_earned;
+            // Handle both null/undefined and 0 values correctly
+            if (p.completed_at && p.points_earned != null) {
+              return sum + (p.points_earned || 0);
             }
             return sum;
           }, 0);
-          
-          // Calculate individual points for team members
-          const teamUsers = allUsers?.filter(u => u.team_id === team.id) || [];
-          const memberStats = teamUsers.map((teamUser) => {
-            const userProgress = teamProgressData.filter((p) => p.user_id === teamUser.id) || [];
-            const individualPoints = userProgress.reduce((sum, p) => {
-              if (p.completed_at && p.individual_points_earned) {
-                return sum + p.individual_points_earned;
-              }
-              return sum;
-            }, 0);
-            const userCheckpointsCompleted = userProgress.filter((p) => p.completed_at).length;
-            
-            return {
-              user_id: teamUser.id,
-              user_name: teamUser.name,
-              individual_points: individualPoints,
-              checkpoints_completed: userCheckpointsCompleted,
-            };
-          }).sort((a, b) => b.individual_points - a.individual_points);
           
           teamProgress[team.id] = {
             team_id: team.id,
@@ -1529,7 +1501,6 @@ function HuntLeaderboard({ hunt }: { hunt: Hunt }) {
             checkpoints_completed: completedCheckpoints,
             checkpoints_unlocked: unlockedCheckpoints,
             total_points: totalPoints,
-            members: memberStats,
           };
         }
       });
@@ -1554,7 +1525,7 @@ function HuntLeaderboard({ hunt }: { hunt: Hunt }) {
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-xl font-bold text-gray-900">{hunt.name}</h3>
         <Link
-          href={`/hunt/${hunt.id}/leaderboard`}
+          href={`/admin/leaderboard/${hunt.id}`}
           className="text-indigo-600 hover:text-indigo-700 font-semibold text-sm"
         >
           View Full Leaderboard →
@@ -1580,21 +1551,6 @@ function HuntLeaderboard({ hunt }: { hunt: Hunt }) {
                   </div>
                 </div>
               </div>
-              {entry.members && entry.members.length > 0 && (
-                <div className="mt-3 pt-3 border-t border-gray-300">
-                  <p className="text-xs font-medium text-gray-700 mb-2">Individual Points:</p>
-                  <div className="space-y-1">
-                    {entry.members.map((member: any) => (
-                      <div key={member.user_id} className="flex items-center justify-between text-xs">
-                        <span className="text-gray-600">{member.user_name}</span>
-                        <span className="font-semibold text-gray-800">
-                          {member.individual_points} pts ({member.checkpoints_completed} completed)
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
           );
         })}
