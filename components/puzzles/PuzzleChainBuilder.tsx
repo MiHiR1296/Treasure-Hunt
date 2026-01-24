@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { PuzzleType, AnswerType } from './types';
 
 export interface PuzzleStepConfig {
@@ -125,6 +125,13 @@ function PuzzleStepEditor({
   onMoveDown,
   checkpointId,
 }: PuzzleStepEditorProps) {
+  // Show answer section only if answer_value is set
+  const [showAnswer, setShowAnswer] = useState(!!(step.answer_value && step.answer_value.trim() !== ''));
+  
+  useEffect(() => {
+    // Update showAnswer when step changes
+    setShowAnswer(!!(step.answer_value && step.answer_value.trim() !== ''));
+  }, [step.answer_value]);
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -454,32 +461,55 @@ function PuzzleStepEditor({
 
         {renderPuzzleConfig()}
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Answer Type:
-            </label>
-            <select
-              value={step.answer_type}
-              onChange={(e) => onUpdate({ answer_type: e.target.value as AnswerType })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-            >
-              <option value="text">Text Answer</option>
-              <option value="qr_code">QR Code</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Answer Value:
-            </label>
+        <div className="border-t border-gray-200 pt-4">
+          <div className="flex items-center gap-2 mb-4">
             <input
-              type="text"
-              value={step.answer_value}
-              onChange={(e) => onUpdate({ answer_value: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-              placeholder={step.answer_type === 'qr_code' ? 'QR code value' : 'Expected answer'}
+              type="checkbox"
+              id={`showAnswer-${step.id}`}
+              checked={showAnswer}
+              onChange={(e) => {
+                setShowAnswer(e.target.checked);
+                if (!e.target.checked) {
+                  // Clear answer when hiding
+                  onUpdate({ answer_value: '', answer_type: 'text' });
+                }
+              }}
+              className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
             />
+            <label htmlFor={`showAnswer-${step.id}`} className="text-sm font-medium text-gray-700 cursor-pointer">
+              Require answer validation for this step
+            </label>
           </div>
+
+          {showAnswer && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Answer Type:
+                </label>
+                <select
+                  value={step.answer_type}
+                  onChange={(e) => onUpdate({ answer_type: e.target.value as AnswerType })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                >
+                  <option value="text">Text Answer</option>
+                  <option value="qr_code">QR Code</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Answer Value:
+                </label>
+                <input
+                  type="text"
+                  value={step.answer_value || ''}
+                  onChange={(e) => onUpdate({ answer_value: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                  placeholder={step.answer_type === 'qr_code' ? 'QR code value' : 'Expected answer'}
+                />
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

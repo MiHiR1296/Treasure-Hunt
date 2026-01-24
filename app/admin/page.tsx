@@ -1497,8 +1497,8 @@ function HuntLeaderboard({ hunt }: { hunt: Hunt }) {
           const unlockedCheckpoints = teamProgressData.filter((p) => p.unlocked_at).length;
           const totalPoints = teamProgressData.reduce((sum, p) => {
             // Only count points from completed checkpoints
-            if (p.completed_at && p.points_earned) {
-              return sum + (p.points_earned || 0);
+            if (p.completed_at && p.points_earned !== null && p.points_earned !== undefined) {
+              return sum + p.points_earned;
             }
             return sum;
           }, 0);

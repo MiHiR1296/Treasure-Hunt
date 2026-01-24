@@ -195,13 +195,8 @@ export function generateInterlockingPieces(
       
       clipPath.closePath();
       
-      // Apply clipping and draw piece
-      pieceCtx.save();
-      pieceCtx.clip(clipPath);
-      
-      // Draw the piece image - extract the correct portion from the full image
-      // The piece canvas has padding, so we need to draw the image portion that includes the padding
-      // Source coordinates in the full image
+      // Draw the piece image first, then clip
+      // We need to draw the full image area that this piece covers, including padding for tabs
       const sourceStartX = Math.max(0, offsetX - padding);
       const sourceStartY = Math.max(0, offsetY - padding);
       const sourceEndX = Math.min(image.width, offsetX + pieceWidth + padding);
@@ -209,23 +204,28 @@ export function generateInterlockingPieces(
       const sourceWidth = sourceEndX - sourceStartX;
       const sourceHeight = sourceEndY - sourceStartY;
       
-      // Destination coordinates in the piece canvas (accounting for padding)
-      const destX = padding - (offsetX - sourceStartX);
-      const destY = padding - (offsetY - sourceStartY);
-      
+      // Draw the full image portion first (before clipping)
       pieceCtx.drawImage(
         fullCanvas,
         sourceStartX,
         sourceStartY,
         sourceWidth,
         sourceHeight,
-        destX,
-        destY,
+        Math.max(0, padding - (offsetX - sourceStartX)),
+        Math.max(0, padding - (offsetY - sourceStartY)),
         sourceWidth,
         sourceHeight
       );
       
+      // Now apply clipping to show only the piece shape
+      pieceCtx.save();
+      pieceCtx.globalCompositeOperation = 'destination-in';
+      pieceCtx.fillStyle = 'black';
+      pieceCtx.fill(clipPath);
       pieceCtx.restore();
+      
+      // Reset composite operation
+      pieceCtx.globalCompositeOperation = 'source-over';
       
       // Draw outline for better visibility
       pieceCtx.strokeStyle = '#e5e7eb';

@@ -35,7 +35,8 @@ export default function PuzzleStepDisplay({
   };
 
   // Some puzzles auto-complete (like jigsaw), others need answer
-  const needsAnswer = step.answer_value && step.answer_type !== null;
+  // Only require answer if answer_value is set and not empty
+  const needsAnswer = step.answer_value && step.answer_value.trim() !== '';
   const canProceed = puzzleSolved && (!needsAnswer || answerCorrect);
 
   return (
