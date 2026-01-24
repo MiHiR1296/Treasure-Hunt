@@ -70,7 +70,7 @@ export default function PuzzleRenderer({ step, onSolved }: PuzzleRendererProps) 
           imageUrl={step.puzzle_image_url}
           words={config.words || []}
           targetWord={config.targetWord}
-          showWordsList={config.showWordsList !== false}
+          showWordsList={config.showWordsList === true}
           onAllWordsFound={onSolved}
         />
       );

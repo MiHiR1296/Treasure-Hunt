@@ -199,19 +199,30 @@ export function generateInterlockingPieces(
       pieceCtx.save();
       pieceCtx.clip(clipPath);
       
-      // Draw the piece image with correct offset to account for padding
-      // Source: extract from full image at the correct position
-      // Destination: draw to piece canvas
+      // Draw the piece image - extract the correct portion from the full image
+      // The piece canvas has padding, so we need to draw the image portion that includes the padding
+      // Source coordinates in the full image
+      const sourceStartX = Math.max(0, offsetX - padding);
+      const sourceStartY = Math.max(0, offsetY - padding);
+      const sourceEndX = Math.min(image.width, offsetX + pieceWidth + padding);
+      const sourceEndY = Math.min(image.height, offsetY + pieceHeight + padding);
+      const sourceWidth = sourceEndX - sourceStartX;
+      const sourceHeight = sourceEndY - sourceStartY;
+      
+      // Destination coordinates in the piece canvas (accounting for padding)
+      const destX = padding - (offsetX - sourceStartX);
+      const destY = padding - (offsetY - sourceStartY);
+      
       pieceCtx.drawImage(
         fullCanvas,
-        offsetX, // Source X (no padding offset needed)
-        offsetY, // Source Y (no padding offset needed)
-        pieceWidth, // Source width
-        pieceHeight, // Source height
-        clipX, // Destination X (with padding)
-        clipY, // Destination Y (with padding)
-        clipW, // Destination width
-        clipH // Destination height
+        sourceStartX,
+        sourceStartY,
+        sourceWidth,
+        sourceHeight,
+        destX,
+        destY,
+        sourceWidth,
+        sourceHeight
       );
       
       pieceCtx.restore();

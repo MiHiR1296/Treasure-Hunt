@@ -94,7 +94,7 @@ export default function CheckpointPage() {
         .select('checkpoint_id')
         .eq('team_id', team.id)
         .eq('checkpoint_id', checkpointId)
-        .single();
+        .maybeSingle();
 
       if (data) {
         setIsUnlocked(true);
@@ -120,7 +120,7 @@ export default function CheckpointPage() {
         .select('id')
         .eq('team_id', team.id)
         .eq('checkpoint_id', checkpointId)
-        .single();
+        .maybeSingle();
 
       if (existingProgress) {
         // Already unlocked, just show success and redirect

@@ -12,17 +12,21 @@ interface WordSearchPuzzleProps {
   onAllWordsFound?: () => void;
 }
 
-interface MarkedWord {
+interface HighlightedWord {
   word: string;
-  path: { x: number; y: number }[];
-  color: string;
+  startX: number;
+  startY: number;
+  endX: number;
+  endY: number;
+  direction: 'horizontal' | 'vertical' | 'diagonal';
+  isValid: boolean;
 }
 
 export default function WordSearchPuzzle({
   imageUrl,
   words = [],
   targetWord,
-  showWordsList = true,
+  showWordsList = false,
   onWordFound,
   onAllWordsFound,
 }: WordSearchPuzzleProps) {
@@ -30,9 +34,9 @@ export default function WordSearchPuzzle({
   const [selectedWord, setSelectedWord] = useState<string>('');
   const [isDrawing, setIsDrawing] = useState(false);
   const [currentPath, setCurrentPath] = useState<{ x: number; y: number }[]>([]);
-  const [markedWords, setMarkedWords] = useState<MarkedWord[]>([]);
+  const [highlightedWords, setHighlightedWords] = useState<HighlightedWord[]>([]);
+  const [pendingHighlight, setPendingHighlight] = useState<HighlightedWord | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const imageRef = useRef<HTMLDivElement>(null);
   const imageContainerRef = useRef<HTMLDivElement>(null);
 
   // Load image and setup canvas
@@ -50,12 +54,13 @@ export default function WordSearchPuzzle({
       // Set canvas size to match container
       canvas.width = containerWidth;
       canvas.height = containerHeight;
+      drawHighlights();
     };
     img.src = imageUrl;
-  }, [imageUrl]);
+  }, [imageUrl, highlightedWords]);
 
-  // Draw marked words on canvas
-  useEffect(() => {
+  // Draw highlights on canvas
+  const drawHighlights = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -65,21 +70,44 @@ export default function WordSearchPuzzle({
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Draw all marked words
-    markedWords.forEach((marked) => {
-      if (marked.path.length < 2) return;
-
-      ctx.strokeStyle = marked.color;
+    // Draw all highlighted words
+    highlightedWords.forEach((highlight) => {
+      if (highlight.isValid) {
+        ctx.strokeStyle = '#10b981'; // Green for valid
+        ctx.fillStyle = 'rgba(16, 185, 129, 0.2)'; // Light green fill
+      } else {
+        ctx.strokeStyle = '#ef4444'; // Red for invalid
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.2)'; // Light red fill
+      }
+      
       ctx.lineWidth = 4;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
 
+      // Draw highlight based on direction
+      const dx = highlight.endX - highlight.startX;
+      const dy = highlight.endY - highlight.startY;
+      const length = Math.sqrt(dx * dx + dy * dy);
+      
+      // Draw filled rectangle for the word
       ctx.beginPath();
-      ctx.moveTo(marked.path[0].x, marked.path[0].y);
-      for (let i = 1; i < marked.path.length; i++) {
-        ctx.lineTo(marked.path[i].x, marked.path[i].y);
+      if (highlight.direction === 'horizontal') {
+        ctx.rect(highlight.startX, highlight.startY - 15, length, 30);
+      } else if (highlight.direction === 'vertical') {
+        ctx.rect(highlight.startX - 15, highlight.startY, 30, length);
+      } else {
+        // Diagonal - draw a thicker line
+        ctx.moveTo(highlight.startX, highlight.startY);
+        ctx.lineTo(highlight.endX, highlight.endY);
+        ctx.lineWidth = 8;
       }
-      ctx.stroke();
+      
+      if (highlight.direction === 'horizontal' || highlight.direction === 'vertical') {
+        ctx.fill();
+        ctx.stroke();
+      } else {
+        ctx.stroke();
+      }
     });
 
     // Draw current path being drawn
@@ -96,7 +124,40 @@ export default function WordSearchPuzzle({
       }
       ctx.stroke();
     }
-  }, [markedWords, currentPath, isDrawing]);
+
+    // Draw pending highlight (word being validated)
+    if (pendingHighlight) {
+      ctx.strokeStyle = '#f59e0b'; // Orange for pending
+      ctx.fillStyle = 'rgba(245, 158, 11, 0.2)';
+      ctx.lineWidth = 4;
+      
+      const dx = pendingHighlight.endX - pendingHighlight.startX;
+      const dy = pendingHighlight.endY - pendingHighlight.startY;
+      const length = Math.sqrt(dx * dx + dy * dy);
+      
+      ctx.beginPath();
+      if (pendingHighlight.direction === 'horizontal') {
+        ctx.rect(pendingHighlight.startX, pendingHighlight.startY - 15, length, 30);
+      } else if (pendingHighlight.direction === 'vertical') {
+        ctx.rect(pendingHighlight.startX - 15, pendingHighlight.startY, 30, length);
+      } else {
+        ctx.moveTo(pendingHighlight.startX, pendingHighlight.startY);
+        ctx.lineTo(pendingHighlight.endX, pendingHighlight.endY);
+        ctx.lineWidth = 8;
+      }
+      
+      if (pendingHighlight.direction === 'horizontal' || pendingHighlight.direction === 'vertical') {
+        ctx.fill();
+        ctx.stroke();
+      } else {
+        ctx.stroke();
+      }
+    }
+  };
+
+  useEffect(() => {
+    drawHighlights();
+  }, [highlightedWords, currentPath, isDrawing, pendingHighlight]);
 
   const getCanvasCoordinates = (e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>): { x: number; y: number } | null => {
     const canvas = canvasRef.current;
@@ -106,12 +167,10 @@ export default function WordSearchPuzzle({
     let clientX: number, clientY: number;
 
     if ('touches' in e) {
-      // Touch event
       if (e.touches.length === 0) return null;
       clientX = e.touches[0].clientX;
       clientY = e.touches[0].clientY;
     } else {
-      // Mouse event
       clientX = e.clientX;
       clientY = e.clientY;
     }
@@ -122,12 +181,28 @@ export default function WordSearchPuzzle({
     };
   };
 
+  const detectWordDirection = (path: { x: number; y: number }[]): 'horizontal' | 'vertical' | 'diagonal' | null => {
+    if (path.length < 2) return null;
+
+    const start = path[0];
+    const end = path[path.length - 1];
+    const dx = Math.abs(end.x - start.x);
+    const dy = Math.abs(end.y - start.y);
+
+    // Determine direction based on dominant axis
+    if (dx > dy * 2) return 'horizontal';
+    if (dy > dx * 2) return 'vertical';
+    if (dx > 0 && dy > 0) return 'diagonal';
+    return null;
+  };
+
   const handleStart = (e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
     e.preventDefault();
     const coords = getCanvasCoordinates(e);
     if (coords) {
       setIsDrawing(true);
       setCurrentPath([coords]);
+      setPendingHighlight(null);
     }
   };
 
@@ -141,22 +216,34 @@ export default function WordSearchPuzzle({
   };
 
   const handleEnd = () => {
-    if (!isDrawing || currentPath.length < 2) {
+    if (!isDrawing || currentPath.length < 10) {
       setIsDrawing(false);
       setCurrentPath([]);
       return;
     }
 
-    // Mark the word as found (user has drawn on the puzzle)
-    // We'll validate against the word list when they submit
-    const color = `hsl(${Math.random() * 360}, 70%, 50%)`;
-    const marked: MarkedWord = {
-      word: '', // Will be validated when user types the word
-      path: [...currentPath],
-      color,
+    // Detect direction and create highlight
+    const direction = detectWordDirection(currentPath);
+    if (!direction) {
+      setIsDrawing(false);
+      setCurrentPath([]);
+      return;
+    }
+
+    const start = currentPath[0];
+    const end = currentPath[currentPath.length - 1];
+
+    const highlight: HighlightedWord = {
+      word: '', // Will be validated
+      startX: start.x,
+      startY: start.y,
+      endX: end.x,
+      endY: end.y,
+      direction,
+      isValid: false,
     };
 
-    setMarkedWords((prev) => [...prev, marked]);
+    setPendingHighlight(highlight);
     setIsDrawing(false);
     setCurrentPath([]);
   };
@@ -172,16 +259,13 @@ export default function WordSearchPuzzle({
         newFound.add(normalizedWord);
         setFoundWords(newFound);
 
-        // Update the most recent marked word with the validated word
-        if (markedWords.length > 0) {
-          const lastMarked = markedWords[markedWords.length - 1];
-          if (!lastMarked.word) {
-            setMarkedWords((prev) => {
-              const updated = [...prev];
-              updated[updated.length - 1] = { ...lastMarked, word: normalizedWord };
-              return updated;
-            });
-          }
+        // Validate pending highlight
+        if (pendingHighlight) {
+          setHighlightedWords((prev) => [
+            ...prev,
+            { ...pendingHighlight, word: normalizedWord, isValid: true }
+          ]);
+          setPendingHighlight(null);
         }
 
         if (onWordFound) {
@@ -198,7 +282,21 @@ export default function WordSearchPuzzle({
           onAllWordsFound();
         }
       }
+    } else {
+      // Wrong word - remove pending highlight
+      if (pendingHighlight) {
+        // Show red highlight briefly, then remove
+        setHighlightedWords((prev) => [
+          ...prev,
+          { ...pendingHighlight, word: word, isValid: false }
+        ]);
+        setTimeout(() => {
+          setHighlightedWords((prev) => prev.filter(h => h !== pendingHighlight));
+        }, 1000);
+        setPendingHighlight(null);
+      }
     }
+    setSelectedWord('');
   };
 
   return (
@@ -232,7 +330,7 @@ export default function WordSearchPuzzle({
           />
         </div>
         <p className="text-xs text-gray-500 mt-2 text-center">
-          Draw on the puzzle to mark words you find
+          Draw over words to select them. Type the word you found to validate.
         </p>
       </div>
 
@@ -249,20 +347,16 @@ export default function WordSearchPuzzle({
               onKeyPress={(e) => {
                 if (e.key === 'Enter') {
                   handleWordSelect(selectedWord);
-                  setSelectedWord('');
                 }
               }}
               className="flex-1 px-3 py-2 border-2 border-gray-300 rounded-lg focus:border-indigo-500 focus:outline-none"
               placeholder="Enter word you marked..."
             />
             <button
-              onClick={() => {
-                handleWordSelect(selectedWord);
-                setSelectedWord('');
-              }}
+              onClick={() => handleWordSelect(selectedWord)}
               className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
             >
-              Mark Found
+              Validate
             </button>
           </div>
         </div>

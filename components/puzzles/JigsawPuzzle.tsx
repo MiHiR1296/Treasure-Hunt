@@ -18,6 +18,7 @@ interface PiecePosition {
   y: number;
   zIndex: number;
   isPlaced: boolean;
+  snappedNeighbors: Set<number>; // IDs of snapped neighbor pieces
 }
 
 const SNAP_DISTANCE = 30; // pixels
@@ -92,6 +93,7 @@ export default function JigsawPuzzle({
             y: scatterY,
             zIndex: index,
             isPlaced: false,
+            snappedNeighbors: new Set(),
           });
         });
 
@@ -152,8 +154,19 @@ export default function JigsawPuzzle({
                 const newPositions = new Map(prev);
                 const pos = newPositions.get(piece.id);
                 if (pos) {
+                  const oldX = pos.x;
+                  const oldY = pos.y;
                   pos.x += event.dx;
                   pos.y += event.dy;
+                  
+                  // Move all snapped neighbors together
+                  pos.snappedNeighbors.forEach((neighborId) => {
+                    const neighborPos = newPositions.get(neighborId);
+                    if (neighborPos) {
+                      neighborPos.x += event.dx;
+                      neighborPos.y += event.dy;
+                    }
+                  });
                 }
                 return newPositions;
               });
@@ -173,10 +186,81 @@ export default function JigsawPuzzle({
     });
   };
 
+  const getNeighborPieces = (piece: PieceShape): PieceShape[] => {
+    const neighbors: PieceShape[] = [];
+    // Check all 4 directions: top, right, bottom, left
+    const directions = [
+      { row: piece.row - 1, col: piece.col }, // top
+      { row: piece.row, col: piece.col + 1 }, // right
+      { row: piece.row + 1, col: piece.col }, // bottom
+      { row: piece.row, col: piece.col - 1 }, // left
+    ];
+
+    directions.forEach((dir) => {
+      if (dir.row >= 0 && dir.row < rows && dir.col >= 0 && dir.col < columns) {
+        const neighbor = pieces.find(p => p.row === dir.row && p.col === dir.col);
+        if (neighbor) {
+          neighbors.push(neighbor);
+        }
+      }
+    });
+
+    return neighbors;
+  };
+
+  const checkNeighborSnap = (pieceId: number, piece: PieceShape, currentX: number, currentY: number, scale: number): void => {
+    setPositions((prev) => {
+      const pos = prev.get(pieceId);
+      if (!pos) return prev;
+
+      const newPositions = new Map(prev);
+      const neighbors = getNeighborPieces(piece);
+      const containerWidth = containerRef.current?.clientWidth || 600;
+      const isMobile = containerWidth < 768;
+      const baseScale = isMobile ? MOBILE_SCALE : PUZZLE_SCALE;
+      const pieceScale = Math.min(
+        (containerWidth * baseScale) / (piece.width * columns),
+        (containerWidth * baseScale) / (piece.height * rows)
+      );
+
+      neighbors.forEach((neighbor) => {
+        const neighborPos = newPositions.get(neighbor.id);
+        if (!neighborPos || !neighborPos.isPlaced) return;
+
+        // Calculate where neighbor should be relative to this piece
+        const neighborCorrectX = (neighbor.col * neighbor.width * pieceScale) + (containerWidth - neighbor.width * columns * pieceScale) / 2;
+        const neighborCorrectY = (neighbor.row * neighbor.height * pieceScale) + 20;
+
+        // Calculate expected position of neighbor based on this piece's position
+        const rowDiff = neighbor.row - piece.row;
+        const colDiff = neighbor.col - piece.col;
+        const expectedNeighborX = currentX + (colDiff * piece.width * pieceScale);
+        const expectedNeighborY = currentY + (rowDiff * piece.height * pieceScale);
+
+        const distance = Math.sqrt(
+          Math.pow(neighborPos.x - expectedNeighborX, 2) + Math.pow(neighborPos.y - expectedNeighborY, 2)
+        );
+
+        if (distance < SNAP_DISTANCE) {
+          // Snap neighbor to this piece
+          neighborPos.x = expectedNeighborX;
+          neighborPos.y = expectedNeighborY;
+          pos.snappedNeighbors.add(neighbor.id);
+          neighborPos.snappedNeighbors.add(pieceId);
+        }
+      });
+
+      return newPositions;
+    });
+  };
+
   const checkSnap = (pieceId: number, correctX: number, correctY: number) => {
     setPositions((prev) => {
       const pos = prev.get(pieceId);
       if (!pos) return prev;
+
+      const piece = pieces.find(p => p.id === pieceId);
+      if (!piece) return prev;
 
       const distance = Math.sqrt(
         Math.pow(pos.x - correctX, 2) + Math.pow(pos.y - correctY, 2)
@@ -190,6 +274,16 @@ export default function JigsawPuzzle({
           updatedPos.x = correctX;
           updatedPos.y = correctY;
           updatedPos.isPlaced = true;
+          
+          // Check neighbor snapping
+          const containerWidth = containerRef.current?.clientWidth || 600;
+          const isMobile = containerWidth < 768;
+          const baseScale = isMobile ? MOBILE_SCALE : PUZZLE_SCALE;
+          const pieceScale = Math.min(
+            (containerWidth * baseScale) / (piece.width * columns),
+            (containerWidth * baseScale) / (piece.height * rows)
+          );
+          checkNeighborSnap(pieceId, piece, correctX, correctY, pieceScale);
           
           // Check if solved after state update
           setTimeout(() => {
