@@ -270,9 +270,11 @@ export default function CheckpointPage() {
   };
 
   const handlePuzzleChainComplete = () => {
-    // Show success message - user will click button to proceed manually
-    // Don't auto-redirect - let user stay on page and click to proceed
-    setShowSuccessPopup(true);
+    // Puzzles are complete - but this doesn't complete the checkpoint
+    // User still needs to unlock the checkpoint (scan QR, enter code, etc.)
+    // and then complete it via ClueDisplay
+    // Just show a message that puzzles are done - no popup needed
+    // The puzzle chain component will show its own completion message
   };
 
   if (isLoading) {

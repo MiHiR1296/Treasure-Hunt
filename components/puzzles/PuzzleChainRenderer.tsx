@@ -99,57 +99,16 @@ export default function PuzzleChainRenderer({ checkpointId, onComplete }: Puzzle
 
       // Check if this is the last step
       if (currentStepIndex === steps.length - 1) {
-        // Get or create progress entry
-        const { data: existingProgress } = await supabase
-          .from('progress')
-          .select('hints_used, unlocked_at')
-          .eq('team_id', team.id)
-          .eq('checkpoint_id', checkpointId)
-          .maybeSingle();
-
-        // Get checkpoint points
-        const { data: checkpointData } = await supabase
-          .from('checkpoints')
-          .select('points')
-          .eq('id', checkpointId)
-          .single();
-
-        const basePoints = checkpointData?.points || 20;
-        const hintsUsed = existingProgress?.hints_used || 0;
-        const pointsEarned = Math.max(0, basePoints - hintsUsed * 5);
-
-        // Upsert progress - create if doesn't exist, update if it does
-        const progressData: any = {
-          team_id: team.id,
-          checkpoint_id: checkpointId,
-          completed_at: new Date().toISOString(),
-          points_earned: pointsEarned,
-          hints_used: hintsUsed,
-        };
-
-        // If progress doesn't exist, also set unlocked_at
-        if (!existingProgress) {
-          progressData.unlocked_at = new Date().toISOString();
-        }
-
-        const { error: checkpointError } = await supabase
-          .from('progress')
-          .upsert(progressData, {
-            onConflict: 'team_id,checkpoint_id',
-          });
-
-        if (checkpointError) {
-          console.error('Error updating progress:', checkpointError);
-          throw checkpointError;
-        }
-
         // Mark this step as completed in local state
         const newCompleted = new Set(completedStepIds);
         newCompleted.add(currentStep.id);
         setCompletedStepIds(newCompleted);
 
-        // Show success message - user will click button to proceed
-        // Don't auto-call onComplete() - let user proceed manually
+        // Puzzles are complete - but checkpoint is NOT complete yet
+        // User still needs to unlock the checkpoint (scan QR, enter code, etc.)
+        // and then complete it via the ClueDisplay component
+        // Don't set completed_at or points_earned here - that's only for checkpoint completion
+        // Just show success message that puzzles are done
       } else {
         // Move to next step
         setCurrentStepIndex(currentStepIndex + 1);
@@ -206,29 +165,26 @@ export default function PuzzleChainRenderer({ checkpointId, onComplete }: Puzzle
         onStepComplete={handleStepComplete}
       />
       
-      {/* Show completion message and proceed button when all steps are done */}
+      {/* Show completion message when all puzzle steps are done */}
       {allStepsCompleted && isLastStep && (
-        <div className="mt-6 bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-300 rounded-lg p-6 space-y-4">
+        <div className="mt-6 bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-300 rounded-lg p-6 space-y-4">
           <div className="flex items-center gap-3">
-            <div className="text-4xl">🎉</div>
+            <div className="text-4xl">✅</div>
             <div>
-              <p className="text-green-900 font-bold text-xl">
+              <p className="text-blue-900 font-bold text-xl">
                 All Puzzles Completed!
               </p>
-              <p className="text-green-700 text-sm mt-1">
-                Great work! You've completed all puzzle steps for this checkpoint.
+              <p className="text-blue-700 text-sm mt-1">
+                Great work! You've completed all puzzle steps. These puzzles help you find the checkpoint location.
+              </p>
+              <p className="text-blue-600 text-sm mt-2 font-semibold">
+                Now unlock the checkpoint by scanning the QR code or entering the code above.
               </p>
             </div>
           </div>
-          <button
-            onClick={() => {
-              // Call completion callback to proceed
-              onComplete();
-            }}
-            className="w-full bg-green-600 text-white py-3 px-6 rounded-lg font-semibold hover:bg-green-700 transition-colors text-base shadow-lg"
-          >
-            Return to Hunt Page →
-          </button>
+          <p className="text-xs text-blue-600 text-center">
+            Note: Completing puzzles does not complete the checkpoint. You still need to unlock and complete it.
+          </p>
         </div>
       )}
     </div>
