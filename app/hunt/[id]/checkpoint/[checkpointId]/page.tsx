@@ -269,9 +269,12 @@ export default function CheckpointPage() {
   };
 
   const handlePuzzleChainComplete = () => {
-    // Puzzle chain completion is handled by PuzzleChainRenderer
-    // Just navigate back to hunt page
-    router.push(`/hunt/${huntId}`);
+    // Show success message before redirecting
+    setShowSuccessPopup(true);
+    // Redirect after a short delay to show success message
+    setTimeout(() => {
+      router.push(`/hunt/${huntId}`);
+    }, 1500);
   };
 
   if (isLoading) {

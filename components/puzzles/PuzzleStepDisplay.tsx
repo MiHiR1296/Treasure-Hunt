@@ -23,9 +23,11 @@ export default function PuzzleStepDisplay({
 
   const handlePuzzleSolved = () => {
     setPuzzleSolved(true);
-    // If puzzle doesn't require answer (auto-solved), complete step
+    // If puzzle doesn't require answer (auto-solved), show success message first
+    // Don't auto-complete - let user see the success and proceed manually
     if (!step.answer_value) {
-      onStepComplete();
+      // Show success message, user can proceed when ready
+      // The completion message below will handle the UI feedback
     }
   };
 
@@ -61,10 +63,10 @@ export default function PuzzleStepDisplay({
 
       {/* Step title and description */}
       {step.title && (
-        <div>
-          <h3 className="text-xl font-bold text-gray-900">{step.title}</h3>
+        <div className="mb-4">
+          <h3 className="text-2xl md:text-3xl font-bold text-gray-900 mb-2">{step.title}</h3>
           {step.description && (
-            <p className="text-gray-600 mt-2">{step.description}</p>
+            <p className="text-base md:text-lg text-gray-700 mt-2 leading-relaxed">{step.description}</p>
           )}
         </div>
       )}
@@ -75,8 +77,8 @@ export default function PuzzleStepDisplay({
       {/* Answer handler */}
       {needsAnswer && (
         <div className="space-y-4">
-          <div className="border-t pt-4">
-            <h4 className="text-lg font-semibold text-gray-900 mb-3">
+          <div className="border-t-2 border-gray-300 pt-6">
+            <h4 className="text-xl md:text-2xl font-bold text-gray-900 mb-4">
               {step.answer_type === 'qr_code' ? 'Scan QR Code' : 'Enter Answer'}
             </h4>
             <AnswerHandler step={step} onAnswerCorrect={handleAnswerCorrect} />
@@ -84,12 +86,32 @@ export default function PuzzleStepDisplay({
         </div>
       )}
 
-      {/* Completion message */}
+      {/* Completion message and proceed button */}
       {canProceed && (
-        <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-          <p className="text-green-800 font-semibold">
-            ✓ Step {stepNumber} completed! Proceeding to next step...
-          </p>
+        <div className="bg-green-50 border-2 border-green-300 rounded-lg p-6 space-y-4">
+          <div className="flex items-center gap-3">
+            <div className="text-3xl">🎉</div>
+            <div>
+              <p className="text-green-900 font-bold text-lg">
+                ✓ Step {stepNumber} completed!
+              </p>
+              {stepNumber < totalSteps ? (
+                <p className="text-green-700 text-sm mt-1">
+                  Great job! Click below to proceed to the next step.
+                </p>
+              ) : (
+                <p className="text-green-700 text-sm mt-1">
+                  All steps completed! Click below to finish this checkpoint.
+                </p>
+              )}
+            </div>
+          </div>
+          <button
+            onClick={onStepComplete}
+            className="w-full bg-green-600 text-white py-3 px-6 rounded-lg font-semibold hover:bg-green-700 transition-colors text-base"
+          >
+            {stepNumber < totalSteps ? 'Continue to Next Step →' : 'Complete Checkpoint ✓'}
+          </button>
         </div>
       )}
     </div>

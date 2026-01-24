@@ -21,7 +21,7 @@ export default function PuzzleRenderer({ step, onSolved }: PuzzleRendererProps) 
       // Text puzzle type - use checkpoint hints instead of separate clues
       return (
         <div className="bg-gradient-to-br from-indigo-50 to-blue-50 border-2 border-indigo-200 rounded-xl p-6">
-          <p className="text-gray-800 text-lg leading-relaxed text-center">
+          <p className="text-gray-900 text-xl md:text-2xl font-semibold leading-relaxed text-center">
             This is a text puzzle step. Use the checkpoint hints to solve this puzzle.
           </p>
         </div>
@@ -29,7 +29,7 @@ export default function PuzzleRenderer({ step, onSolved }: PuzzleRendererProps) 
 
     case 'jigsaw':
       if (!step.puzzle_image_url) {
-        return <div className="text-red-600">Error: No image URL provided for jigsaw puzzle</div>;
+        return <div className="text-red-700 text-lg font-semibold bg-red-50 border-2 border-red-300 rounded-lg p-4">Error: No image URL provided for jigsaw puzzle</div>;
       }
       return (
         <JigsawPuzzle
@@ -51,7 +51,7 @@ export default function PuzzleRenderer({ step, onSolved }: PuzzleRendererProps) 
 
     case 'crossword':
       if (!step.puzzle_image_url) {
-        return <div className="text-red-600">Error: No image URL provided for crossword puzzle</div>;
+        return <div className="text-red-700 text-lg font-semibold bg-red-50 border-2 border-red-300 rounded-lg p-4">Error: No image URL provided for crossword puzzle</div>;
       }
       return (
         <CrosswordPuzzle
@@ -63,7 +63,7 @@ export default function PuzzleRenderer({ step, onSolved }: PuzzleRendererProps) 
 
     case 'word_search':
       if (!step.puzzle_image_url) {
-        return <div className="text-red-600">Error: No image URL provided for word search puzzle</div>;
+        return <div className="text-red-700 text-lg font-semibold bg-red-50 border-2 border-red-300 rounded-lg p-4">Error: No image URL provided for word search puzzle</div>;
       }
       return (
         <WordSearchPuzzle
@@ -77,7 +77,7 @@ export default function PuzzleRenderer({ step, onSolved }: PuzzleRendererProps) 
 
     case 'circular_rotate':
       if (!step.puzzle_image_url) {
-        return <div className="text-red-600">Error: No image URL provided for circular rotation puzzle</div>;
+        return <div className="text-red-700 text-lg font-semibold bg-red-50 border-2 border-red-300 rounded-lg p-4">Error: No image URL provided for circular rotation puzzle</div>;
       }
       return (
         <CircularRotatePuzzle
@@ -89,6 +89,6 @@ export default function PuzzleRenderer({ step, onSolved }: PuzzleRendererProps) 
       );
 
     default:
-      return <div className="text-red-600">Unknown puzzle type: {step.puzzle_type}</div>;
+      return <div className="text-red-700 text-lg font-semibold bg-red-50 border-2 border-red-300 rounded-lg p-4">Unknown puzzle type: {step.puzzle_type}</div>;
   }
 }

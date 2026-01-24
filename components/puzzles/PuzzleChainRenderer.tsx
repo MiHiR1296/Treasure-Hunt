@@ -99,13 +99,13 @@ export default function PuzzleChainRenderer({ checkpointId, onComplete }: Puzzle
 
       // Check if this is the last step
       if (currentStepIndex === steps.length - 1) {
-        // Get current progress to calculate points
-        const { data: progressData } = await supabase
+        // Get or create progress entry
+        const { data: existingProgress } = await supabase
           .from('progress')
-          .select('hints_used')
+          .select('hints_used, unlocked_at')
           .eq('team_id', team.id)
           .eq('checkpoint_id', checkpointId)
-          .single();
+          .maybeSingle();
 
         // Get checkpoint points
         const { data: checkpointData } = await supabase
@@ -115,26 +115,41 @@ export default function PuzzleChainRenderer({ checkpointId, onComplete }: Puzzle
           .single();
 
         const basePoints = checkpointData?.points || 20;
-        const hintsUsed = progressData?.hints_used || 0;
+        const hintsUsed = existingProgress?.hints_used || 0;
         const pointsEarned = Math.max(0, basePoints - hintsUsed * 5);
 
-        // Mark checkpoint as completed with points
-        const updateData: any = {
+        // Upsert progress - create if doesn't exist, update if it does
+        const progressData: any = {
+          team_id: team.id,
+          checkpoint_id: checkpointId,
           completed_at: new Date().toISOString(),
           points_earned: pointsEarned,
           hints_used: hintsUsed,
         };
-        
+
+        // If progress doesn't exist, also set unlocked_at
+        if (!existingProgress) {
+          progressData.unlocked_at = new Date().toISOString();
+        }
+
         const { error: checkpointError } = await supabase
           .from('progress')
-          .update(updateData)
-          .eq('team_id', team.id)
-          .eq('checkpoint_id', checkpointId);
+          .upsert(progressData, {
+            onConflict: 'team_id,checkpoint_id',
+          });
 
-        if (checkpointError) throw checkpointError;
+        if (checkpointError) {
+          console.error('Error updating progress:', checkpointError);
+          throw checkpointError;
+        }
 
-        // Call completion callback
-        onComplete();
+        // Mark this step as completed in local state
+        const newCompleted = new Set(completedStepIds);
+        newCompleted.add(currentStep.id);
+        setCompletedStepIds(newCompleted);
+
+        // Show success message - user will click button to proceed
+        // Don't auto-call onComplete() - let user proceed manually
       } else {
         // Move to next step
         setCurrentStepIndex(currentStepIndex + 1);
@@ -179,6 +194,9 @@ export default function PuzzleChainRenderer({ checkpointId, onComplete }: Puzzle
     );
   }
 
+  const isLastStep = currentStepIndex === steps.length - 1;
+  const allStepsCompleted = completedStepIds.size === steps.length;
+
   return (
     <div className="w-full">
       <PuzzleStepDisplay
@@ -187,6 +205,32 @@ export default function PuzzleChainRenderer({ checkpointId, onComplete }: Puzzle
         totalSteps={steps.length}
         onStepComplete={handleStepComplete}
       />
+      
+      {/* Show completion message and proceed button when all steps are done */}
+      {allStepsCompleted && isLastStep && (
+        <div className="mt-6 bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-300 rounded-lg p-6 space-y-4">
+          <div className="flex items-center gap-3">
+            <div className="text-4xl">🎉</div>
+            <div>
+              <p className="text-green-900 font-bold text-xl">
+                All Puzzles Completed!
+              </p>
+              <p className="text-green-700 text-sm mt-1">
+                Great work! You've completed all puzzle steps for this checkpoint.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              // Call completion callback to proceed
+              onComplete();
+            }}
+            className="w-full bg-green-600 text-white py-3 px-6 rounded-lg font-semibold hover:bg-green-700 transition-colors text-base shadow-lg"
+          >
+            Return to Hunt Page →
+          </button>
+        </div>
+      )}
     </div>
   );
 }
