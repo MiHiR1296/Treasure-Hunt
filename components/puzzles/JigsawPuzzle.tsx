@@ -21,7 +21,8 @@ interface PiecePosition {
 }
 
 const SNAP_DISTANCE = 30; // pixels
-const PUZZLE_SCALE = 0.8; // Scale down puzzle for mobile
+const PUZZLE_SCALE = 0.9; // Scale down puzzle for mobile
+const MOBILE_SCALE = 0.85; // Additional scale for mobile devices
 
 export default function JigsawPuzzle({
   imageUrl,
@@ -65,11 +66,13 @@ export default function JigsawPuzzle({
         // Generate interlocking pieces
         const generatedPieces = generateInterlockingPieces(img, rows, columns);
 
-        // Calculate puzzle dimensions
+        // Calculate puzzle dimensions with better mobile support
         const containerWidth = containerRef.current?.clientWidth || 600;
+        const isMobile = containerWidth < 768;
+        const baseScale = isMobile ? MOBILE_SCALE : PUZZLE_SCALE;
         const scale = Math.min(
-          (containerWidth * PUZZLE_SCALE) / img.width,
-          (containerWidth * PUZZLE_SCALE) / img.height
+          (containerWidth * baseScale) / img.width,
+          (containerWidth * baseScale) / img.height
         );
         const puzzleWidth = img.width * scale;
         const puzzleHeight = img.height * scale;
@@ -118,15 +121,20 @@ export default function JigsawPuzzle({
       if (!element || !containerRef.current) return;
 
       const containerWidth = containerRef.current.clientWidth;
+      const isMobile = containerWidth < 768;
+      const baseScale = isMobile ? MOBILE_SCALE : PUZZLE_SCALE;
       const scale = Math.min(
-        (containerWidth * PUZZLE_SCALE) / (piece.width * columns),
-        (containerWidth * PUZZLE_SCALE) / (piece.height * rows)
+        (containerWidth * baseScale) / (piece.width * columns),
+        (containerWidth * baseScale) / (piece.height * rows)
       );
       const correctX = (piece.col * piece.width * scale) + (containerWidth - piece.width * columns * scale) / 2;
       const correctY = (piece.row * piece.height * scale) + 20;
 
       interact(element)
         .draggable({
+          // Better mobile touch support
+          allowFrom: null,
+          ignoreFrom: null,
           listeners: {
             start: () => {
               setDraggedPieceId(piece.id);
@@ -229,9 +237,11 @@ export default function JigsawPuzzle({
   }
 
   const containerWidth = containerRef.current?.clientWidth || 600;
+  const isMobile = containerWidth < 768;
+  const baseScale = isMobile ? MOBILE_SCALE : PUZZLE_SCALE;
   const scale = Math.min(
-    (containerWidth * PUZZLE_SCALE) / (pieces[0]?.width * columns || 600),
-    (containerWidth * PUZZLE_SCALE) / (pieces[0]?.height * rows || 600)
+    (containerWidth * baseScale) / (pieces[0]?.width * columns || 600),
+    (containerWidth * baseScale) / (pieces[0]?.height * rows || 600)
   );
   const puzzleWidth = (pieces[0]?.width || 200) * columns * scale;
   const puzzleHeight = (pieces[0]?.height || 200) * rows * scale;
@@ -267,8 +277,14 @@ export default function JigsawPuzzle({
 
           const isDragging = draggedPieceId === piece.id;
           const containerWidth = containerRef.current?.clientWidth || 600;
-          const correctX = (piece.col * piece.width * scale) + (containerWidth - piece.width * columns * scale) / 2;
-          const correctY = (piece.row * piece.height * scale) + 20; // Offset for puzzle area
+          const isMobile = containerWidth < 768;
+          const baseScale = isMobile ? MOBILE_SCALE : PUZZLE_SCALE;
+          const pieceScale = Math.min(
+            (containerWidth * baseScale) / (piece.width * columns),
+            (containerWidth * baseScale) / (piece.height * rows)
+          );
+          const correctX = (piece.col * piece.width * pieceScale) + (containerWidth - piece.width * columns * pieceScale) / 2;
+          const correctY = (piece.row * piece.height * pieceScale) + 20; // Offset for puzzle area
 
           return (
             <div
@@ -280,8 +296,8 @@ export default function JigsawPuzzle({
               style={{
                 left: `${pos.x}px`,
                 top: `${pos.y}px`,
-                width: `${piece.width * scale}px`,
-                height: `${piece.height * scale}px`,
+                width: `${piece.width * pieceScale}px`,
+                height: `${piece.height * pieceScale}px`,
                 zIndex: pos.zIndex,
                 opacity: isDragging ? 0.9 : 1,
                 transform: isDragging ? 'scale(1.05) rotate(2deg)' : 'scale(1) rotate(0deg)',
@@ -292,6 +308,7 @@ export default function JigsawPuzzle({
                   ? '0 8px 16px rgba(0, 0, 0, 0.3)'
                   : '0 2px 4px rgba(0, 0, 0, 0.1)',
                 willChange: isDragging ? 'transform' : 'auto',
+                touchAction: 'none', // Prevent default touch behaviors
               }}
             >
               <img

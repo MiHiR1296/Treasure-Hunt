@@ -190,8 +190,26 @@ export default function CheckpointPage() {
       return;
     }
 
-    // Check if scanned QR matches any dud QR in the hunt
-    // We'll check the database for dud QRs with this value
+    // Check if scanned QR matches any dud QR in the dud_qr_codes table
+    try {
+      const { data: dudQRCodes } = await supabase
+        .from('dud_qr_codes')
+        .select('dud_message')
+        .eq('hunt_id', checkpoint.hunt_id || '')
+        .eq('qr_code_value', scannedValue)
+        .limit(1);
+
+      if (dudQRCodes && dudQRCodes.length > 0) {
+        setDudQrMessage(dudQRCodes[0].dud_message || 'Try again! This is not the right QR code.');
+        setShowErrorPopup(true);
+        setShowQRScannerModal(false);
+        return;
+      }
+    } catch (err) {
+      // Continue with validation if check fails
+    }
+
+    // Also check legacy dud checkpoints (for backward compatibility)
     try {
       const { data: dudCheckpoints } = await supabase
         .from('checkpoints')

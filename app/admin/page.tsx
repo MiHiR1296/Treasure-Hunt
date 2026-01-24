@@ -80,6 +80,13 @@ export default function AdminPage() {
     totalProgress: 0,
   });
 
+  // Dud QR states
+  const [dudQRCodes, setDudQRCodes] = useState<any[]>([]);
+  const [newDudQRValue, setNewDudQRValue] = useState('');
+  const [newDudQRMessage, setNewDudQRMessage] = useState('Try again! This is not the right QR code.');
+  const [newDudQRCheckpoint, setNewDudQRCheckpoint] = useState<string>('');
+  const dudQRGeneratorRef = useRef<QRCodeGeneratorRef>(null);
+
   // Selected items
   const [selectedHunt, setSelectedHunt] = useState<string | null>(null);
   const [editingHunt, setEditingHunt] = useState<Hunt | null>(null);
@@ -122,8 +129,91 @@ export default function AdminPage() {
   useEffect(() => {
     if (selectedHunt && activeTab === 'checkpoints') {
       loadCheckpoints();
+      loadDudQRCodes();
     }
   }, [selectedHunt, activeTab]);
+
+  const loadDudQRCodes = async () => {
+    if (!selectedHunt) return;
+    try {
+      const { data, error } = await supabase
+        .from('dud_qr_codes')
+        .select('*, checkpoints(id, title)')
+        .eq('hunt_id', selectedHunt)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      setDudQRCodes(data || []);
+    } catch (err: any) {
+      console.error('Error loading dud QR codes:', err);
+    }
+  };
+
+  const handleCreateDudQR = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedHunt) {
+      alert('Please select a hunt first');
+      return;
+    }
+    if (!newDudQRValue.trim()) {
+      alert('Please enter a QR code value');
+      return;
+    }
+    setIsLoading(true);
+    try {
+      const dudQRData: any = {
+        hunt_id: selectedHunt,
+        qr_code_value: newDudQRValue.trim(),
+        dud_message: newDudQRMessage.trim() || 'Try again! This is not the right QR code.',
+      };
+      if (newDudQRCheckpoint) {
+        dudQRData.checkpoint_id = newDudQRCheckpoint;
+      }
+
+      const { data: dudQR, error } = await supabase
+        .from('dud_qr_codes')
+        .insert(dudQRData)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Generate and upload QR code image
+      if (dudQR && dudQRGeneratorRef.current) {
+        try {
+          const qrCodeDataUrl = await dudQRGeneratorRef.current.generateImage();
+          const qrImageUrl = await uploadQRCode(qrCodeDataUrl, dudQR.id);
+          await supabase
+            .from('dud_qr_codes')
+            .update({ qr_code_image_url: qrImageUrl })
+            .eq('id', dudQR.id);
+        } catch (qrError: any) {
+          console.error('Error generating/uploading dud QR code:', qrError);
+        }
+      }
+
+      alert('Dud QR code created!');
+      setNewDudQRValue('');
+      setNewDudQRMessage('Try again! This is not the right QR code.');
+      setNewDudQRCheckpoint('');
+      loadDudQRCodes();
+    } catch (err: any) {
+      alert(err.message || 'Failed to create dud QR code');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDeleteDudQR = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this dud QR code?')) return;
+    try {
+      const { error } = await supabase.from('dud_qr_codes').delete().eq('id', id);
+      if (error) throw error;
+      alert('Dud QR code deleted!');
+      loadDudQRCodes();
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete dud QR code');
+    }
+  };
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1084,6 +1174,108 @@ export default function AdminPage() {
                     )}
                   </div>
                 </div>
+
+                {/* Dud QR Codes Management */}
+                {checkpoints.some(cp => cp.unlock_method === 'qr_code') && (
+                  <div className="bg-white rounded-2xl shadow-xl p-4 md:p-6">
+                    <h2 className="text-xl md:text-2xl font-bold text-gray-900 mb-4">Dud QR Codes</h2>
+                    <p className="text-sm text-gray-600 mb-4">
+                      Create fake QR codes to distract players. These will show an error message when scanned.
+                    </p>
+                    
+                    {/* Create Dud QR Form */}
+                    <form onSubmit={handleCreateDudQR} className="space-y-4 mb-6 p-4 bg-gray-50 rounded-lg">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">QR Code Value</label>
+                        <input
+                          type="text"
+                          value={newDudQRValue}
+                          onChange={(e) => setNewDudQRValue(e.target.value)}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base text-gray-900 bg-white font-mono"
+                          placeholder="DUD-QR-001"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Error Message</label>
+                        <textarea
+                          value={newDudQRMessage}
+                          onChange={(e) => setNewDudQRMessage(e.target.value)}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base text-gray-900 bg-white"
+                          rows={2}
+                          placeholder="Try again! This is not the right QR code."
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Link to Checkpoint (Optional)</label>
+                        <select
+                          value={newDudQRCheckpoint}
+                          onChange={(e) => setNewDudQRCheckpoint(e.target.value)}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base text-gray-900 bg-white"
+                        >
+                          <option value="">-- None --</option>
+                          {checkpoints.filter(cp => cp.unlock_method === 'qr_code').map((cp) => (
+                            <option key={cp.id} value={cp.id}>
+                              {cp.order_index}. {cp.title}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                        <QRCodeGenerator
+                          ref={dudQRGeneratorRef}
+                          qrCodeValue={newDudQRValue || 'DUD-QR-PLACEHOLDER'}
+                          qrCodeImageUrl={null}
+                          isDudQr={true}
+                          dudMessage={newDudQRMessage}
+                          onValueChange={setNewDudQRValue}
+                          onImageUrlChange={() => {}}
+                          onDudChange={() => {}}
+                          onDudMessageChange={setNewDudQRMessage}
+                        />
+                      </div>
+                      <button
+                        type="submit"
+                        disabled={isLoading || !newDudQRValue.trim()}
+                        className="w-full bg-indigo-600 text-white px-6 py-2 rounded-lg font-semibold hover:bg-indigo-700 disabled:opacity-50"
+                      >
+                        Create Dud QR Code
+                      </button>
+                    </form>
+
+                    {/* List of Dud QR Codes */}
+                    <div className="space-y-3">
+                      <h3 className="text-lg font-semibold text-gray-900">Existing Dud QR Codes ({dudQRCodes.length})</h3>
+                      {dudQRCodes.map((dudQR) => (
+                        <div key={dudQR.id} className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                            <div className="flex-1">
+                              <p className="font-semibold text-base text-gray-900 font-mono">{dudQR.qr_code_value}</p>
+                              <p className="text-sm text-gray-600 mt-1">{dudQR.dud_message}</p>
+                              {dudQR.checkpoints && (
+                                <p className="text-xs text-gray-500 mt-1">
+                                  Linked to: {dudQR.checkpoints.title}
+                                </p>
+                              )}
+                              {dudQR.qr_code_image_url && (
+                                <img src={dudQR.qr_code_image_url} alt="Dud QR" className="mt-2 max-w-xs rounded-lg" />
+                              )}
+                            </div>
+                            <button
+                              onClick={() => handleDeleteDudQR(dudQR.id)}
+                              className="bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-red-600 w-full sm:w-auto"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                      {dudQRCodes.length === 0 && (
+                        <p className="text-gray-500 text-center py-4">No dud QR codes yet. Create one above!</p>
+                      )}
+                    </div>
+                  </div>
+                )}
               </>
             )}
           </div>
@@ -1151,6 +1343,39 @@ function TeamCard({ team, onEdit, onDelete }: { team: Team; onEdit: (team: Team)
 
   useEffect(() => {
     loadMembers();
+    
+    // Subscribe to realtime updates for team members
+    const channel = supabase
+      .channel(`team-members-${team.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'team_members',
+          filter: `team_id=eq.${team.id}`,
+        },
+        () => {
+          loadMembers();
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'users',
+          filter: `team_id=eq.${team.id}`,
+        },
+        () => {
+          loadMembers();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [team.id]);
 
   const loadMembers = async () => {
@@ -1244,11 +1469,20 @@ function HuntLeaderboard({ hunt }: { hunt: Hunt }) {
 
       const { data: progress, error: progressError } = await supabase
         .from('progress')
-        .select('team_id, checkpoint_id')
+        .select('team_id, checkpoint_id, completed_at, unlocked_at, points_earned, user_id, individual_points_earned')
         .in('checkpoint_id', checkpointIds);
 
       if (progressError) {
         console.error('Error loading progress:', progressError);
+      }
+
+      // Get all users for teams with progress
+      const { data: allUsers, error: usersError } = await supabase
+        .from('users')
+        .select('id, name, team_id');
+      
+      if (usersError) {
+        console.error('Error loading users:', usersError);
       }
 
       // Get unique team IDs that have progress
@@ -1258,18 +1492,56 @@ function HuntLeaderboard({ hunt }: { hunt: Hunt }) {
       teams?.forEach((team) => {
         // Only show teams that have started (have progress)
         if (teamIdsWithProgress.has(team.id)) {
-          const completed = progress?.filter(p => p.team_id === team.id).length || 0;
+          const teamProgressData = progress?.filter(p => p.team_id === team.id) || [];
+          const completedCheckpoints = teamProgressData.filter((p) => p.completed_at).length;
+          const unlockedCheckpoints = teamProgressData.filter((p) => p.unlocked_at).length;
+          const totalPoints = teamProgressData.reduce((sum, p) => {
+            // Only count points from completed checkpoints
+            if (p.completed_at && p.points_earned) {
+              return sum + (p.points_earned || 0);
+            }
+            return sum;
+          }, 0);
+          
+          // Calculate individual points for team members
+          const teamUsers = allUsers?.filter(u => u.team_id === team.id) || [];
+          const memberStats = teamUsers.map((teamUser) => {
+            const userProgress = teamProgressData.filter((p) => p.user_id === teamUser.id) || [];
+            const individualPoints = userProgress.reduce((sum, p) => {
+              if (p.completed_at && p.individual_points_earned) {
+                return sum + p.individual_points_earned;
+              }
+              return sum;
+            }, 0);
+            const userCheckpointsCompleted = userProgress.filter((p) => p.completed_at).length;
+            
+            return {
+              user_id: teamUser.id,
+              user_name: teamUser.name,
+              individual_points: individualPoints,
+              checkpoints_completed: userCheckpointsCompleted,
+            };
+          }).sort((a, b) => b.individual_points - a.individual_points);
+          
           teamProgress[team.id] = {
             team_id: team.id,
             team_name: team.name,
-            checkpoints_completed: completed,
+            checkpoints_completed: completedCheckpoints,
+            checkpoints_unlocked: unlockedCheckpoints,
+            total_points: totalPoints,
+            members: memberStats,
           };
         }
       });
 
-      const sorted = Object.values(teamProgress).sort((a: any, b: any) => 
-        b.checkpoints_completed - a.checkpoints_completed
-      );
+      const sorted = Object.values(teamProgress).sort((a: any, b: any) => {
+        // First sort by points
+        if (b.total_points !== a.total_points) {
+          return b.total_points - a.total_points;
+        }
+        // Then by checkpoints completed
+        return b.checkpoints_completed - a.checkpoints_completed;
+      });
 
       setLeaderboard(sorted);
     } catch (err) {
@@ -1288,19 +1560,41 @@ function HuntLeaderboard({ hunt }: { hunt: Hunt }) {
           View Full Leaderboard →
         </Link>
       </div>
-      <div className="space-y-2">
+      <div className="space-y-3">
         {leaderboard.slice(0, 5).map((entry: any, index) => {
           const rank = index + 1;
           const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `${rank}.`;
           return (
-            <div key={entry.team_id} className="p-3 bg-gray-50 rounded-lg flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <span className="text-lg font-bold">{medal}</span>
-                <span className="font-semibold text-gray-900">{entry.team_name}</span>
+            <div key={entry.team_id} className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-3">
+                  <span className="text-lg font-bold">{medal}</span>
+                  <span className="font-semibold text-gray-900">{entry.team_name}</span>
+                </div>
+                <div className="text-right">
+                  <div className="font-semibold text-gray-900">
+                    Team: {entry.total_points || 0} pts
+                  </div>
+                  <div className="text-xs text-gray-600">
+                    {entry.checkpoints_completed} / {totalCheckpoints}
+                  </div>
+                </div>
               </div>
-              <span className="font-semibold text-gray-700">
-                {entry.checkpoints_completed} / {totalCheckpoints}
-              </span>
+              {entry.members && entry.members.length > 0 && (
+                <div className="mt-3 pt-3 border-t border-gray-300">
+                  <p className="text-xs font-medium text-gray-700 mb-2">Individual Points:</p>
+                  <div className="space-y-1">
+                    {entry.members.map((member: any) => (
+                      <div key={member.user_id} className="flex items-center justify-between text-xs">
+                        <span className="text-gray-600">{member.user_name}</span>
+                        <span className="font-semibold text-gray-800">
+                          {member.individual_points} pts ({member.checkpoints_completed} completed)
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}

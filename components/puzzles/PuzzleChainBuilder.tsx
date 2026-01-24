@@ -142,22 +142,10 @@ function PuzzleStepEditor({
     switch (step.puzzle_type) {
       case 'text':
         return (
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Clue Text:
-            </label>
-            <textarea
-              value={step.puzzle_config.text || step.description || ''}
-              onChange={(e) => {
-                onUpdate({
-                  puzzle_config: { ...step.puzzle_config, text: e.target.value },
-                  description: e.target.value,
-                });
-              }}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:outline-none"
-              rows={4}
-              placeholder="Enter the clue or riddle text..."
-            />
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+            <p className="text-sm text-blue-800">
+              Text puzzle type. The checkpoint hints will be used instead of separate clues.
+            </p>
           </div>
         );
 
@@ -317,6 +305,20 @@ function PuzzleStepEditor({
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 placeholder="CLUE"
               />
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id={`showWordsList-${step.id}`}
+                checked={step.puzzle_config.showWordsList !== false}
+                onChange={(e) => onUpdate({
+                  puzzle_config: { ...step.puzzle_config, showWordsList: e.target.checked },
+                })}
+                className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+              />
+              <label htmlFor={`showWordsList-${step.id}`} className="text-sm font-medium text-gray-700 cursor-pointer">
+                Show words list to players
+              </label>
             </div>
           </div>
         );

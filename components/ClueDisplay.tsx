@@ -31,7 +31,7 @@ export default function ClueDisplay({
   const [showConfetti, setShowConfetti] = useState(false);
   const [isCompleting, setIsCompleting] = useState(false);
   const [completionError, setCompletionError] = useState<string | null>(null);
-  const { team } = useTeam();
+  const { team, user } = useTeam();
 
   useEffect(() => {
     loadHintUsage();
@@ -114,13 +114,22 @@ export default function ClueDisplay({
       console.log('Updating progress in Supabase...');
       
       // Update progress to mark as completed with final points
+      // Track both team points and individual points
+      const updateData: any = {
+        completed_at: new Date().toISOString(),
+        points_earned: currentPoints,
+        hints_used: hintsUsed,
+      };
+      
+      // Add user_id and individual_points_earned if user exists
+      if (user?.id) {
+        updateData.user_id = user.id;
+        updateData.individual_points_earned = currentPoints;
+      }
+      
       const { data, error } = await supabase
         .from('progress')
-        .update({
-          completed_at: new Date().toISOString(),
-          points_earned: currentPoints,
-          hints_used: hintsUsed,
-        })
+        .update(updateData)
         .eq('team_id', team.id)
         .eq('checkpoint_id', checkpointId)
         .select();

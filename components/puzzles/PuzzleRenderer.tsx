@@ -18,7 +18,14 @@ export default function PuzzleRenderer({ step, onSolved }: PuzzleRendererProps) 
 
   switch (step.puzzle_type) {
     case 'text':
-      return <TextClue clueText={config.text || step.description || 'No clue provided'} />;
+      // Text puzzle type - use checkpoint hints instead of separate clues
+      return (
+        <div className="bg-gradient-to-br from-indigo-50 to-blue-50 border-2 border-indigo-200 rounded-xl p-6">
+          <p className="text-gray-800 text-lg leading-relaxed text-center">
+            This is a text puzzle step. Use the checkpoint hints to solve this puzzle.
+          </p>
+        </div>
+      );
 
     case 'jigsaw':
       if (!step.puzzle_image_url) {
@@ -63,6 +70,7 @@ export default function PuzzleRenderer({ step, onSolved }: PuzzleRendererProps) 
           imageUrl={step.puzzle_image_url}
           words={config.words || []}
           targetWord={config.targetWord}
+          showWordsList={config.showWordsList !== false}
           onAllWordsFound={onSolved}
         />
       );

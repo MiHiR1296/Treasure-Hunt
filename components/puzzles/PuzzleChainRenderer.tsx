@@ -12,7 +12,7 @@ interface PuzzleChainRendererProps {
 }
 
 export default function PuzzleChainRenderer({ checkpointId, onComplete }: PuzzleChainRendererProps) {
-  const { team } = useTeam();
+  const { team, user } = useTeam();
   const [steps, setSteps] = useState<PuzzleStep[]>([]);
   const [completedStepIds, setCompletedStepIds] = useState<Set<string>>(new Set());
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
@@ -119,13 +119,22 @@ export default function PuzzleChainRenderer({ checkpointId, onComplete }: Puzzle
         const pointsEarned = Math.max(0, basePoints - hintsUsed * 5);
 
         // Mark checkpoint as completed with points
+        // Track both team points and individual points
+        const updateData: any = {
+          completed_at: new Date().toISOString(),
+          points_earned: pointsEarned,
+          hints_used: hintsUsed,
+        };
+        
+        // Add user_id and individual_points_earned if user exists
+        if (user?.id) {
+          updateData.user_id = user.id;
+          updateData.individual_points_earned = pointsEarned;
+        }
+        
         const { error: checkpointError } = await supabase
           .from('progress')
-          .update({
-            completed_at: new Date().toISOString(),
-            points_earned: pointsEarned,
-            hints_used: hintsUsed,
-          })
+          .update(updateData)
           .eq('team_id', team.id)
           .eq('checkpoint_id', checkpointId);
 

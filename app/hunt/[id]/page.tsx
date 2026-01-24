@@ -8,6 +8,7 @@ import { useTeam } from '@/lib/context/TeamContext';
 import ProgressBar from '@/components/ProgressBar';
 import Leaderboard from '@/components/Leaderboard';
 import GameTips from '@/components/GameTips';
+import TeamMembersDisplay from '@/components/TeamMembersDisplay';
 
 interface Checkpoint {
   id: string;
@@ -172,6 +173,9 @@ export default function HuntPage() {
         <div className="bg-white rounded-2xl shadow-xl p-4 md:p-6">
           <ProgressBar current={completedCount} total={totalCheckpoints} />
         </div>
+
+        {/* Team Members */}
+        <TeamMembersDisplay />
 
         {/* Completed Checkpoints List */}
         {checkpoints
