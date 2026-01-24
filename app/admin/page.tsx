@@ -1,10 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import Link from 'next/link';
 import PuzzleChainBuilder, { PuzzleStepConfig } from '@/components/puzzles/PuzzleChainBuilder';
 import { uploadPuzzleImage } from '@/lib/puzzles/storage';
+import QRCodeGenerator, { QRCodeGeneratorRef } from '@/components/admin/QRCodeGenerator';
+import { uploadQRCode, deleteQRCode } from '@/lib/utils/qrStorage';
 
 const ADMIN_PASSWORD = typeof window !== 'undefined' 
   ? (process.env.NEXT_PUBLIC_ADMIN_PASSWORD || 'admin123')
@@ -35,6 +37,9 @@ interface Checkpoint {
   hint_3?: string | null;
   unlock_method: string;
   qr_code_value: string | null;
+  qr_code_image_url?: string | null;
+  is_dud_qr?: boolean;
+  dud_message?: string | null;
   manual_code: string | null;
   lat: number | null;
   lng: number | null;
@@ -96,6 +101,9 @@ export default function AdminPage() {
   const [checkpointHint3, setCheckpointHint3] = useState('');
   const [checkpointUnlockMethod, setCheckpointUnlockMethod] = useState<'qr_code' | 'gps' | 'manual_code'>('manual_code');
   const [checkpointQRCode, setCheckpointQRCode] = useState('');
+  const [checkpointQRCodeImageUrl, setCheckpointQRCodeImageUrl] = useState<string | null>(null);
+  const [checkpointIsDudQr, setCheckpointIsDudQr] = useState(false);
+  const [checkpointDudMessage, setCheckpointDudMessage] = useState('Try again! This is not the right QR code.');
   const [checkpointManualCode, setCheckpointManualCode] = useState('');
   const [checkpointLat, setCheckpointLat] = useState('');
   const [checkpointLng, setCheckpointLng] = useState('');
@@ -103,6 +111,7 @@ export default function AdminPage() {
   const [checkpointPoints, setCheckpointPoints] = useState('20');
   const [usePuzzleChain, setUsePuzzleChain] = useState(false);
   const [puzzleSteps, setPuzzleSteps] = useState<PuzzleStepConfig[]>([]);
+  const qrCodeGeneratorRef = useRef<QRCodeGeneratorRef>(null);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -251,6 +260,8 @@ export default function AdminPage() {
       };
       if (checkpointUnlockMethod === 'qr_code') {
         checkpointData.qr_code_value = checkpointQRCode;
+        checkpointData.is_dud_qr = checkpointIsDudQr;
+        checkpointData.dud_message = checkpointIsDudQr ? checkpointDudMessage : null;
       } else if (checkpointUnlockMethod === 'manual_code') {
         checkpointData.manual_code = checkpointManualCode;
       } else if (checkpointUnlockMethod === 'gps') {
@@ -260,6 +271,25 @@ export default function AdminPage() {
       }
       const { data: checkpoint, error } = await supabase.from('checkpoints').insert(checkpointData).select().single();
       if (error) throw error;
+
+      // Generate and upload QR code image if QR code unlock method
+      if (checkpointUnlockMethod === 'qr_code' && checkpoint && checkpointQRCode && qrCodeGeneratorRef.current) {
+        try {
+          // Generate QR code image data URL from the component
+          const qrCodeDataUrl = await qrCodeGeneratorRef.current.generateImage();
+          // Upload to storage
+          const qrImageUrl = await uploadQRCode(qrCodeDataUrl, checkpoint.id);
+          // Update checkpoint with image URL
+          await supabase
+            .from('checkpoints')
+            .update({ qr_code_image_url: qrImageUrl })
+            .eq('id', checkpoint.id);
+          setCheckpointQRCodeImageUrl(qrImageUrl);
+        } catch (qrError: any) {
+          console.error('Error generating/uploading QR code:', qrError);
+          // Don't fail checkpoint creation if QR upload fails
+        }
+      }
 
       // Save puzzle steps if using puzzle chain
       if (usePuzzleChain && checkpoint) {
@@ -296,6 +326,9 @@ export default function AdminPage() {
       setCheckpointHint2('');
       setCheckpointHint3('');
       setCheckpointQRCode('');
+      setCheckpointQRCodeImageUrl(null);
+      setCheckpointIsDudQr(false);
+      setCheckpointDudMessage('Try again! This is not the right QR code.');
       setCheckpointManualCode('');
       setCheckpointLat('');
       setCheckpointLng('');
@@ -334,6 +367,8 @@ export default function AdminPage() {
       };
       if (checkpointUnlockMethod === 'qr_code') {
         checkpointData.qr_code_value = checkpointQRCode;
+        checkpointData.is_dud_qr = checkpointIsDudQr;
+        checkpointData.dud_message = checkpointIsDudQr ? checkpointDudMessage : null;
         checkpointData.manual_code = null;
         checkpointData.lat = null;
         checkpointData.lng = null;
@@ -356,6 +391,25 @@ export default function AdminPage() {
         .update(checkpointData)
         .eq('id', editingCheckpoint.id);
       if (error) throw error;
+
+      // Generate and upload QR code image if QR code unlock method
+      if (checkpointUnlockMethod === 'qr_code' && checkpointQRCode && qrCodeGeneratorRef.current) {
+        try {
+          // Generate QR code image data URL from the component
+          const qrCodeDataUrl = await qrCodeGeneratorRef.current.generateImage();
+          // Upload to storage
+          const qrImageUrl = await uploadQRCode(qrCodeDataUrl, editingCheckpoint.id);
+          // Update checkpoint with image URL
+          await supabase
+            .from('checkpoints')
+            .update({ qr_code_image_url: qrImageUrl })
+            .eq('id', editingCheckpoint.id);
+          setCheckpointQRCodeImageUrl(qrImageUrl);
+        } catch (qrError: any) {
+          console.error('Error generating/uploading QR code:', qrError);
+          // Don't fail checkpoint update if QR upload fails
+        }
+      }
 
       // Delete existing puzzle steps
       await supabase.from('puzzle_steps').delete().eq('checkpoint_id', editingCheckpoint.id);
@@ -397,6 +451,9 @@ export default function AdminPage() {
       setCheckpointHint2('');
       setCheckpointHint3('');
       setCheckpointQRCode('');
+      setCheckpointQRCodeImageUrl(null);
+      setCheckpointIsDudQr(false);
+      setCheckpointDudMessage('Try again! This is not the right QR code.');
       setCheckpointManualCode('');
       setCheckpointLat('');
       setCheckpointLng('');
@@ -422,6 +479,9 @@ export default function AdminPage() {
     setCheckpointHint3(checkpoint.hint_3 || '');
     setCheckpointUnlockMethod(checkpoint.unlock_method as 'qr_code' | 'gps' | 'manual_code');
     setCheckpointQRCode(checkpoint.qr_code_value || '');
+    setCheckpointQRCodeImageUrl(checkpoint.qr_code_image_url || null);
+    setCheckpointIsDudQr(checkpoint.is_dud_qr || false);
+    setCheckpointDudMessage(checkpoint.dud_message || 'Try again! This is not the right QR code.');
     setCheckpointManualCode(checkpoint.manual_code || '');
     setCheckpointLat(checkpoint.lat?.toString() || '');
     setCheckpointLng(checkpoint.lng?.toString() || '');
@@ -459,6 +519,10 @@ export default function AdminPage() {
   const handleDeleteCheckpoint = async (id: string) => {
     if (!confirm('Are you sure? This will delete this checkpoint and all progress!')) return;
     try {
+      // Delete QR code image from storage
+      await deleteQRCode(id);
+      
+      // Delete checkpoint (cascade will handle related data)
       const { error } = await supabase.from('checkpoints').delete().eq('id', id);
       if (error) throw error;
       alert('Checkpoint deleted!');
@@ -880,14 +944,17 @@ export default function AdminPage() {
                     </div>
                     {checkpointUnlockMethod === 'qr_code' && (
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">QR Code Value</label>
-                        <input
-                          type="text"
-                          value={checkpointQRCode}
-                          onChange={(e) => setCheckpointQRCode(e.target.value)}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base text-gray-900 bg-white"
-                          required
-                          placeholder="The value that the QR code should contain"
+                        <QRCodeGenerator
+                          ref={qrCodeGeneratorRef}
+                          checkpointId={editingCheckpoint?.id}
+                          qrCodeValue={checkpointQRCode}
+                          qrCodeImageUrl={checkpointQRCodeImageUrl}
+                          isDudQr={checkpointIsDudQr}
+                          dudMessage={checkpointDudMessage}
+                          onValueChange={setCheckpointQRCode}
+                          onImageUrlChange={setCheckpointQRCodeImageUrl}
+                          onDudChange={setCheckpointIsDudQr}
+                          onDudMessageChange={setCheckpointDudMessage}
                         />
                       </div>
                     )}

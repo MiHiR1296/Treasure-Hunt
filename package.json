@@ -20,7 +20,8 @@
     "react-highlight-words": "^0.20.0",
     "react-leaflet": "^4.2.1",
     "sudoku-core": "^1.0.0",
-    "interactjs": "^1.10.27"
+    "interactjs": "^1.10.27",
+    "qrcode.react": "^4.2.0"
   },
   "devDependencies": {
     "@types/leaflet": "^1.9.8",

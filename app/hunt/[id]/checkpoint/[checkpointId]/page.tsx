@@ -12,9 +12,11 @@ import PuzzleChainRenderer from '@/components/puzzles/PuzzleChainRenderer';
 import ErrorPopup from '@/components/ErrorPopup';
 import SuccessPopup from '@/components/SuccessPopup';
 import HintsModal from '@/components/HintsModal';
+import QRScannerModal from '@/components/QRScannerModal';
 
 interface Checkpoint {
   id: string;
+  hunt_id?: string;
   title: string;
   description: string | null;
   clue_text?: string; // Kept for backward compatibility
@@ -24,6 +26,9 @@ interface Checkpoint {
   hint_3?: string | null;
   unlock_method: 'qr_code' | 'gps' | 'manual_code';
   qr_code_value: string | null;
+  qr_code_image_url?: string | null;
+  is_dud_qr?: boolean;
+  dud_message?: string | null;
   manual_code: string | null;
   lat: number | null;
   lng: number | null;
@@ -46,8 +51,10 @@ export default function CheckpointPage() {
   const [showErrorPopup, setShowErrorPopup] = useState(false);
   const [showSuccessPopup, setShowSuccessPopup] = useState(false);
   const [showHintsModal, setShowHintsModal] = useState(false);
+  const [showQRScannerModal, setShowQRScannerModal] = useState(false);
   const [currentPoints, setCurrentPoints] = useState(20);
   const [isUnlocking, setIsUnlocking] = useState(false);
+  const [dudQrMessage, setDudQrMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (!team) {
@@ -63,7 +70,7 @@ export default function CheckpointPage() {
     try {
       const { data, error: fetchError } = await supabase
         .from('checkpoints')
-        .select('*')
+        .select('*, hunt_id')
         .eq('id', checkpointId)
         .single();
 
@@ -168,15 +175,51 @@ export default function CheckpointPage() {
     router.push(`/hunt/${huntId}`);
   };
 
-  const handleQRScan = (decodedText: string) => {
+  const handleQRScan = async (decodedText: string) => {
     if (!checkpoint) return;
 
-    if (decodedText === checkpoint.qr_code_value) {
+    const scannedValue = decodedText.trim();
+    const expectedValue = checkpoint.qr_code_value?.trim();
+
+    // Check if scanned QR is a dud QR
+    // First check if this checkpoint itself is a dud QR
+    if (checkpoint.is_dud_qr && scannedValue === expectedValue) {
+      setDudQrMessage(checkpoint.dud_message || 'Try again! This is not the right QR code.');
+      setShowErrorPopup(true);
+      setShowQRScannerModal(false);
+      return;
+    }
+
+    // Check if scanned QR matches any dud QR in the hunt
+    // We'll check the database for dud QRs with this value
+    try {
+      const { data: dudCheckpoints } = await supabase
+        .from('checkpoints')
+        .select('dud_message')
+        .eq('hunt_id', checkpoint.hunt_id || '')
+        .eq('is_dud_qr', true)
+        .eq('qr_code_value', scannedValue)
+        .limit(1);
+
+      if (dudCheckpoints && dudCheckpoints.length > 0) {
+        setDudQrMessage(dudCheckpoints[0].dud_message || 'Try again! This is not the right QR code.');
+        setShowErrorPopup(true);
+        setShowQRScannerModal(false);
+        return;
+      }
+    } catch (err) {
+      // Continue with validation if check fails
+    }
+
+    // Validate QR code
+    if (scannedValue === expectedValue) {
       setError(''); // Clear any previous errors
       setShowErrorPopup(false); // Close error popup if open
+      setShowQRScannerModal(false);
       handleUnlock();
     } else {
       setShowErrorPopup(true);
+      setShowQRScannerModal(false);
     }
   };
 
@@ -267,10 +310,34 @@ export default function CheckpointPage() {
             </div>
           )}
 
+          {/* QR Scanner Button - Always Visible for QR Code Checkpoints */}
+          {checkpoint.unlock_method === 'qr_code' && !isUnlocked && (
+            <div className="bg-indigo-50 border-2 border-indigo-200 rounded-xl p-4 mb-4">
+              <button
+                onClick={() => setShowQRScannerModal(true)}
+                className="w-full bg-indigo-600 text-white py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors text-base flex items-center justify-center gap-2"
+              >
+                📷 Scan QR Code
+              </button>
+              <p className="text-xs text-indigo-700 mt-2 text-center">
+                Scan the QR code at the checkpoint location to unlock
+              </p>
+            </div>
+          )}
+
           {!isUnlocked ? (
             <div className="space-y-4 md:space-y-6">
-              {checkpoint.unlock_method === 'qr_code' && (
-                <QRScanner onScanSuccess={handleQRScan} onError={() => setShowErrorPopup(true)} />
+              {/* Show puzzle chain if exists (optional hints to QR location) */}
+              {checkpoint.use_puzzle_chain && (
+                <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
+                  <p className="text-sm text-blue-800 mb-3">
+                    💡 These puzzles will help you find the QR code location. You can skip them and scan the QR code directly if you already know where it is.
+                  </p>
+                  <PuzzleChainRenderer
+                    checkpointId={checkpointId}
+                    onComplete={handlePuzzleChainComplete}
+                  />
+                </div>
               )}
 
               {checkpoint.unlock_method === 'gps' && checkpoint.lat && checkpoint.lng && (
@@ -287,21 +354,15 @@ export default function CheckpointPage() {
               )}
             </div>
           ) : (
-            checkpoint.use_puzzle_chain ? (
-              <PuzzleChainRenderer
-                checkpointId={checkpointId}
-                onComplete={handlePuzzleChainComplete}
-              />
-            ) : (
-              <ClueDisplay
-                checkpointId={checkpointId}
-                hint1={checkpoint.hint_1}
-                hint2={checkpoint.hint_2}
-                hint3={checkpoint.hint_3}
-                onNext={handleNext}
-                checkpointPoints={checkpoint.points || 20}
-              />
-            )
+            // After unlock, show question/hints interface
+            <ClueDisplay
+              checkpointId={checkpointId}
+              hint1={checkpoint.hint_1}
+              hint2={checkpoint.hint_2}
+              hint3={checkpoint.hint_3}
+              onNext={handleNext}
+              checkpointPoints={checkpoint.points || 20}
+            />
           )}
 
           {showSuccessPopup && (
@@ -325,9 +386,29 @@ export default function CheckpointPage() {
 
           {showErrorPopup && !showSuccessPopup && (
             <ErrorPopup
-              message="Incorrect code. Please try again."
-              onClose={() => setShowErrorPopup(false)}
-              onTryAgain={() => setShowErrorPopup(false)}
+              message={dudQrMessage || "Incorrect code. Please try again."}
+              onClose={() => {
+                setShowErrorPopup(false);
+                setDudQrMessage(null);
+              }}
+              onTryAgain={() => {
+                setShowErrorPopup(false);
+                setDudQrMessage(null);
+                if (checkpoint?.unlock_method === 'qr_code') {
+                  setShowQRScannerModal(true);
+                }
+              }}
+            />
+          )}
+
+          {showQRScannerModal && checkpoint.unlock_method === 'qr_code' && (
+            <QRScannerModal
+              isOpen={showQRScannerModal}
+              onClose={() => setShowQRScannerModal(false)}
+              onScanSuccess={handleQRScan}
+              expectedValue={checkpoint.qr_code_value || undefined}
+              isDudQr={checkpoint.is_dud_qr}
+              dudMessage={checkpoint.dud_message || undefined}
             />
           )}
 
