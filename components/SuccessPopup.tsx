@@ -1,6 +1,5 @@
 'use client';
 
-import { useEffect } from 'react';
 import Confetti from './Confetti';
 
 interface SuccessPopupProps {
@@ -12,15 +11,11 @@ interface SuccessPopupProps {
 export default function SuccessPopup({ 
   message = 'Checkpoint Unlocked!', 
   onClose,
-  autoCloseDelay = 2500 
+  autoCloseDelay 
 }: SuccessPopupProps) {
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      onClose();
-    }, autoCloseDelay);
-
-    return () => clearTimeout(timer);
-  }, [onClose, autoCloseDelay]);
+  // Don't auto-close - require user to click button
+  // Only auto-close if autoCloseDelay is explicitly set and > 0
+  // But for checkpoint completion, we want manual close
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -34,10 +29,12 @@ export default function SuccessPopup({
           <p className="text-gray-600 mb-4">
             Great job! You've unlocked this checkpoint.
           </p>
-          <div className="mt-6">
-            <div className="inline-block animate-spin text-indigo-600 text-4xl">⏳</div>
-            <p className="text-sm text-gray-500 mt-2">Redirecting...</p>
-          </div>
+          <button
+            onClick={onClose}
+            className="mt-6 w-full bg-indigo-600 text-white py-3 px-6 rounded-lg font-bold text-lg hover:bg-indigo-700 transition-colors shadow-lg"
+          >
+            OK
+          </button>
         </div>
       </div>
       <style jsx>{`

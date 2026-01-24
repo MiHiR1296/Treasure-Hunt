@@ -172,7 +172,8 @@ export default function CheckpointPage() {
 
   const handleSuccessPopupClose = () => {
     setShowSuccessPopup(false);
-    router.push(`/hunt/${huntId}`);
+    // Don't redirect - let user stay on checkpoint page to complete it
+    // User will manually navigate away when ready
   };
 
   const handleQRScan = async (decodedText: string) => {
@@ -269,12 +270,9 @@ export default function CheckpointPage() {
   };
 
   const handlePuzzleChainComplete = () => {
-    // Show success message before redirecting
+    // Show success message - user will click button to proceed manually
+    // Don't auto-redirect - let user stay on page and click to proceed
     setShowSuccessPopup(true);
-    // Redirect after a short delay to show success message
-    setTimeout(() => {
-      router.push(`/hunt/${huntId}`);
-    }, 1500);
   };
 
   if (isLoading) {
