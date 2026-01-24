@@ -34,7 +34,7 @@ export default function TextAnswerInput({ onAnswerSubmit, placeholder = 'Enter y
             setError('');
           }}
           placeholder={placeholder}
-          className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-indigo-500 focus:outline-none text-lg"
+          className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-indigo-500 focus:outline-none text-lg font-medium text-gray-900 bg-white placeholder:text-gray-500"
         />
         {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
       </div>

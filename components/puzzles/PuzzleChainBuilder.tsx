@@ -167,7 +167,7 @@ function PuzzleStepEditor({
                 type="file"
                 accept="image/*"
                 onChange={handleImageChange}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 font-medium bg-white placeholder:text-gray-500"
               />
               {step.puzzle_image_url && (
                 <img src={step.puzzle_image_url} alt="Preview" className="mt-2 max-w-xs rounded-lg" />
@@ -186,7 +186,7 @@ function PuzzleStepEditor({
                   onChange={(e) => onUpdate({
                     puzzle_config: { ...step.puzzle_config, rows: parseInt(e.target.value) || 3 },
                   })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 font-medium bg-white placeholder:text-gray-500"
                 />
               </div>
               <div>
@@ -201,7 +201,7 @@ function PuzzleStepEditor({
                   onChange={(e) => onUpdate({
                     puzzle_config: { ...step.puzzle_config, columns: parseInt(e.target.value) || 3 },
                   })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 font-medium bg-white placeholder:text-gray-500"
                 />
               </div>
             </div>
@@ -221,7 +221,7 @@ function PuzzleStepEditor({
                   const solution = e.target.value.split(',').map(n => parseInt(n.trim()) || 0);
                   onUpdate({ puzzle_config: { ...step.puzzle_config, solution } });
                 }}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 font-medium bg-white placeholder:text-gray-500"
                 rows={3}
                 placeholder="1,2,3,4,5,6,7,8,9,..."
               />
@@ -243,7 +243,7 @@ function PuzzleStepEditor({
                 type="file"
                 accept="image/*"
                 onChange={handleImageChange}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 font-medium bg-white placeholder:text-gray-500"
               />
               {step.puzzle_image_url && (
                 <img src={step.puzzle_image_url} alt="Preview" className="mt-2 max-w-xs rounded-lg" />
@@ -260,7 +260,7 @@ function PuzzleStepEditor({
                   const answers = e.target.value.split(',').map(a => a.trim()).filter(Boolean);
                   onUpdate({ puzzle_config: { ...step.puzzle_config, answers } });
                 }}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 font-medium bg-white placeholder:text-gray-500"
                 placeholder="Answer1, Answer2, Answer3"
               />
             </div>
@@ -278,7 +278,7 @@ function PuzzleStepEditor({
                 type="file"
                 accept="image/*"
                 onChange={handleImageChange}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 font-medium bg-white placeholder:text-gray-500"
               />
               {step.puzzle_image_url && (
                 <img src={step.puzzle_image_url} alt="Preview" className="mt-2 max-w-xs rounded-lg" />
@@ -295,7 +295,7 @@ function PuzzleStepEditor({
                   const words = e.target.value.split(',').map(w => w.trim()).filter(Boolean);
                   onUpdate({ puzzle_config: { ...step.puzzle_config, words } });
                 }}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 font-medium bg-white placeholder:text-gray-500"
                 placeholder="WORD1, WORD2, WORD3"
               />
             </div>
@@ -309,7 +309,7 @@ function PuzzleStepEditor({
                 onChange={(e) => onUpdate({
                   puzzle_config: { ...step.puzzle_config, targetWord: e.target.value },
                 })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 font-medium bg-white placeholder:text-gray-500"
                 placeholder="CLUE"
               />
             </div>
@@ -341,7 +341,7 @@ function PuzzleStepEditor({
                 type="file"
                 accept="image/*"
                 onChange={handleImageChange}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 font-medium bg-white placeholder:text-gray-500"
               />
               {step.puzzle_image_url && (
                 <img src={step.puzzle_image_url} alt="Preview" className="mt-2 max-w-xs rounded-lg" />
@@ -359,7 +359,7 @@ function PuzzleStepEditor({
                 onChange={(e) => onUpdate({
                   puzzle_config: { ...step.puzzle_config, segments: parseInt(e.target.value) || 8 },
                 })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 font-medium bg-white placeholder:text-gray-500"
               />
             </div>
             <div>
@@ -373,7 +373,7 @@ function PuzzleStepEditor({
                   const rotations = e.target.value.split(',').map(r => parseInt(r.trim()) || 0);
                   onUpdate({ puzzle_config: { ...step.puzzle_config, correctRotation: rotations } });
                 }}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 font-medium bg-white placeholder:text-gray-500"
                 placeholder="0, 90, 180, 270, ..."
               />
             </div>
@@ -431,7 +431,7 @@ function PuzzleStepEditor({
               type="text"
               value={step.title}
               onChange={(e) => onUpdate({ title: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 font-medium bg-white placeholder:text-gray-500"
               placeholder="Step title"
             />
           </div>
@@ -447,7 +447,7 @@ function PuzzleStepEditor({
                 puzzle_image_url: null,
                 imageFile: null,
               })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 font-medium bg-white"
             >
               <option value="text">Text Clue</option>
               <option value="jigsaw">Jigsaw Puzzle</option>
@@ -490,7 +490,7 @@ function PuzzleStepEditor({
                 <select
                   value={step.answer_type}
                   onChange={(e) => onUpdate({ answer_type: e.target.value as AnswerType })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 font-medium bg-white placeholder:text-gray-500"
                 >
                   <option value="text">Text Answer</option>
                   <option value="qr_code">QR Code</option>
@@ -504,7 +504,7 @@ function PuzzleStepEditor({
                   type="text"
                   value={step.answer_value || ''}
                   onChange={(e) => onUpdate({ answer_value: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 font-medium bg-white placeholder:text-gray-500"
                   placeholder={step.answer_type === 'qr_code' ? 'QR code value' : 'Expected answer'}
                 />
               </div>

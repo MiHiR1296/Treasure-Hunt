@@ -138,10 +138,8 @@ export default function ClueDisplay({
       setShowConfetti(true);
       setIsCompleting(false);
       
-      // Call onNext after a short delay to show confetti
-      setTimeout(() => {
-        onNext();
-      }, 2000);
+      // Don't auto-redirect - show success popup and let user click to proceed
+      // User will click the button to proceed
     } catch (err: any) {
       console.error('Error completing checkpoint:', err);
       setIsCompleting(false);
@@ -256,20 +254,44 @@ export default function ClueDisplay({
         </div>
       )}
 
-      {/* Complete/Next Button - Always visible */}
-      <div className="space-y-3" style={{ position: 'relative', zIndex: 10 }}>
-        <button
-          onClick={handleComplete}
-          className="w-full bg-green-600 text-white py-3 rounded-lg font-semibold hover:bg-green-700 transition-colors text-lg disabled:opacity-50 disabled:cursor-not-allowed relative z-10"
-          disabled={showConfetti || isCompleting || !team}
-          type="button"
-        >
-          {isCompleting ? 'Completing...' : showConfetti ? 'Completing...' : 'Mark as Complete & Next Checkpoint →'}
-        </button>
-        <p className="text-xs text-gray-500 text-center">
-          Click to mark this checkpoint as completed and proceed to the next one
-        </p>
-      </div>
+      {/* Success Popup - Show when completed */}
+      {showConfetti && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full text-center space-y-6">
+            <div className="text-6xl mb-4">🎉</div>
+            <h2 className="text-3xl font-bold text-gray-900">Checkpoint Completed!</h2>
+            <p className="text-lg text-gray-700">
+              You earned <span className="font-bold text-indigo-600">{currentPoints} points</span> for this checkpoint!
+            </p>
+            <button
+              onClick={() => {
+                setShowConfetti(false);
+                onNext();
+              }}
+              className="w-full bg-green-600 text-white py-4 rounded-lg font-bold text-xl hover:bg-green-700 transition-colors shadow-lg"
+            >
+              YEA!! 🎉
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Complete/Next Button - Hidden when completed */}
+      {!showConfetti && (
+        <div className="space-y-3" style={{ position: 'relative', zIndex: 10 }}>
+          <button
+            onClick={handleComplete}
+            className="w-full bg-green-600 text-white py-3 rounded-lg font-semibold hover:bg-green-700 transition-colors text-lg disabled:opacity-50 disabled:cursor-not-allowed relative z-10"
+            disabled={isCompleting || !team}
+            type="button"
+          >
+            {isCompleting ? 'Completing...' : 'Mark as Complete & Next Checkpoint →'}
+          </button>
+          <p className="text-xs text-gray-500 text-center">
+            Click to mark this checkpoint as completed and proceed to the next one
+          </p>
+        </div>
+      )}
 
       {/* Confirmation Dialog */}
       {showConfirmation && (
