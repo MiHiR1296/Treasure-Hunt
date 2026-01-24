@@ -227,7 +227,7 @@ export default function PuzzleChainRenderer({ checkpointId, onComplete }: Puzzle
                 Great work! You've completed all puzzle steps. These puzzles help you find the checkpoint location.
               </p>
               <p className="text-blue-600 text-sm mt-2 font-semibold">
-                Now unlock the checkpoint by scanning the QR code or entering the code above.
+                Now unlock the checkpoint by scanning the QR code or entering the answer above.
               </p>
             </div>
           </div>
