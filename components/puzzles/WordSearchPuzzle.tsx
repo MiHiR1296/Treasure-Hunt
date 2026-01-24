@@ -314,7 +314,7 @@ export default function WordSearchPuzzle({
           onTouchEnd={handleEnd}
           style={{ touchAction: 'none', userSelect: 'none' }}
         >
-          <div ref={imageRef} className="relative w-full h-full">
+          <div className="relative w-full h-full">
             <Image
               src={imageUrl}
               alt="Word search puzzle"
