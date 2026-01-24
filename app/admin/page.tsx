@@ -52,6 +52,7 @@ interface Team {
   id: string;
   name: string;
   created_at: string;
+  pin?: string | null;
 }
 
 interface DashboardStats {
@@ -1344,34 +1345,22 @@ function TeamCard({ team, onEdit, onDelete }: { team: Team; onEdit: (team: Team)
   useEffect(() => {
     loadMembers();
     
-    // Subscribe to realtime updates for team members
-    const channel = supabase
-      .channel(`team-members-${team.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'team_members',
-          filter: `team_id=eq.${team.id}`,
-        },
-        () => {
-          loadMembers();
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'users',
-          filter: `team_id=eq.${team.id}`,
-        },
-        () => {
-          loadMembers();
-        }
-      )
-      .subscribe();
+    // Subscribe to realtime updates for team members (users table)
+      const channel = supabase
+        .channel(`team-members-${team.id}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'users',
+            filter: `team_id=eq.${team.id}`,
+          },
+          () => {
+            loadMembers();
+          }
+        )
+        .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
@@ -1380,14 +1369,22 @@ function TeamCard({ team, onEdit, onDelete }: { team: Team; onEdit: (team: Team)
 
   const loadMembers = async () => {
     try {
-      const { data } = await supabase
-        .from('team_members')
-        .select('*')
+      // Load from users table (current system - PIN-based)
+      const { data: users, error } = await supabase
+        .from('users')
+        .select('id, name')
         .eq('team_id', team.id)
-        .order('order_index', { ascending: true });
-      setMembers(data || []);
+        .order('name', { ascending: true });
+
+      if (error) {
+        console.error('Error loading members:', error);
+        setMembers([]);
+      } else {
+        setMembers(users || []);
+      }
     } catch (err) {
       console.error('Error loading members:', err);
+      setMembers([]);
     } finally {
       setLoading(false);
     }
@@ -1401,6 +1398,11 @@ function TeamCard({ team, onEdit, onDelete }: { team: Team; onEdit: (team: Team)
           <p className="text-xs md:text-sm text-gray-700">
             Joined: {new Date(team.created_at).toLocaleString()}
           </p>
+          {team.pin && (
+            <p className="text-xs md:text-sm text-gray-700 mt-1">
+              <span className="font-semibold">PIN:</span> <span className="font-mono bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded">{team.pin}</span>
+            </p>
+          )}
           {!loading && members.length > 0 && (
             <div className="mt-2">
               <p className="text-xs text-gray-800 mb-1">Members ({members.length}):</p>
@@ -1412,6 +1414,9 @@ function TeamCard({ team, onEdit, onDelete }: { team: Team; onEdit: (team: Team)
                 ))}
               </div>
             </div>
+          )}
+          {!loading && members.length === 0 && (
+            <p className="text-xs text-gray-500 mt-2">No members found</p>
           )}
         </div>
         <div className="flex gap-2">
