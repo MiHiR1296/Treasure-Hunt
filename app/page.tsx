@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { useTeam } from '@/lib/context/TeamContext';
 import { useRouter } from 'next/navigation';
 
@@ -26,14 +27,30 @@ export default function Home() {
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
       <div className="max-w-2xl w-full bg-white rounded-2xl shadow-xl p-8 md:p-12 text-center">
         <div className="mb-8">
+          {/* Logo */}
+          <div className="mb-6 flex justify-center">
+            <div className="relative w-48 h-48 md:w-56 md:h-56">
+              <Image
+                src="/logo.png"
+                alt="Kanchanjanga CHS Treasure Hunt Logo"
+                fill
+                className="object-contain"
+                priority
+              />
+            </div>
+          </div>
+          
           <h1 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">
-            🎯 Republic Day Treasure Hunt
+            The Grand Kanchanjanga Quest
           </h1>
-          <p className="text-xl text-gray-600 mb-2">
-            Lokdhara, Kalyan East, Maharashtra
+          <p className="text-xl text-gray-700 mb-2 font-semibold">
+            Kanchanjanga Society
           </p>
-          <p className="text-gray-500">
-            Explore iconic local spots and find the hidden treasure!
+          <p className="text-lg text-gray-600 mb-3">
+            A Republic Day Treasure Hunt Experience 🇮🇳
+          </p>
+          <p className="text-base text-gray-600">
+            Join us for our annual 2026 community event! This treasure hunt brings everyone together for an exciting day of adventure, fun, and friendly competition. Connect with neighbors, explore your community, and create lasting memories together.
           </p>
         </div>
 
@@ -42,10 +59,10 @@ export default function Home() {
             <h2 className="font-semibold text-gray-900 mb-2">How to Play</h2>
             <ul className="text-left text-gray-700 space-y-1 text-sm">
               <li>• Form a team and choose a team name</li>
-              <li>• Visit checkpoints at iconic locations</li>
-              <li>• Unlock clues using QR codes, GPS, or secret codes</li>
-              <li>• Solve riddles to find the next checkpoint</li>
-              <li>• Be the first to find the treasure!</li>
+              <li>• Visit checkpoints at designated locations</li>
+              <li>• Scan QR codes to unlock clues and puzzles</li>
+              <li>• Solve challenges to reveal the next checkpoint</li>
+              <li>• Complete all checkpoints and top the leaderboard!</li>
             </ul>
           </div>
         </div>
