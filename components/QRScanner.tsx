@@ -89,7 +89,7 @@ export default function QRScanner({ onScanSuccess, onError }: QRScannerProps) {
               videoTrackRef.current = videoTrack;
               
               // Check if flashlight is supported
-              const capabilities = videoTrack.getCapabilities();
+              const capabilities = videoTrack.getCapabilities() as any;
               if (capabilities.torch !== undefined) {
                 setFlashlightSupported(true);
               } else {
