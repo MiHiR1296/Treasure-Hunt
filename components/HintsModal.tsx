@@ -84,15 +84,40 @@ export default function HintsModal({
       const newHintsUsed = hintsUsed + 1;
       const newPoints = getRemainingPointsAfterHint(currentPoints);
 
-      // Update progress
-      await supabase
+      // Check if progress exists
+      const { data: existingProgress } = await supabase
         .from('progress')
-        .update({
-          hints_used: newHintsUsed,
-          points_earned: newPoints,
-        })
+        .select('id')
         .eq('team_id', team.id)
-        .eq('checkpoint_id', checkpointId);
+        .eq('checkpoint_id', checkpointId)
+        .maybeSingle();
+
+      if (existingProgress) {
+        // Update existing progress
+        await supabase
+          .from('progress')
+          .update({
+            hints_used: newHintsUsed,
+            points_earned: newPoints,
+          })
+          .eq('team_id', team.id)
+          .eq('checkpoint_id', checkpointId);
+      } else {
+        // Create progress record if it doesn't exist (hints used before unlocking)
+        // Use upsert to handle race conditions
+        await supabase
+          .from('progress')
+          .upsert({
+            team_id: team.id,
+            checkpoint_id: checkpointId,
+            hints_used: newHintsUsed,
+            points_earned: newPoints,
+            unlocked_at: null, // Not unlocked yet
+            completed_at: null,
+          }, {
+            onConflict: 'team_id,checkpoint_id',
+          });
+      }
 
       setHintsUsed(newHintsUsed);
       setCurrentPoints(newPoints);

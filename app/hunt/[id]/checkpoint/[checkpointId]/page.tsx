@@ -91,13 +91,17 @@ export default function CheckpointPage() {
     try {
       const { data } = await supabase
         .from('progress')
-        .select('checkpoint_id')
+        .select('checkpoint_id, points_earned, hints_used')
         .eq('team_id', team.id)
         .eq('checkpoint_id', checkpointId)
         .maybeSingle();
 
       if (data) {
         setIsUnlocked(true);
+        // Load current points if checkpoint is already unlocked
+        if (data.points_earned !== undefined && data.points_earned !== null) {
+          setCurrentPoints(data.points_earned);
+        }
       }
     } catch (err) {
       // Not unlocked yet
@@ -114,43 +118,61 @@ export default function CheckpointPage() {
     try {
       const basePoints = checkpoint.points || 20;
       
-      // Check if progress already exists
+      // Check if progress already exists (might have been created when hints were used)
       const { data: existingProgress } = await supabase
         .from('progress')
-        .select('id')
+        .select('id, points_earned, hints_used')
         .eq('team_id', team.id)
         .eq('checkpoint_id', checkpointId)
         .maybeSingle();
 
       if (existingProgress) {
-        // Already unlocked, just show success and redirect
-        console.log('Checkpoint already unlocked, showing success popup');
-        setIsUnlocked(true);
-        setShowSuccessPopup(true);
-        setIsUnlocking(false);
-        return;
-      }
-
-      console.log('Unlocking checkpoint...', { teamId: team.id, checkpointId, basePoints });
-
-      // Record progress with initial points (will be updated when completed)
-      const { error: progressError } = await supabase
-        .from('progress')
-        .insert({
-          team_id: team.id,
-          checkpoint_id: checkpointId,
-          unlocked_at: new Date().toISOString(),
-          points_earned: basePoints, // Start with full points, will deduct for hints
-          hints_used: 0,
-        });
-
-      if (progressError) {
-        // If it's a duplicate key error, that's okay - just proceed
-        if (progressError.code === '23505') {
-          console.log('Progress already exists (duplicate key), proceeding...');
+        // Progress exists - check if already unlocked
+        if (existingProgress.hints_used !== undefined && existingProgress.points_earned !== undefined) {
+          // Hints were used before unlocking, preserve the existing points
+          console.log('Progress exists with hints used, preserving points:', existingProgress);
+          // Update to mark as unlocked, but keep existing points_earned
+          await supabase
+            .from('progress')
+            .update({
+              unlocked_at: new Date().toISOString(),
+            })
+            .eq('team_id', team.id)
+            .eq('checkpoint_id', checkpointId);
+          
+          // Update current points display to match what's in DB
+          setCurrentPoints(existingProgress.points_earned);
         } else {
-          console.error('Progress insert error:', progressError);
-          throw progressError;
+          // Already unlocked, just show success
+          console.log('Checkpoint already unlocked, showing success popup');
+          setIsUnlocked(true);
+          setShowSuccessPopup(true);
+          setIsUnlocking(false);
+          return;
+        }
+      } else {
+        // No progress exists, create new record
+        console.log('Unlocking checkpoint...', { teamId: team.id, checkpointId, basePoints });
+
+        // Record progress with initial points (will be updated when completed)
+        const { error: progressError } = await supabase
+          .from('progress')
+          .insert({
+            team_id: team.id,
+            checkpoint_id: checkpointId,
+            unlocked_at: new Date().toISOString(),
+            points_earned: basePoints, // Start with full points, will deduct for hints
+            hints_used: 0,
+          });
+
+        if (progressError) {
+          // If it's a duplicate key error, that's okay - just proceed
+          if (progressError.code === '23505') {
+            console.log('Progress already exists (duplicate key), proceeding...');
+          } else {
+            console.error('Progress insert error:', progressError);
+            throw progressError;
+          }
         }
       }
 

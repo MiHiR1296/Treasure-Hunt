@@ -50,8 +50,22 @@ export default function QRScanner({ onScanSuccess, onError }: QRScannerProps) {
           stopScanning();
         },
         (errorMessage) => {
-          // Error callback - ignore if it's just "not found"
-          if (!errorMessage.includes('No QR code found')) {
+          // Error callback - ignore common scanning errors that occur during normal scanning
+          // These are expected when scanning wrong QR codes, taking time to focus, etc.
+          const ignorableErrors = [
+            'No QR code found',
+            'No MultiFormat readers were able to detect the code',
+            'QR code parse error',
+            'error_Z',
+            'NotFoundException',
+          ];
+          
+          const shouldIgnore = ignorableErrors.some(ignorable => 
+            errorMessage.includes(ignorable)
+          );
+          
+          if (!shouldIgnore) {
+            // Only show meaningful errors (like camera permission issues)
             setError(errorMessage);
           }
         }

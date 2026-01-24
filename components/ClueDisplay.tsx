@@ -51,9 +51,15 @@ export default function ClueDisplay({
       if (progressData) {
         const used = progressData.hints_used || 0;
         setHintsUsed(used);
-        // Calculate current points based on hints used
-        const points = calculatePoints(checkpointPoints, used);
-        setCurrentPoints(points.pointsEarned);
+        // Use points_earned from database if available (already accounts for hints)
+        // Otherwise calculate from base points
+        if (progressData.points_earned !== null && progressData.points_earned !== undefined) {
+          setCurrentPoints(progressData.points_earned);
+        } else {
+          // Fallback: calculate current points based on hints used
+          const points = calculatePoints(checkpointPoints, used);
+          setCurrentPoints(points.pointsEarned);
+        }
       }
     } catch (err) {
       // No progress yet, use default
