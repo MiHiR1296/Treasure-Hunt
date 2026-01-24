@@ -1,4 +1,5 @@
 // Jigsaw puzzle piece generator with interlocking tabs and notches
+// Based on best practices for canvas-based jigsaw puzzle generation
 
 import { PieceShape, Tab, TabType } from './jigsawTypes';
 
@@ -14,22 +15,13 @@ function generateTabPattern(row: number, col: number, rows: number, cols: number
   bottom: TabType;
   left: TabType;
 } {
-  // Create alternating pattern
-  // Corners have tabs/notches on both sides
-  // Edges alternate
-  // Center pieces can have any pattern
-  
+  // Create alternating pattern for interlocking pieces
   const isTopEdge = row === 0;
   const isBottomEdge = row === rows - 1;
   const isLeftEdge = col === 0;
   const isRightEdge = col === cols - 1;
   
-  // Top edge: flat
-  // Bottom edge: tabs/notches
-  // Left edge: flat
-  // Right edge: tabs/notches
-  // Interior: alternating pattern
-  
+  // Edges are flat, interior pieces alternate tabs/notches
   const top: TabType = isTopEdge ? 'flat' : (row % 2 === 0 ? 'notch' : 'tab');
   const bottom: TabType = isBottomEdge ? 'flat' : (row % 2 === 0 ? 'tab' : 'notch');
   const left: TabType = isLeftEdge ? 'flat' : (col % 2 === 0 ? 'notch' : 'tab');
@@ -52,6 +44,8 @@ function createEdgePath(
   const dx = endX - startX;
   const dy = endY - startY;
   const length = Math.sqrt(dx * dx + dy * dy);
+  if (length === 0) return;
+  
   const unitX = dx / length;
   const unitY = dy / length;
   
@@ -85,7 +79,6 @@ function createEdgePath(
       const tabPeakX = startX + unitX * tabCenter + perpX * tabSize;
       const tabPeakY = startY + unitY * tabCenter + perpY * tabSize;
       
-      // Use quadratic curve for smooth tab
       path.quadraticCurveTo(tabPeakX, tabPeakY, tabEndX, tabEndY);
     } else {
       // Inward notch (smooth curve)
@@ -96,7 +89,6 @@ function createEdgePath(
       const notchPeakX = startX + unitX * tabCenter - perpX * tabSize;
       const notchPeakY = startY + unitY * tabCenter - perpY * tabSize;
       
-      // Use quadratic curve for smooth notch
       path.quadraticCurveTo(notchPeakX, notchPeakY, notchEndX, notchEndY);
     }
     
@@ -107,6 +99,7 @@ function createEdgePath(
 
 /**
  * Generate interlocking jigsaw puzzle pieces from an image
+ * This function properly extracts image portions and applies clipping masks
  */
 export function generateInterlockingPieces(
   image: HTMLImageElement,
@@ -124,6 +117,7 @@ export function generateInterlockingPieces(
   const fullCtx = fullCanvas.getContext('2d');
   if (!fullCtx) return pieces;
   
+  // Draw the full image to the canvas
   fullCtx.drawImage(image, 0, 0);
   
   // Generate each piece
@@ -136,15 +130,17 @@ export function generateInterlockingPieces(
       // Get tab pattern for this piece
       const tabPattern = generateTabPattern(row, col, rows, columns);
       
-      // Create piece canvas (slightly larger to accommodate tabs)
+      // Calculate padding needed for tabs (they extend beyond piece boundaries)
       const padding = Math.max(pieceWidth, pieceHeight) * TAB_SIZE * 1.5;
+      
+      // Create piece canvas (larger to accommodate tabs)
       const pieceCanvas = document.createElement('canvas');
       pieceCanvas.width = pieceWidth + padding * 2;
       pieceCanvas.height = pieceHeight + padding * 2;
       const pieceCtx = pieceCanvas.getContext('2d');
       if (!pieceCtx) continue;
       
-      // Create clipping path with tabs/notches
+      // Define the clipping path for the piece shape (centered in canvas with padding)
       const clipX = padding;
       const clipY = padding;
       const clipW = pieceWidth;
@@ -152,7 +148,7 @@ export function generateInterlockingPieces(
       
       const clipPath = new Path2D();
       
-      // Create clipping path with tabs/notches
+      // Build the piece path with tabs/notches
       // Top edge
       createEdgePath(
         clipPath,
@@ -195,38 +191,42 @@ export function generateInterlockingPieces(
       
       clipPath.closePath();
       
-      // Draw the piece image with proper clipping
-      // First, draw the image portion that corresponds to this piece
-      // We need to account for padding when extracting from source
+      // Calculate the source region from the original image
+      // We need the piece area plus padding on all sides for tabs
       const sourceX = Math.max(0, offsetX - padding);
       const sourceY = Math.max(0, offsetY - padding);
       const sourceWidth = Math.min(image.width - sourceX, pieceWidth + padding * 2);
       const sourceHeight = Math.min(image.height - sourceY, pieceHeight + padding * 2);
       
-      // Draw the image to fill the entire canvas (including padding area)
+      // Calculate where to draw this image portion in the piece canvas
+      // The piece's center (at padding, padding) should align with the image's piece center (at offsetX, offsetY)
+      const destX = padding - (offsetX - sourceX);
+      const destY = padding - (offsetY - sourceY);
+      
+      // Step 1: Draw the image portion to the piece canvas
+      // Draw the exact image region that corresponds to this piece (with padding for tabs)
       pieceCtx.drawImage(
         fullCanvas,
-        sourceX,
-        sourceY,
-        sourceWidth,
-        sourceHeight,
-        0, // Draw from top-left of canvas
-        0,
-        pieceCanvas.width, // Fill entire canvas
-        pieceCanvas.height
+        sourceX,           // Source X in original image
+        sourceY,           // Source Y in original image
+        sourceWidth,       // Source width
+        sourceHeight,      // Source height
+        destX,             // Destination X in piece canvas
+        destY,           // Destination Y in piece canvas
+        sourceWidth,       // Destination width (same as source)
+        sourceHeight       // Destination height (same as source)
       );
       
-      // Now apply the clip path to mask the image to the piece shape
+      // Step 2: Apply clipping mask using the piece path
+      // This will show only the piece shape (with tabs), hiding the rest
       pieceCtx.save();
       pieceCtx.globalCompositeOperation = 'destination-in';
       pieceCtx.fillStyle = 'black';
       pieceCtx.fill(clipPath);
       pieceCtx.restore();
       
-      // Reset composite operation for outline drawing
+      // Step 3: Reset composite operation and draw outline
       pieceCtx.globalCompositeOperation = 'source-over';
-      
-      // Draw outline for better visibility
       pieceCtx.strokeStyle = '#e5e7eb';
       pieceCtx.lineWidth = 1;
       pieceCtx.stroke(clipPath);
@@ -245,7 +245,7 @@ export function generateInterlockingPieces(
         col,
         correctPosition: { row, col },
         tabs,
-        imageData: pieceCanvas.toDataURL(),
+        imageData: pieceCanvas.toDataURL('image/png'),
         mask: new Path2D(), // Path2D can't be serialized, create empty for type compatibility
         width: pieceWidth,
         height: pieceHeight,
