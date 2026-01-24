@@ -80,7 +80,40 @@ export default function PuzzleChainRenderer({ checkpointId, onComplete }: Puzzle
     const currentStep = steps[currentStepIndex];
     if (!currentStep) return;
 
+    // Check if step is already completed
+    if (completedStepIds.has(currentStep.id)) {
+      // Step already completed - show friendly message
+      setError('');
+      // Don't throw error, just return - the UI will show completion state
+      return;
+    }
+
     try {
+      // Check if step is already in database
+      const { data: existingProgress } = await supabase
+        .from('puzzle_progress')
+        .select('step_id')
+        .eq('team_id', team.id)
+        .eq('checkpoint_id', checkpointId)
+        .eq('step_id', currentStep.id)
+        .maybeSingle();
+
+      if (existingProgress) {
+        // Already completed - update local state and proceed
+        const newCompleted = new Set(completedStepIds);
+        newCompleted.add(currentStep.id);
+        setCompletedStepIds(newCompleted);
+        
+        // Move to next step or show completion message
+        if (currentStepIndex === steps.length - 1) {
+          // Last step already completed
+          return;
+        } else {
+          setCurrentStepIndex(currentStepIndex + 1);
+        }
+        return;
+      }
+
       // Record step completion
       const { error: progressError } = await supabase
         .from('puzzle_progress')
@@ -90,7 +123,23 @@ export default function PuzzleChainRenderer({ checkpointId, onComplete }: Puzzle
           step_id: currentStep.id,
         });
 
-      if (progressError) throw progressError;
+      if (progressError) {
+        // If it's a duplicate key error, that's okay - step was already completed
+        if (progressError.code === '23505') {
+          // Duplicate key - step already completed
+          const newCompleted = new Set(completedStepIds);
+          newCompleted.add(currentStep.id);
+          setCompletedStepIds(newCompleted);
+          
+          if (currentStepIndex === steps.length - 1) {
+            return;
+          } else {
+            setCurrentStepIndex(currentStepIndex + 1);
+          }
+          return;
+        }
+        throw progressError;
+      }
 
       // Update local state
       const newCompleted = new Set(completedStepIds);
@@ -99,11 +148,6 @@ export default function PuzzleChainRenderer({ checkpointId, onComplete }: Puzzle
 
       // Check if this is the last step
       if (currentStepIndex === steps.length - 1) {
-        // Mark this step as completed in local state
-        const newCompleted = new Set(completedStepIds);
-        newCompleted.add(currentStep.id);
-        setCompletedStepIds(newCompleted);
-
         // Puzzles are complete - but checkpoint is NOT complete yet
         // User still needs to unlock the checkpoint (scan QR, enter code, etc.)
         // and then complete it via the ClueDisplay component
@@ -115,7 +159,12 @@ export default function PuzzleChainRenderer({ checkpointId, onComplete }: Puzzle
       }
     } catch (err: any) {
       console.error('Error completing step:', err);
-      setError(err.message || 'Failed to complete step');
+      // Show friendly error message instead of technical error
+      if (err.code === '23505') {
+        setError('This puzzle step has already been completed. Please proceed to unlock the checkpoint.');
+      } else {
+        setError(err.message || 'Failed to complete step');
+      }
     }
   };
 

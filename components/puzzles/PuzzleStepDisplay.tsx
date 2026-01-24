@@ -20,6 +20,8 @@ export default function PuzzleStepDisplay({
 }: PuzzleStepDisplayProps) {
   const [puzzleSolved, setPuzzleSolved] = useState(false);
   const [answerCorrect, setAnswerCorrect] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [alreadyCompleted, setAlreadyCompleted] = useState(false);
 
   const handlePuzzleSolved = () => {
     setPuzzleSolved(true);
@@ -32,8 +34,26 @@ export default function PuzzleStepDisplay({
   };
 
   const handleAnswerCorrect = () => {
+    if (isSubmitting || alreadyCompleted) return;
     setAnswerCorrect(true);
+    setIsSubmitting(true);
     onStepComplete();
+    // Reset submitting state after a delay
+    setTimeout(() => {
+      setIsSubmitting(false);
+    }, 1000);
+  };
+
+  const handleStepCompleteClick = () => {
+    if (isSubmitting || alreadyCompleted) {
+      setAlreadyCompleted(true);
+      return;
+    }
+    setIsSubmitting(true);
+    onStepComplete();
+    setTimeout(() => {
+      setIsSubmitting(false);
+    }, 1000);
   };
 
   // Some puzzles auto-complete (like jigsaw), others need answer
@@ -95,23 +115,37 @@ export default function PuzzleStepDisplay({
               <p className="text-green-900 font-bold text-lg">
                 ✓ Step {stepNumber} completed!
               </p>
-              {stepNumber < totalSteps ? (
+              {alreadyCompleted ? (
+                <p className="text-blue-700 text-sm mt-1 font-semibold">
+                  Answer already submitted for this puzzle. Now answer the checkpoint question to unlock the next checkpoint.
+                </p>
+              ) : stepNumber < totalSteps ? (
                 <p className="text-green-700 text-sm mt-1">
                   Great job! Click below to proceed to the next step.
                 </p>
               ) : (
                 <p className="text-green-700 text-sm mt-1">
-                  All steps completed! Click below to finish this checkpoint.
+                  All steps completed! Now unlock the checkpoint by scanning the QR code or entering the answer above.
                 </p>
               )}
             </div>
           </div>
-          <button
-            onClick={onStepComplete}
-            className="w-full bg-green-600 text-white py-3 px-6 rounded-lg font-semibold hover:bg-green-700 transition-colors text-base"
-          >
-            {stepNumber < totalSteps ? 'Continue to Next Step →' : 'Complete Checkpoint ✓'}
-          </button>
+          {!alreadyCompleted && (
+            <button
+              onClick={handleStepCompleteClick}
+              disabled={isSubmitting}
+              className="w-full bg-green-600 text-white py-3 px-6 rounded-lg font-semibold hover:bg-green-700 transition-colors text-base disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isSubmitting ? 'Processing...' : stepNumber < totalSteps ? 'Continue to Next Step →' : 'Mark Step Complete ✓'}
+            </button>
+          )}
+          {alreadyCompleted && (
+            <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-4">
+              <p className="text-blue-800 text-sm font-semibold text-center">
+                ✓ This puzzle step is already completed. Please proceed to unlock the checkpoint.
+              </p>
+            </div>
+          )}
         </div>
       )}
     </div>
