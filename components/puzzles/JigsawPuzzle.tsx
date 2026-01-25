@@ -1,10 +1,5 @@
 'use client';
 
-import { JigsawPuzzle as ReactJigsawPuzzle } from 'react-jigsaw-puzzle/lib';
-import 'react-jigsaw-puzzle/lib/jigsaw-puzzle.css';
-
-'use client';
-
 import { useEffect, useState } from 'react';
 import { JigsawPuzzle as ReactJigsawPuzzle } from 'react-jigsaw-puzzle/lib';
 import 'react-jigsaw-puzzle/lib/jigsaw-puzzle.css';
