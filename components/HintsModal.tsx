@@ -53,16 +53,27 @@ export default function HintsModal({
         .select('hints_used, points_earned')
         .eq('team_id', team.id)
         .eq('checkpoint_id', checkpointId)
-        .single();
+        .maybeSingle(); // Use maybeSingle instead of single to handle no record gracefully
 
       if (progressData) {
         const used = progressData.hints_used || 0;
         setHintsUsed(used);
-        const points = calculatePoints(checkpointPoints, used);
-        setCurrentPoints(points.pointsEarned);
+        // Use points_earned from DB if available, otherwise calculate
+        if (progressData.points_earned !== null && progressData.points_earned !== undefined) {
+          setCurrentPoints(progressData.points_earned);
+        } else {
+          const points = calculatePoints(checkpointPoints, used);
+          setCurrentPoints(points.pointsEarned);
+        }
+      } else {
+        // No progress yet - reset to defaults
+        setHintsUsed(0);
+        setCurrentPoints(checkpointPoints);
       }
     } catch (err) {
-      // No progress yet
+      // No progress yet - reset to defaults
+      setHintsUsed(0);
+      setCurrentPoints(checkpointPoints);
     }
   };
 

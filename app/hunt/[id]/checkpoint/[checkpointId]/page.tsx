@@ -46,6 +46,7 @@ export default function CheckpointPage() {
 
   const [checkpoint, setCheckpoint] = useState<Checkpoint | null>(null);
   const [isUnlocked, setIsUnlocked] = useState(false);
+  const [hasProgress, setHasProgress] = useState(false); // Track if any progress record exists (for hints)
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [showErrorPopup, setShowErrorPopup] = useState(false);
@@ -96,17 +97,25 @@ export default function CheckpointPage() {
         .eq('checkpoint_id', checkpointId)
         .maybeSingle();
 
-      // Only consider unlocked if unlocked_at is not null
-      // (hints can be used before unlocking, creating a progress record with unlocked_at: null)
-      if (data && data.unlocked_at !== null) {
-        setIsUnlocked(true);
-        // Load current points if checkpoint is already unlocked
-        if (data.points_earned !== undefined && data.points_earned !== null) {
-          setCurrentPoints(data.points_earned);
+      if (data) {
+        // Track if progress exists (for hints functionality)
+        setHasProgress(true);
+        
+        // Only consider unlocked if unlocked_at is not null
+        // (hints can be used before unlocking, creating a progress record with unlocked_at: null)
+        if (data.unlocked_at !== null) {
+          setIsUnlocked(true);
+          // Load current points if checkpoint is already unlocked
+          if (data.points_earned !== undefined && data.points_earned !== null) {
+            setCurrentPoints(data.points_earned);
+          }
         }
+      } else {
+        setHasProgress(false);
       }
     } catch (err) {
-      // Not unlocked yet
+      // Not unlocked yet, no progress
+      setHasProgress(false);
     }
   };
 
@@ -340,7 +349,7 @@ export default function CheckpointPage() {
             )}
           </div>
 
-          {/* Show Hints Button - Before Unlock */}
+          {/* Show Hints Button - Before Unlock (hints can always be used before unlock) */}
           {hasHints && !isUnlocked && (
             <div className="bg-yellow-50 border-2 border-yellow-200 rounded-xl p-4">
               <button

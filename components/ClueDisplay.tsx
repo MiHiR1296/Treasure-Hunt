@@ -46,7 +46,7 @@ export default function ClueDisplay({
         .select('hints_used, points_earned')
         .eq('team_id', team.id)
         .eq('checkpoint_id', checkpointId)
-        .single();
+        .maybeSingle(); // Use maybeSingle instead of single to handle no record gracefully
 
       if (progressData) {
         const used = progressData.hints_used || 0;
@@ -60,9 +60,15 @@ export default function ClueDisplay({
           const points = calculatePoints(checkpointPoints, used);
           setCurrentPoints(points.pointsEarned);
         }
+      } else {
+        // No progress yet, use defaults
+        setHintsUsed(0);
+        setCurrentPoints(checkpointPoints);
       }
     } catch (err) {
-      // No progress yet, use default
+      // No progress yet, use defaults
+      setHintsUsed(0);
+      setCurrentPoints(checkpointPoints);
     }
   };
 
