@@ -88,6 +88,7 @@ export default function ClueDisplay({
     if (!isUnlocked) {
       verifyCanComplete();
     }
+    console.log('ClueDisplay: Loading puzzle hints for checkpoint', checkpointId);
     loadPuzzleHints(); // Load individual puzzle hints
     if (usePuzzleChain) {
       loadPuzzleSteps();
@@ -737,6 +738,10 @@ export default function ClueDisplay({
       </div>
 
       {/* Hints Section - Slot-based hints (text or puzzle hints) */}
+      {(() => {
+        console.log('ClueDisplay render: hasHints =', hasHints, 'hintSlots.length =', hintSlots.length, 'puzzleChainHints.length =', puzzleChainHints.length);
+        return null;
+      })()}
       {hasHints && (
         <div className="space-y-3">
           {hintSlots.map((slot) => {

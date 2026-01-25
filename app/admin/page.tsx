@@ -442,24 +442,28 @@ export default function AdminPage() {
 
           const hintData: any = {
             checkpoint_id: checkpoint.id,
-            hint_slot: hint.hint_slot,
+            hint_slot: typeof hint.hint_slot === 'string' ? parseInt(hint.hint_slot, 10) : hint.hint_slot,
             puzzle_type: hint.puzzle_type,
             puzzle_config: hint.puzzle_config,
             puzzle_image_url: imageUrl,
-            points_cost: hint.points_cost,
+            points_cost: typeof hint.points_cost === 'string' ? parseInt(hint.points_cost, 10) : hint.points_cost,
             completion_message: hint.completion_message || null,
             show_custom_message: hint.show_custom_message,
             title: hint.title || null,
             description: hint.description || null,
           };
 
-          const { error: hintError } = await supabase.from('puzzle_hints').insert(hintData);
+          console.log('Saving puzzle hint:', hintData);
+
+          const { error: hintError, data: insertedHint } = await supabase.from('puzzle_hints').insert(hintData).select();
           if (hintError) {
+            console.error('Error saving puzzle hint:', hintError);
             if (hintError.message?.includes('puzzle_hints') || hintError.message?.includes('does not exist')) {
               throw new Error('puzzle_hints table does not exist. Please run the migration: supabase/migrations/add_puzzle_hints_system.sql');
             }
             throw hintError;
           }
+          console.log('Puzzle hint saved successfully:', insertedHint);
         }
       }
 
@@ -624,24 +628,28 @@ export default function AdminPage() {
 
           const hintData: any = {
             checkpoint_id: editingCheckpoint.id,
-            hint_slot: hint.hint_slot,
+            hint_slot: typeof hint.hint_slot === 'string' ? parseInt(hint.hint_slot, 10) : hint.hint_slot,
             puzzle_type: hint.puzzle_type,
             puzzle_config: hint.puzzle_config,
             puzzle_image_url: imageUrl,
-            points_cost: hint.points_cost,
+            points_cost: typeof hint.points_cost === 'string' ? parseInt(hint.points_cost, 10) : hint.points_cost,
             completion_message: hint.completion_message || null,
             show_custom_message: hint.show_custom_message,
             title: hint.title || null,
             description: hint.description || null,
           };
 
-          const { error: hintError } = await supabase.from('puzzle_hints').insert(hintData);
+          console.log('Saving puzzle hint (edit):', hintData);
+
+          const { error: hintError, data: insertedHint } = await supabase.from('puzzle_hints').insert(hintData).select();
           if (hintError) {
+            console.error('Error saving puzzle hint (edit):', hintError);
             if (hintError.message?.includes('puzzle_hints') || hintError.message?.includes('does not exist')) {
               throw new Error('puzzle_hints table does not exist. Please run the migration: supabase/migrations/add_puzzle_hints_system.sql');
             }
             throw hintError;
           }
+          console.log('Puzzle hint saved successfully (edit):', insertedHint);
         }
       }
 
