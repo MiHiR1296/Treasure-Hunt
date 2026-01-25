@@ -49,10 +49,15 @@ export default function MapPage() {
       if (team) {
         const { data: progressData } = await supabase
           .from('progress')
-          .select('checkpoint_id')
+          .select('checkpoint_id, completed_at')
           .eq('team_id', team.id);
 
-        completed = new Set(progressData?.map((p) => p.checkpoint_id) || []);
+        // Only include checkpoints that are actually completed (have completed_at)
+        completed = new Set(
+          progressData
+            ?.filter((p) => p.completed_at !== null)
+            .map((p) => p.checkpoint_id) || []
+        );
         setCompletedCheckpoints(completed);
       }
 
