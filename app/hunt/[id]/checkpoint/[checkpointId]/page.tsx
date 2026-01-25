@@ -91,12 +91,14 @@ export default function CheckpointPage() {
     try {
       const { data } = await supabase
         .from('progress')
-        .select('checkpoint_id, points_earned, hints_used')
+        .select('checkpoint_id, points_earned, hints_used, unlocked_at')
         .eq('team_id', team.id)
         .eq('checkpoint_id', checkpointId)
         .maybeSingle();
 
-      if (data) {
+      // Only consider unlocked if unlocked_at is not null
+      // (hints can be used before unlocking, creating a progress record with unlocked_at: null)
+      if (data && data.unlocked_at !== null) {
         setIsUnlocked(true);
         // Load current points if checkpoint is already unlocked
         if (data.points_earned !== undefined && data.points_earned !== null) {
