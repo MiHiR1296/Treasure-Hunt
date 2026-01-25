@@ -19,6 +19,7 @@ interface ClueDisplayProps {
   onNext: () => void;
   checkpointPoints?: number;
   hintCost?: number; // Points deducted per hint (independent system)
+  isUnlocked?: boolean; // Parent's unlock status - triggers re-verification
 }
 
 export default function ClueDisplay({
@@ -30,6 +31,7 @@ export default function ClueDisplay({
   onNext,
   checkpointPoints = 20,
   hintCost = 5, // Default to 5 if not provided
+  isUnlocked = false, // Parent's unlock status
 }: ClueDisplayProps) {
   // ============================================================================
   // INDEPENDENT SYSTEMS - Clear separation of concerns
@@ -86,6 +88,27 @@ export default function ClueDisplay({
       loadPuzzleSteps();
     }
   }, [checkpointId, team, usePuzzleChain]);
+
+  // Re-verify when parent indicates unlock status changed
+  useEffect(() => {
+    if (isUnlocked) {
+      // Parent says it's unlocked, re-verify to ensure database is in sync
+      // Add a small delay to ensure database update is committed
+      const timeoutId = setTimeout(() => {
+        verifyCanComplete();
+      }, 100);
+      
+      // Also retry after a longer delay in case of slow database propagation
+      const retryTimeoutId = setTimeout(() => {
+        verifyCanComplete();
+      }, 500);
+      
+      return () => {
+        clearTimeout(timeoutId);
+        clearTimeout(retryTimeoutId);
+      };
+    }
+  }, [isUnlocked]);
 
   // Clear flag check: canComplete = unlocked_at !== null
   // This explicitly verifies that the correct QR/code/GPS was given

@@ -415,6 +415,7 @@ export default function CheckpointPage() {
               onNext={handleNext}
               checkpointPoints={checkpoint.points || 20}
               hintCost={checkpoint.hint_cost || 5}
+              isUnlocked={isUnlocked}
             />
           )}
 
