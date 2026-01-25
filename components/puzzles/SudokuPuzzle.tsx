@@ -6,22 +6,33 @@ interface SudokuPuzzleProps {
   grid?: number[][];
   solution?: number[][];
   onSolved?: () => void;
+  initialState?: { grid?: (number | null)[][]; completed?: boolean };
+  onStateChange?: (state: { grid: (number | null)[][]; completed: boolean }) => void;
 }
 
-export default function SudokuPuzzle({ grid, solution, onSolved }: SudokuPuzzleProps) {
+export default function SudokuPuzzle({ 
+  grid, 
+  solution, 
+  onSolved,
+  initialState,
+  onStateChange,
+}: SudokuPuzzleProps) {
   const [userGrid, setUserGrid] = useState<(number | null)[][]>([]);
   const [errors, setErrors] = useState<Set<string>>(new Set());
   const [isComplete, setIsComplete] = useState(false);
 
   useEffect(() => {
-    // Initialize grid
-    if (grid) {
+    // Initialize grid - prioritize saved state, then initial grid, then empty
+    if (initialState?.grid) {
+      setUserGrid(initialState.grid);
+      setIsComplete(initialState.completed || false);
+    } else if (grid) {
       setUserGrid(grid.map(row => row.map(cell => cell === 0 ? null : cell)));
     } else {
       // Create empty 9x9 grid
       setUserGrid(Array(9).fill(null).map(() => Array(9).fill(null)));
     }
-  }, [grid]);
+  }, [grid, initialState]);
 
   const validateCell = (row: number, col: number, value: number | null): boolean => {
     if (value === null) return true;
@@ -70,6 +81,11 @@ export default function SudokuPuzzle({ grid, solution, onSolved }: SudokuPuzzleP
 
     // Check if complete and correct
     checkCompletion(newGrid);
+
+    // Emit state change
+    if (onStateChange) {
+      onStateChange({ grid: newGrid, completed: isComplete });
+    }
   };
 
   const checkCompletion = (gridToCheck: (number | null)[][]) => {
@@ -85,9 +101,14 @@ export default function SudokuPuzzle({ grid, solution, onSolved }: SudokuPuzzleP
       const matches = gridToCheck.every((row, r) =>
         row.every((cell, c) => cell === solution[r][c])
       );
-      if (matches && onSolved) {
+      if (matches) {
         setIsComplete(true);
-        onSolved();
+        if (onStateChange) {
+          onStateChange({ grid: gridToCheck, completed: true });
+        }
+        if (onSolved) {
+          onSolved();
+        }
       }
     }
   };

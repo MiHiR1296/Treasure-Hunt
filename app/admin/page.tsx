@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import Link from 'next/link';
 import PuzzleChainBuilder, { PuzzleStepConfig } from '@/components/puzzles/PuzzleChainBuilder';
+import PuzzleHintBuilder, { PuzzleHintConfig } from '@/components/admin/PuzzleHintBuilder';
 import { uploadPuzzleImage } from '@/lib/puzzles/storage';
 import QRCodeGenerator, { QRCodeGeneratorRef } from '@/components/admin/QRCodeGenerator';
 import { uploadQRCode, deleteQRCode } from '@/lib/utils/qrStorage';
@@ -121,6 +122,7 @@ export default function AdminPage() {
   const [checkpointHintCost, setCheckpointHintCost] = useState('5');
   const [usePuzzleChain, setUsePuzzleChain] = useState(false);
   const [puzzleSteps, setPuzzleSteps] = useState<PuzzleStepConfig[]>([]);
+  const [puzzleHints, setPuzzleHints] = useState<PuzzleHintConfig[]>([]);
   const qrCodeGeneratorRef = useRef<QRCodeGeneratorRef>(null);
 
   useEffect(() => {
@@ -412,6 +414,50 @@ export default function AdminPage() {
         }
       }
 
+      // Save puzzle hints
+      if (checkpoint && puzzleHints.length > 0) {
+        for (const hint of puzzleHints) {
+          let imageUrl = hint.puzzle_image_url;
+          
+          // Upload image if there's a file
+          if (hint.imageFile) {
+            const fileExt = hint.imageFile.name.split('.').pop();
+            const fileName = `${checkpoint.id}/puzzle-hint-${Date.now()}.${fileExt}`;
+            
+            const { error: uploadError } = await supabase.storage
+              .from('puzzle-images')
+              .upload(fileName, hint.imageFile, {
+                cacheControl: '3600',
+                upsert: false,
+              });
+
+            if (uploadError) throw uploadError;
+
+            const { data } = supabase.storage
+              .from('puzzle-images')
+              .getPublicUrl(fileName);
+            
+            imageUrl = data.publicUrl;
+          }
+
+          const hintData: any = {
+            checkpoint_id: checkpoint.id,
+            hint_slot: hint.hint_slot,
+            puzzle_type: hint.puzzle_type,
+            puzzle_config: hint.puzzle_config,
+            puzzle_image_url: imageUrl,
+            points_cost: hint.points_cost,
+            completion_message: hint.completion_message || null,
+            show_custom_message: hint.show_custom_message,
+            title: hint.title || null,
+            description: hint.description || null,
+          };
+
+          const { error: hintError } = await supabase.from('puzzle_hints').insert(hintData);
+          if (hintError) throw hintError;
+        }
+      }
+
       alert('Checkpoint created!');
       setCheckpointTitle('');
       setCheckpointDescription('');
@@ -431,6 +477,7 @@ export default function AdminPage() {
       setCheckpointHintCost('5');
       setUsePuzzleChain(false);
       setPuzzleSteps([]);
+      setPuzzleHints([]);
       loadCheckpoints();
       loadDashboard();
     } catch (err: any) {
@@ -537,6 +584,53 @@ export default function AdminPage() {
         }
       }
 
+      // Delete existing puzzle hints
+      await supabase.from('puzzle_hints').delete().eq('checkpoint_id', editingCheckpoint.id);
+
+      // Save new puzzle hints
+      if (puzzleHints.length > 0) {
+        for (const hint of puzzleHints) {
+          let imageUrl = hint.puzzle_image_url;
+          
+          // Upload image if there's a new file
+          if (hint.imageFile) {
+            const fileExt = hint.imageFile.name.split('.').pop();
+            const fileName = `${editingCheckpoint.id}/puzzle-hint-${Date.now()}.${fileExt}`;
+            
+            const { error: uploadError } = await supabase.storage
+              .from('puzzle-images')
+              .upload(fileName, hint.imageFile, {
+                cacheControl: '3600',
+                upsert: false,
+              });
+
+            if (uploadError) throw uploadError;
+
+            const { data } = supabase.storage
+              .from('puzzle-images')
+              .getPublicUrl(fileName);
+            
+            imageUrl = data.publicUrl;
+          }
+
+          const hintData: any = {
+            checkpoint_id: editingCheckpoint.id,
+            hint_slot: hint.hint_slot,
+            puzzle_type: hint.puzzle_type,
+            puzzle_config: hint.puzzle_config,
+            puzzle_image_url: imageUrl,
+            points_cost: hint.points_cost,
+            completion_message: hint.completion_message || null,
+            show_custom_message: hint.show_custom_message,
+            title: hint.title || null,
+            description: hint.description || null,
+          };
+
+          const { error: hintError } = await supabase.from('puzzle_hints').insert(hintData);
+          if (hintError) throw hintError;
+        }
+      }
+
       alert('Checkpoint updated!');
       setEditingCheckpoint(null);
       setCheckpointTitle('');
@@ -610,6 +704,31 @@ export default function AdminPage() {
       }
     } else {
       setPuzzleSteps([]);
+    }
+
+    // Load puzzle hints
+    const { data: hints, error: hintsError } = await supabase
+      .from('puzzle_hints')
+      .select('*')
+      .eq('checkpoint_id', checkpoint.id)
+      .order('hint_slot', { ascending: true });
+
+    if (!hintsError && hints) {
+      const hintConfigs: PuzzleHintConfig[] = hints.map((hint: any) => ({
+        id: hint.id,
+        hint_slot: hint.hint_slot,
+        puzzle_type: hint.puzzle_type,
+        puzzle_config: hint.puzzle_config || {},
+        puzzle_image_url: hint.puzzle_image_url,
+        points_cost: hint.points_cost,
+        completion_message: hint.completion_message || '',
+        show_custom_message: hint.show_custom_message || false,
+        title: hint.title || '',
+        description: hint.description || '',
+      }));
+      setPuzzleHints(hintConfigs);
+    } else {
+      setPuzzleHints([]);
     }
   };
 
@@ -1009,8 +1128,27 @@ export default function AdminPage() {
                       </div>
                       <p className="text-xs text-gray-500">
                         Teams can use up to 3 hints per checkpoint. The cost per hint is set above.
+                        <br />
+                        <strong>Note:</strong> If you add puzzle hints below, they will replace text hints in their slots.
                       </p>
                     </div>
+
+                    {/* Puzzle Hints Section */}
+                    <div className="p-4 bg-purple-50 border border-purple-200 rounded-lg">
+                      <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                        🧩 Puzzle Hints (Replace Text Hints)
+                      </h3>
+                      <p className="text-xs text-gray-600 mb-4">
+                        Add interactive puzzle hints that replace text hints. Each puzzle hint can have its own point cost.
+                        Puzzle progress is automatically saved when users close the puzzle.
+                      </p>
+                      <PuzzleHintBuilder
+                        hints={puzzleHints}
+                        onChange={setPuzzleHints}
+                        checkpointId={editingCheckpoint?.id}
+                      />
+                    </div>
+
                     <div className="flex items-center gap-2 p-4 bg-indigo-50 border border-indigo-200 rounded-lg">
                       <input
                         type="checkbox"
@@ -1025,7 +1163,7 @@ export default function AdminPage() {
                         className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
                       />
                       <label htmlFor="usePuzzleChain" className="text-sm font-medium text-gray-700 cursor-pointer">
-                        Use Puzzle Chain (instead of simple question)
+                        Use Puzzle Chain (optional puzzles to help find QR location - old system)
                       </label>
                     </div>
                     {usePuzzleChain && (

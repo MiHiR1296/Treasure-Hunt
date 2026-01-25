@@ -7,7 +7,8 @@ import { calculatePoints, canUseHint, getRemainingPointsAfterHint } from '@/lib/
 import HintConfirmationDialog from './HintConfirmationDialog';
 import Confetti from './Confetti';
 import PuzzleStepDisplay from './puzzles/PuzzleStepDisplay';
-import { PuzzleStep } from './puzzles/types';
+import PuzzleHintModal from './PuzzleHintModal';
+import { PuzzleStep, PuzzleHint } from './puzzles/types';
 
 interface ClueDisplayProps {
   checkpointId: string;
@@ -46,10 +47,16 @@ export default function ClueDisplay({
   const [confirmingHint, setConfirmingHint] = useState<number | string | null>(null); // Can be number (text hint) or string (puzzle hint stepId)
   
   // Puzzle hints state (part of hint system)
+  // Old puzzle chain hints (from puzzle_steps)
   const [puzzleSteps, setPuzzleSteps] = useState<PuzzleStep[]>([]);
   const [completedPuzzleStepIds, setCompletedPuzzleStepIds] = useState<Set<string>>(new Set());
   const [puzzleHintsUsed, setPuzzleHintsUsed] = useState(0); // Track how many puzzle hints have been used
   const [activePuzzleHint, setActivePuzzleHint] = useState<string | null>(null); // Which puzzle hint is currently being shown
+  
+  // New individual puzzle hints (from puzzle_hints table)
+  const [puzzleHints, setPuzzleHints] = useState<PuzzleHint[]>([]);
+  const [usedPuzzleHintIds, setUsedPuzzleHintIds] = useState<Set<string>>(new Set());
+  const [activePuzzleHintModal, setActivePuzzleHintModal] = useState<PuzzleHint | null>(null);
   
   // 2. POINTS SYSTEM - Independent calculation
   //    - Calculated based on base points and hint deductions
@@ -74,6 +81,7 @@ export default function ClueDisplay({
   useEffect(() => {
     loadHintUsage();
     verifyCanComplete();
+    loadPuzzleHints(); // Load individual puzzle hints
     if (usePuzzleChain) {
       loadPuzzleSteps();
     }
@@ -112,7 +120,46 @@ export default function ClueDisplay({
     }
   };
 
-  // Load puzzle steps if puzzles are enabled as hints
+  // Load individual puzzle hints (from puzzle_hints table)
+  const loadPuzzleHints = async () => {
+    if (!team) return;
+
+    try {
+      const { data: hintsData, error: hintsError } = await supabase
+        .from('puzzle_hints')
+        .select('*')
+        .eq('checkpoint_id', checkpointId)
+        .order('hint_slot', { ascending: true });
+
+      if (hintsError) throw hintsError;
+
+      if (hintsData && hintsData.length > 0) {
+        setPuzzleHints(hintsData as PuzzleHint[]);
+
+        // Load which puzzle hints have been used (check puzzle_hint_state)
+        const { data: stateData } = await supabase
+          .from('puzzle_hint_state')
+          .select('puzzle_hint_id')
+          .eq('team_id', team.id)
+          .eq('checkpoint_id', checkpointId)
+          .in('puzzle_hint_id', hintsData.map(h => h.id));
+
+        if (stateData) {
+          const used = new Set(stateData.map(s => s.puzzle_hint_id));
+          setUsedPuzzleHintIds(used);
+        } else {
+          setUsedPuzzleHintIds(new Set());
+        }
+      } else {
+        setPuzzleHints([]);
+        setUsedPuzzleHintIds(new Set());
+      }
+    } catch (err) {
+      console.error('Error loading puzzle hints:', err);
+    }
+  };
+
+  // Load puzzle steps if puzzles are enabled as hints (old puzzle chain system)
   const loadPuzzleSteps = async () => {
     if (!team) return;
 
@@ -147,17 +194,71 @@ export default function ClueDisplay({
     }
   };
 
-  // Handle requesting a puzzle hint
-  const handleRequestPuzzleHint = (stepId: string) => {
+  // Handle requesting a puzzle hint (new individual puzzle hints)
+  const handleRequestPuzzleHint = (puzzleHint: PuzzleHint) => {
     if (!canUseHint(totalHintsUsed)) {
       return;
     }
-    setConfirmingHint(`puzzle-${stepId}`); // Prefix to identify as puzzle hint
+    
+    // Check if already used
+    if (usedPuzzleHintIds.has(puzzleHint.id)) {
+      // Already used, just open the modal
+      setActivePuzzleHintModal(puzzleHint);
+      return;
+    }
+
+    // First time use - show confirmation
+    setConfirmingHint(`puzzle-hint-${puzzleHint.id}`);
     setShowConfirmation(true);
   };
 
-  // Handle confirming puzzle hint usage
-  const handleConfirmPuzzleHint = async (stepId: string) => {
+  // Handle confirming puzzle hint usage (new individual puzzle hints)
+  const handleConfirmPuzzleHint = async (puzzleHint: PuzzleHint) => {
+    if (!team) return;
+
+    try {
+      // Deduct custom points_cost (not checkpoint hint_cost)
+      const newHintsUsed = hintsUsed + 1;
+      const newPoints = Math.max(0, currentPoints - puzzleHint.points_cost);
+
+      // Update progress with new hints_used and points_earned
+      await supabase
+        .from('progress')
+        .update({
+          hints_used: newHintsUsed,
+          points_earned: newPoints,
+        })
+        .eq('team_id', team.id)
+        .eq('checkpoint_id', checkpointId);
+
+      setHintsUsed(newHintsUsed);
+      setCurrentPoints(newPoints);
+      
+      // Mark as used
+      const newUsed = new Set(usedPuzzleHintIds);
+      newUsed.add(puzzleHint.id);
+      setUsedPuzzleHintIds(newUsed);
+      
+      // Show the puzzle modal
+      setActivePuzzleHintModal(puzzleHint);
+      setShowConfirmation(false);
+      setConfirmingHint(null);
+    } catch (err) {
+      console.error('Error using puzzle hint:', err);
+    }
+  };
+
+  // Handle requesting old puzzle chain hint (for backward compatibility)
+  const handleRequestPuzzleChainHint = (stepId: string) => {
+    if (!canUseHint(totalHintsUsed)) {
+      return;
+    }
+    setConfirmingHint(`puzzle-${stepId}`); // Prefix to identify as puzzle chain hint
+    setShowConfirmation(true);
+  };
+
+  // Handle confirming old puzzle chain hint usage
+  const handleConfirmPuzzleChainHint = async (stepId: string) => {
     if (!team) return;
 
     try {
@@ -237,6 +338,17 @@ export default function ClueDisplay({
         const totalUsed = progressData.hints_used || 0;
         
         // Load puzzle hints separately
+        // First, load new individual puzzle hints usage
+        const { data: puzzleHintStates } = await supabase
+          .from('puzzle_hint_state')
+          .select('puzzle_hint_id')
+          .eq('team_id', team.id)
+          .eq('checkpoint_id', checkpointId);
+        
+        const usedPuzzleHintCount = puzzleHintStates?.length || 0;
+        
+        // Then load old puzzle chain hints if enabled
+        let puzzleChainHintsUsed = 0;
         if (usePuzzleChain) {
           const { data: puzzleProgress } = await supabase
             .from('puzzle_progress')
@@ -247,37 +359,32 @@ export default function ClueDisplay({
           if (puzzleProgress) {
             const completed = new Set(puzzleProgress.map(p => p.step_id));
             setCompletedPuzzleStepIds(completed);
+            puzzleChainHintsUsed = completed.size;
             setPuzzleHintsUsed(completed.size);
-            
-            // Text hints = total - puzzle hints
-            const textHintsUsed = Math.max(0, totalUsed - completed.size);
-            setHintsUsed(textHintsUsed);
-            
-            // Restore which text hints were used (approximate based on count)
-            setHint1Used(textHintsUsed >= 1);
-            setHint2Used(textHintsUsed >= 2);
-            setHint3Used(textHintsUsed >= 3);
-          } else {
-            // No puzzle hints, all are text hints
-            setHintsUsed(totalUsed);
-            setHint1Used(totalUsed >= 1);
-            setHint2Used(totalUsed >= 2);
-            setHint3Used(totalUsed >= 3);
           }
-        } else {
-          // No puzzle chain, all hints are text hints
-          setHintsUsed(totalUsed);
-          setHint1Used(totalUsed >= 1);
-          setHint2Used(totalUsed >= 2);
-          setHint3Used(totalUsed >= 3);
         }
         
-        // Use points_earned from database if available (already accounts for hints)
+        // Text hints = total - puzzle hints (new) - puzzle chain hints (old)
+        const textHintsUsed = Math.max(0, totalUsed - usedPuzzleHintCount - puzzleChainHintsUsed);
+        setHintsUsed(textHintsUsed);
+        
+        // Restore which text hints were used (approximate based on count)
+        setHint1Used(textHintsUsed >= 1);
+        setHint2Used(textHintsUsed >= 2);
+        setHint3Used(textHintsUsed >= 3);
+        
+        // Load used puzzle hint IDs
+        if (puzzleHintStates) {
+          setUsedPuzzleHintIds(new Set(puzzleHintStates.map(s => s.puzzle_hint_id)));
+        }
+        
+        // Use points_earned from database if available (already accounts for all hint costs)
         // Otherwise calculate from base points
         if (progressData.points_earned !== null && progressData.points_earned !== undefined) {
           setCurrentPoints(progressData.points_earned);
         } else {
           // Fallback: calculate current points based on hints used
+          // Note: This is approximate - actual calculation happens when hints are used
           const points = calculatePoints(checkpointPoints, totalUsed, hintCost);
           setCurrentPoints(points.pointsEarned);
         }
@@ -315,11 +422,18 @@ export default function ClueDisplay({
   const handleConfirmHint = async () => {
     if (!team || confirmingHint === null) return;
 
-    // Check if it's a puzzle hint (string starting with 'puzzle-') or text hint (number)
-    if (typeof confirmingHint === 'string' && confirmingHint.startsWith('puzzle-')) {
-      // Handle puzzle hint
+    // Check if it's a new puzzle hint (puzzle-hint-), old puzzle chain hint (puzzle-), or text hint (number)
+    if (typeof confirmingHint === 'string' && confirmingHint.startsWith('puzzle-hint-')) {
+      // Handle new individual puzzle hint
+      const puzzleHintId = confirmingHint.replace('puzzle-hint-', '');
+      const puzzleHint = puzzleHints.find(h => h.id === puzzleHintId);
+      if (puzzleHint) {
+        await handleConfirmPuzzleHint(puzzleHint);
+      }
+    } else if (typeof confirmingHint === 'string' && confirmingHint.startsWith('puzzle-')) {
+      // Handle old puzzle chain hint
       const stepId = confirmingHint.replace('puzzle-', '');
-      await handleConfirmPuzzleHint(stepId);
+      await handleConfirmPuzzleChainHint(stepId);
     } else {
       // Handle text hint
       const hintNumber = confirmingHint as number;
@@ -459,38 +573,55 @@ export default function ClueDisplay({
     }
   };
 
-  // Calculate total hints: text hints + puzzle hints
-  // Puzzle hints count towards the 3 hint limit
-  const totalHintsUsed = hintsUsed + puzzleHintsUsed;
+  // Calculate total hints: text hints + new puzzle hints + old puzzle chain hints
+  // All hints count towards the 3 hint limit
+  const totalHintsUsed = hintsUsed + usedPuzzleHintIds.size + puzzleHintsUsed;
   const hintsAvailable = 3 - totalHintsUsed;
   
-  const textHints = [
-    { id: 1, text: hint1, used: hint1Used, type: 'text' as const },
-    { id: 2, text: hint2, used: hint2Used, type: 'text' as const },
-    { id: 3, text: hint3, used: hint3Used, type: 'text' as const },
-  ].filter(h => h.text);
-  
-  // Puzzle hints (each puzzle step is a hint)
-  const puzzleHints = puzzleSteps.map((step, index) => ({
-    id: `puzzle-${step.id}`,
+  // Build hint slots (1, 2, 3)
+  // Puzzle hints replace text hints in their slots
+  const hintSlots: Array<{
+    slot: number;
+    type: 'text' | 'puzzle-hint' | 'puzzle-chain';
+    data: any;
+    used: boolean;
+  }> = [];
+
+  // Check each slot
+  for (let slot = 1; slot <= 3; slot++) {
+    // Check if there's a puzzle hint for this slot
+    const puzzleHint = puzzleHints.find(h => h.hint_slot === slot);
+    if (puzzleHint) {
+      hintSlots.push({
+        slot,
+        type: 'puzzle-hint',
+        data: puzzleHint,
+        used: usedPuzzleHintIds.has(puzzleHint.id),
+      });
+    } else {
+      // Use text hint for this slot
+      const textHint = slot === 1 ? hint1 : slot === 2 ? hint2 : hint3;
+      if (textHint) {
+        hintSlots.push({
+          slot,
+          type: 'text',
+          data: { id: slot, text: textHint },
+          used: slot === 1 ? hint1Used : slot === 2 ? hint2Used : hint3Used,
+        });
+      }
+    }
+  }
+
+  // Old puzzle chain hints (shown separately, not in slots)
+  const puzzleChainHints = puzzleSteps.map((step) => ({
+    id: `puzzle-chain-${step.id}`,
     step: step,
     used: completedPuzzleStepIds.has(step.id),
-    type: 'puzzle' as const,
+    type: 'puzzle-chain' as const,
     order: step.step_order,
   }));
   
-  // Combine all hints (text + puzzle) and sort by order
-  const allHints = [
-    ...textHints.map(h => ({ ...h, order: h.id })),
-    ...puzzleHints,
-  ].sort((a, b) => {
-    if (a.type === 'text' && b.type === 'text') return a.id - b.id;
-    if (a.type === 'puzzle' && b.type === 'puzzle') return a.order - b.order;
-    // Text hints come first, then puzzles
-    return a.type === 'text' ? -1 : 1;
-  });
-  
-  const hasHints = textHints.length > 0 || puzzleHints.length > 0;
+  const hasHints = hintSlots.length > 0 || puzzleChainHints.length > 0;
 
   if (isLoading) {
     return (
@@ -522,22 +653,23 @@ export default function ClueDisplay({
         </div>
         {currentPoints < checkpointPoints && (
           <p className="text-xs mt-2 opacity-75">
-            Started with {checkpointPoints} points • {totalHintsUsed * hintCost} points deducted for hints
+            Started with {checkpointPoints} points • {checkpointPoints - currentPoints} points deducted for hints
           </p>
         )}
       </div>
 
-      {/* Hints Section - Text Hints and Puzzle Hints */}
+      {/* Hints Section - Slot-based hints (text or puzzle hints) */}
       {hasHints && (
         <div className="space-y-3">
-          {allHints.map((hint) => {
-            if (hint.type === 'text') {
+          {hintSlots.map((slot) => {
+            if (slot.type === 'text') {
               // Text hint
+              const hint = slot.data;
               return (
                 <div
-                  key={hint.id}
+                  key={`text-${slot.slot}`}
                   className={`border-2 rounded-xl p-4 ${
-                    hint.used
+                    slot.used
                       ? 'bg-yellow-50 border-yellow-300'
                       : 'bg-gray-50 border-gray-200'
                   }`}
@@ -545,14 +677,14 @@ export default function ClueDisplay({
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-2">
-                        <span className="font-semibold text-gray-900">Text Hint {hint.id}</span>
-                        {hint.used && (
+                        <span className="font-semibold text-gray-900">Text Hint {slot.slot}</span>
+                        {slot.used && (
                           <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded">
                             Used
                           </span>
                         )}
                       </div>
-                      {hint.used ? (
+                      {slot.used ? (
                         <p className="text-gray-800">{hint.text}</p>
                       ) : (
                         <div className="space-y-2">
@@ -564,7 +696,7 @@ export default function ClueDisplay({
                               onClick={() => handleRequestHint(hint.id)}
                               className="px-4 py-2 bg-yellow-500 text-white rounded-lg font-semibold hover:bg-yellow-600 transition-colors text-sm"
                             >
-                              Use Text Hint {hint.id} (-{hintCost} pts)
+                              Use Text Hint {slot.slot} (-{hintCost} pts)
                             </button>
                           )}
                         </div>
@@ -573,12 +705,71 @@ export default function ClueDisplay({
                   </div>
                 </div>
               );
-            } else {
-              // Puzzle hint
+            } else if (slot.type === 'puzzle-hint') {
+              // New individual puzzle hint
+              const puzzleHint = slot.data as PuzzleHint;
               return (
                 <div
-                  key={hint.id}
+                  key={`puzzle-hint-${puzzleHint.id}`}
                   className={`border-2 rounded-xl p-4 ${
+                    slot.used
+                      ? 'bg-blue-50 border-blue-300'
+                      : 'bg-gray-50 border-gray-200'
+                  }`}
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="font-semibold text-gray-900">
+                          🧩 Puzzle Hint {slot.slot}
+                          {puzzleHint.title && `: ${puzzleHint.title}`}
+                        </span>
+                        {slot.used && (
+                          <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded">
+                            {slot.used ? 'Opened' : 'Available'}
+                          </span>
+                        )}
+                      </div>
+                      {puzzleHint.description && (
+                        <p className="text-sm text-gray-600 mb-2">{puzzleHint.description}</p>
+                      )}
+                      <div className="space-y-2">
+                        <p className="text-gray-600 text-sm">
+                          Solve this puzzle to get a hint. Costs {puzzleHint.points_cost} points.
+                        </p>
+                        {hintsAvailable > 0 && !slot.used && (
+                          <button
+                            onClick={() => handleRequestPuzzleHint(puzzleHint)}
+                            className="px-4 py-2 bg-blue-500 text-white rounded-lg font-semibold hover:bg-blue-600 transition-colors text-sm"
+                          >
+                            Use Puzzle Hint {slot.slot} (-{puzzleHint.points_cost} pts)
+                          </button>
+                        )}
+                        {slot.used && (
+                          <button
+                            onClick={() => setActivePuzzleHintModal(puzzleHint)}
+                            className="px-4 py-2 bg-blue-500 text-white rounded-lg font-semibold hover:bg-blue-600 transition-colors text-sm"
+                          >
+                            Open Puzzle
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+            return null;
+          })}
+
+          {/* Old puzzle chain hints (for backward compatibility) */}
+          {puzzleChainHints.length > 0 && (
+            <div className="mt-4 pt-4 border-t border-gray-300">
+              <p className="text-sm font-semibold text-gray-700 mb-2">Additional Puzzle Hints:</p>
+              {puzzleChainHints.map((hint) => (
+                <div
+                  key={hint.id}
+                  className={`border-2 rounded-xl p-4 mb-3 ${
                     hint.used
                       ? 'bg-blue-50 border-blue-300'
                       : 'bg-gray-50 border-gray-200'
@@ -588,7 +779,7 @@ export default function ClueDisplay({
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-2">
                         <span className="font-semibold text-gray-900">
-                          Puzzle Hint {hint.order}
+                          Puzzle Chain Hint {hint.order}
                           {hint.step.title && `: ${hint.step.title}`}
                         </span>
                         {hint.used && (
@@ -603,10 +794,8 @@ export default function ClueDisplay({
                       {hint.used ? (
                         <div className="bg-green-50 border border-green-200 rounded-lg p-3">
                           <p className="text-green-800 text-sm font-semibold">✓ Puzzle completed!</p>
-                          <p className="text-green-700 text-xs mt-1">This puzzle hint has been solved.</p>
                         </div>
                       ) : activePuzzleHint === hint.step.id ? (
-                        // Show puzzle when active
                         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mt-2">
                           <PuzzleStepDisplay
                             step={hint.step}
@@ -622,10 +811,10 @@ export default function ClueDisplay({
                           </p>
                           {hintsAvailable > 0 && (
                             <button
-                              onClick={() => handleRequestPuzzleHint(hint.step.id)}
+                              onClick={() => handleRequestPuzzleChainHint(hint.step.id)}
                               className="px-4 py-2 bg-blue-500 text-white rounded-lg font-semibold hover:bg-blue-600 transition-colors text-sm"
                             >
-                              Use Puzzle Hint {hint.order} (-{hintCost} pts)
+                              Use Puzzle Chain Hint {hint.order} (-{hintCost} pts)
                             </button>
                           )}
                         </div>
@@ -633,9 +822,9 @@ export default function ClueDisplay({
                     </div>
                   </div>
                 </div>
-              );
-            }
-          })}
+              ))}
+            </div>
+          )}
 
           {hintsAvailable === 0 && (
             <div className="bg-gray-100 border border-gray-300 rounded-xl p-4 text-center">
@@ -723,12 +912,26 @@ export default function ClueDisplay({
           currentPoints={currentPoints}
           hintsUsed={totalHintsUsed}
           hintsAvailable={hintsAvailable}
-          hintCost={hintCost}
+          hintCost={
+            typeof confirmingHint === 'string' && confirmingHint.startsWith('puzzle-hint-')
+              ? puzzleHints.find(h => h.id === confirmingHint.replace('puzzle-hint-', ''))?.points_cost || hintCost
+              : hintCost
+          }
           onConfirm={handleConfirmHint}
           onCancel={() => {
             setShowConfirmation(false);
             setConfirmingHint(null);
           }}
+        />
+      )}
+
+      {/* Puzzle Hint Modal */}
+      {activePuzzleHintModal && (
+        <PuzzleHintModal
+          puzzleHint={activePuzzleHintModal}
+          checkpointId={checkpointId}
+          onClose={() => setActivePuzzleHintModal(null)}
+          onPointsUpdate={setCurrentPoints}
         />
       )}
     </div>

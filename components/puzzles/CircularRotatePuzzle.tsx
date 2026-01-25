@@ -8,6 +8,8 @@ interface CircularRotatePuzzleProps {
   segments?: number;
   correctRotations?: number[];
   onSolved?: () => void;
+  initialState?: { rotations?: number[]; completed?: boolean };
+  onStateChange?: (state: { rotations: number[]; completed: boolean }) => void;
 }
 
 export default function CircularRotatePuzzle({
@@ -15,9 +17,13 @@ export default function CircularRotatePuzzle({
   segments = 8,
   correctRotations = [],
   onSolved,
+  initialState,
+  onStateChange,
 }: CircularRotatePuzzleProps) {
-  const [rotations, setRotations] = useState<number[]>(Array(segments).fill(0));
-  const [isSolved, setIsSolved] = useState(false);
+  const [rotations, setRotations] = useState<number[]>(
+    initialState?.rotations || Array(segments).fill(0)
+  );
+  const [isSolved, setIsSolved] = useState(initialState?.completed || false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -35,11 +41,17 @@ export default function CircularRotatePuzzle({
 
     if (normalized.every(Boolean) && !isSolved) {
       setIsSolved(true);
+      if (onStateChange) {
+        onStateChange({ rotations, completed: true });
+      }
       if (onSolved) {
         onSolved();
       }
     } else if (!normalized.every(Boolean) && isSolved) {
       setIsSolved(false);
+      if (onStateChange) {
+        onStateChange({ rotations, completed: false });
+      }
     }
   };
 
@@ -48,6 +60,10 @@ export default function CircularRotatePuzzle({
     const step = direction === 'left' ? -90 : 90;
     newRotations[index] = (newRotations[index] + step) % 360;
     setRotations(newRotations);
+    
+    if (onStateChange) {
+      onStateChange({ rotations: newRotations, completed: isSolved });
+    }
   };
 
   const segmentAngle = 360 / segments;

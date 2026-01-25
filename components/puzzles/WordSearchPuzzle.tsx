@@ -10,6 +10,8 @@ interface WordSearchPuzzleProps {
   showWordsList?: boolean;
   onWordFound?: (word: string) => void;
   onAllWordsFound?: () => void;
+  initialState?: { foundWords?: string[]; completed?: boolean };
+  onStateChange?: (state: { foundWords: string[]; completed: boolean }) => void;
 }
 
 interface HighlightedWord {
@@ -29,8 +31,12 @@ export default function WordSearchPuzzle({
   showWordsList = false,
   onWordFound,
   onAllWordsFound,
+  initialState,
+  onStateChange,
 }: WordSearchPuzzleProps) {
-  const [foundWords, setFoundWords] = useState<Set<string>>(new Set());
+  const [foundWords, setFoundWords] = useState<Set<string>>(
+    new Set(initialState?.foundWords || [])
+  );
   const [selectedWord, setSelectedWord] = useState<string>('');
   const [isDrawing, setIsDrawing] = useState(false);
   const [currentPath, setCurrentPath] = useState<{ x: number; y: number }[]>([]);
@@ -274,11 +280,18 @@ export default function WordSearchPuzzle({
 
         // Check if all words found
         const allFound = normalizedWords.every(w => newFound.has(w));
-        if (normalizedTarget) {
-          if (allFound && newFound.has(normalizedTarget) && onAllWordsFound) {
-            onAllWordsFound();
-          }
-        } else if (allFound && onAllWordsFound) {
+        const isCompleted = normalizedTarget 
+          ? (allFound && newFound.has(normalizedTarget))
+          : allFound;
+        
+        if (onStateChange) {
+          onStateChange({ 
+            foundWords: Array.from(newFound), 
+            completed: isCompleted 
+          });
+        }
+        
+        if (isCompleted && onAllWordsFound) {
           onAllWordsFound();
         }
       }

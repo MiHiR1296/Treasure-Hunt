@@ -7,11 +7,21 @@ interface CrosswordPuzzleProps {
   imageUrl: string;
   answers?: string[];
   onSolved?: () => void;
+  initialState?: { answers?: Record<number, string>; completed?: boolean };
+  onStateChange?: (state: { answers: Record<number, string>; completed: boolean }) => void;
 }
 
-export default function CrosswordPuzzle({ imageUrl, answers = [], onSolved }: CrosswordPuzzleProps) {
-  const [userAnswers, setUserAnswers] = useState<Record<number, string>>({});
-  const [isComplete, setIsComplete] = useState(false);
+export default function CrosswordPuzzle({ 
+  imageUrl, 
+  answers = [], 
+  onSolved,
+  initialState,
+  onStateChange,
+}: CrosswordPuzzleProps) {
+  const [userAnswers, setUserAnswers] = useState<Record<number, string>>(
+    initialState?.answers || {}
+  );
+  const [isComplete, setIsComplete] = useState(initialState?.completed || false);
 
   const handleAnswerChange = (index: number, value: string) => {
     const newAnswers = { ...userAnswers, [index]: value };
@@ -26,11 +36,17 @@ export default function CrosswordPuzzle({ imageUrl, answers = [], onSolved }: Cr
       
       if (allCorrect && Object.keys(newAnswers).length === answers.length) {
         setIsComplete(true);
+        if (onStateChange) {
+          onStateChange({ answers: newAnswers, completed: true });
+        }
         if (onSolved) {
           onSolved();
         }
       } else {
         setIsComplete(false);
+        if (onStateChange) {
+          onStateChange({ answers: newAnswers, completed: false });
+        }
       }
     }
   };

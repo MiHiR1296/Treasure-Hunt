@@ -11,9 +11,16 @@ import CircularRotatePuzzle from './CircularRotatePuzzle';
 interface PuzzleRendererProps {
   step: PuzzleStep;
   onSolved?: () => void;
+  initialState?: Record<string, any>;
+  onStateChange?: (state: Record<string, any>) => void;
 }
 
-export default function PuzzleRenderer({ step, onSolved }: PuzzleRendererProps) {
+export default function PuzzleRenderer({ 
+  step, 
+  onSolved,
+  initialState,
+  onStateChange,
+}: PuzzleRendererProps) {
   const config = step.puzzle_config || {};
 
   switch (step.puzzle_type) {
@@ -37,6 +44,8 @@ export default function PuzzleRenderer({ step, onSolved }: PuzzleRendererProps) 
           rows={config.rows || 3}
           columns={config.columns || 3}
           onSolved={onSolved}
+          initialState={initialState}
+          onStateChange={onStateChange}
         />
       );
 
@@ -46,6 +55,8 @@ export default function PuzzleRenderer({ step, onSolved }: PuzzleRendererProps) 
           grid={config.grid}
           solution={config.solution}
           onSolved={onSolved}
+          initialState={initialState}
+          onStateChange={onStateChange}
         />
       );
 
@@ -58,6 +69,8 @@ export default function PuzzleRenderer({ step, onSolved }: PuzzleRendererProps) 
           imageUrl={step.puzzle_image_url}
           answers={config.answers || []}
           onSolved={onSolved}
+          initialState={initialState}
+          onStateChange={onStateChange}
         />
       );
 
@@ -72,6 +85,8 @@ export default function PuzzleRenderer({ step, onSolved }: PuzzleRendererProps) 
           targetWord={config.targetWord}
           showWordsList={config.showWordsList === true}
           onAllWordsFound={onSolved}
+          initialState={initialState}
+          onStateChange={onStateChange}
         />
       );
 
@@ -85,6 +100,8 @@ export default function PuzzleRenderer({ step, onSolved }: PuzzleRendererProps) 
           segments={config.segments || 8}
           correctRotations={config.correctRotation || []}
           onSolved={onSolved}
+          initialState={initialState}
+          onStateChange={onStateChange}
         />
       );
 
