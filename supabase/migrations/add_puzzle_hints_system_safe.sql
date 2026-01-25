@@ -66,6 +66,98 @@ BEGIN
   END IF;
 END $$;
 
+-- Allow anyone to insert puzzle hints (for admin panel)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies 
+    WHERE schemaname = 'public' 
+    AND tablename = 'puzzle_hints' 
+    AND policyname = 'Anyone can create puzzle hints'
+  ) THEN
+    CREATE POLICY "Anyone can create puzzle hints" ON puzzle_hints
+      FOR INSERT
+      WITH CHECK (true);
+  END IF;
+END $$;
+
+-- Allow anyone to update puzzle hints (for admin panel)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies 
+    WHERE schemaname = 'public' 
+    AND tablename = 'puzzle_hints' 
+    AND policyname = 'Anyone can update puzzle hints'
+  ) THEN
+    CREATE POLICY "Anyone can update puzzle hints" ON puzzle_hints
+      FOR UPDATE
+      USING (true)
+      WITH CHECK (true);
+  END IF;
+END $$;
+
+-- Allow anyone to delete puzzle hints (for admin panel)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies 
+    WHERE schemaname = 'public' 
+    AND tablename = 'puzzle_hints' 
+    AND policyname = 'Anyone can delete puzzle hints'
+  ) THEN
+    CREATE POLICY "Anyone can delete puzzle hints" ON puzzle_hints
+      FOR DELETE
+      USING (true);
+  END IF;
+END $$;
+
+-- Allow anyone to insert puzzle hints (for admin panel)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies 
+    WHERE schemaname = 'public' 
+    AND tablename = 'puzzle_hints' 
+    AND policyname = 'Anyone can create puzzle hints'
+  ) THEN
+    CREATE POLICY "Anyone can create puzzle hints" ON puzzle_hints
+      FOR INSERT
+      WITH CHECK (true);
+  END IF;
+END $$;
+
+-- Allow anyone to update puzzle hints (for admin panel)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies 
+    WHERE schemaname = 'public' 
+    AND tablename = 'puzzle_hints' 
+    AND policyname = 'Anyone can update puzzle hints'
+  ) THEN
+    CREATE POLICY "Anyone can update puzzle hints" ON puzzle_hints
+      FOR UPDATE
+      USING (true)
+      WITH CHECK (true);
+  END IF;
+END $$;
+
+-- Allow anyone to delete puzzle hints (for admin panel)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies 
+    WHERE schemaname = 'public' 
+    AND tablename = 'puzzle_hints' 
+    AND policyname = 'Anyone can delete puzzle hints'
+  ) THEN
+    CREATE POLICY "Anyone can delete puzzle hints" ON puzzle_hints
+      FOR DELETE
+      USING (true);
+  END IF;
+END $$;
+
 -- Puzzle hint state: teams can only read/write their own state
 ALTER TABLE puzzle_hint_state ENABLE ROW LEVEL SECURITY;
 

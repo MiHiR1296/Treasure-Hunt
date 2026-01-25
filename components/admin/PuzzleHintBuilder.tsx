@@ -77,8 +77,21 @@ export default function PuzzleHintBuilder({ hints, onChange, checkpointId }: Puz
   };
 
   const handleImageUpload = async (hint: PuzzleHintConfig, file: File) => {
+    // For new checkpoints, checkpointId might not be available yet
+    // In that case, create a temporary file path and upload will happen when checkpoint is saved
     if (!checkpointId) {
-      alert('Checkpoint ID is required for image upload');
+      // Create a preview URL from the file for immediate display
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        updateHint(hint.id, { 
+          puzzle_image_url: reader.result as string, 
+          imageFile: file 
+        });
+      };
+      reader.readAsDataURL(file);
+      
+      // Show info message that image will be uploaded when checkpoint is saved
+      console.info('Image will be uploaded when checkpoint is created. Using preview for now.');
       return;
     }
 

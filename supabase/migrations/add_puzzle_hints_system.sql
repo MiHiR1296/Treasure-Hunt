@@ -56,6 +56,41 @@ CREATE POLICY "Puzzle hints are viewable by everyone" ON puzzle_hints
   FOR SELECT
   USING (true);
 
+-- Allow anyone to insert puzzle hints (for admin panel)
+DROP POLICY IF EXISTS "Anyone can create puzzle hints" ON puzzle_hints;
+CREATE POLICY "Anyone can create puzzle hints" ON puzzle_hints
+  FOR INSERT
+  WITH CHECK (true);
+
+-- Allow anyone to update puzzle hints (for admin panel)
+DROP POLICY IF EXISTS "Anyone can update puzzle hints" ON puzzle_hints;
+CREATE POLICY "Anyone can update puzzle hints" ON puzzle_hints
+  FOR UPDATE
+  USING (true)
+  WITH CHECK (true);
+
+-- Allow anyone to delete puzzle hints (for admin panel)
+DROP POLICY IF EXISTS "Anyone can delete puzzle hints" ON puzzle_hints;
+CREATE POLICY "Anyone can delete puzzle hints" ON puzzle_hints
+  FOR DELETE
+  USING (true);
+
+DROP POLICY IF EXISTS "Anyone can create puzzle hints" ON puzzle_hints;
+CREATE POLICY "Anyone can create puzzle hints" ON puzzle_hints
+  FOR INSERT
+  WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Anyone can update puzzle hints" ON puzzle_hints;
+CREATE POLICY "Anyone can update puzzle hints" ON puzzle_hints
+  FOR UPDATE
+  USING (true)
+  WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Anyone can delete puzzle hints" ON puzzle_hints;
+CREATE POLICY "Anyone can delete puzzle hints" ON puzzle_hints
+  FOR DELETE
+  USING (true);
+
 -- Puzzle hint state: teams can only read/write their own state
 ALTER TABLE puzzle_hint_state ENABLE ROW LEVEL SECURITY;
 
