@@ -82,12 +82,17 @@ export default function ClueDisplay({
 
   useEffect(() => {
     loadHintUsage();
-    verifyCanComplete();
+    // Only verify if parent hasn't already indicated it's unlocked
+    // If isUnlocked is true, trust the parent and skip initial verification
+    // (it will be verified in the isUnlocked useEffect)
+    if (!isUnlocked) {
+      verifyCanComplete();
+    }
     loadPuzzleHints(); // Load individual puzzle hints
     if (usePuzzleChain) {
       loadPuzzleSteps();
     }
-  }, [checkpointId, team, usePuzzleChain]);
+  }, [checkpointId, team, usePuzzleChain, isUnlocked]);
 
   // Re-verify when parent indicates unlock status changed
   useEffect(() => {
