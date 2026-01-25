@@ -163,16 +163,29 @@ export default function ClueDisplay({
 
   // Load individual puzzle hints (from puzzle_hints table)
   const loadPuzzleHints = async () => {
-    if (!team) return;
+    if (!team) {
+      console.log('loadPuzzleHints: No team, skipping');
+      return;
+    }
 
     try {
+      console.log('loadPuzzleHints: Loading puzzle hints for checkpoint', checkpointId);
       const { data: hintsData, error: hintsError } = await supabase
         .from('puzzle_hints')
         .select('*')
         .eq('checkpoint_id', checkpointId)
         .order('hint_slot', { ascending: true });
 
-      if (hintsError) throw hintsError;
+      if (hintsError) {
+        console.error('Error loading puzzle hints:', hintsError);
+        // Check if table doesn't exist
+        if (hintsError.message?.includes('puzzle_hints') || hintsError.message?.includes('does not exist')) {
+          console.warn('puzzle_hints table does not exist. Please run the migration.');
+        }
+        throw hintsError;
+      }
+
+      console.log('loadPuzzleHints: Found puzzle hints', hintsData?.length || 0, hintsData);
 
       if (hintsData && hintsData.length > 0) {
         setPuzzleHints(hintsData as PuzzleHint[]);
@@ -188,15 +201,20 @@ export default function ClueDisplay({
         if (stateData) {
           const used = new Set(stateData.map(s => s.puzzle_hint_id));
           setUsedPuzzleHintIds(used);
+          console.log('loadPuzzleHints: Found used puzzle hints', Array.from(used));
         } else {
           setUsedPuzzleHintIds(new Set());
         }
       } else {
+        console.log('loadPuzzleHints: No puzzle hints found for checkpoint', checkpointId);
         setPuzzleHints([]);
         setUsedPuzzleHintIds(new Set());
       }
     } catch (err) {
       console.error('Error loading puzzle hints:', err);
+      // Set empty arrays on error to prevent UI issues
+      setPuzzleHints([]);
+      setUsedPuzzleHintIds(new Set());
     }
   };
 
@@ -628,11 +646,21 @@ export default function ClueDisplay({
     used: boolean;
   }> = [];
 
+  // Debug logging
+  console.log('Building hint slots:', {
+    puzzleHints: puzzleHints.length,
+    puzzleHintsData: puzzleHints,
+    hint1,
+    hint2,
+    hint3,
+  });
+
   // Check each slot
   for (let slot = 1; slot <= 3; slot++) {
     // Check if there's a puzzle hint for this slot
     const puzzleHint = puzzleHints.find(h => h.hint_slot === slot);
     if (puzzleHint) {
+      console.log(`Slot ${slot}: Found puzzle hint`, puzzleHint);
       hintSlots.push({
         slot,
         type: 'puzzle-hint',
@@ -643,15 +671,20 @@ export default function ClueDisplay({
       // Use text hint for this slot
       const textHint = slot === 1 ? hint1 : slot === 2 ? hint2 : hint3;
       if (textHint) {
+        console.log(`Slot ${slot}: Using text hint`);
         hintSlots.push({
           slot,
           type: 'text',
           data: { id: slot, text: textHint },
           used: slot === 1 ? hint1Used : slot === 2 ? hint2Used : hint3Used,
         });
+      } else {
+        console.log(`Slot ${slot}: No hint (neither puzzle nor text)`);
       }
     }
   }
+
+  console.log('Final hintSlots:', hintSlots);
 
   // Old puzzle chain hints (shown separately, not in slots)
   const puzzleChainHints = puzzleSteps.map((step) => ({
