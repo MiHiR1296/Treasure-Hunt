@@ -181,72 +181,24 @@ export default function CheckpointPage() {
         }
         
         // Use upsert to handle both create and update cases reliably
-        const { error: upsertError } = await supabase
+        const { error: upsertError, data: upsertResult } = await supabase
           .from('progress')
           .upsert(upsertData, {
             onConflict: 'team_id,checkpoint_id',
-          });
+          })
+          .select();
         
         if (upsertError) {
           console.error('Error upserting progress to unlocked:', upsertError);
           throw new Error(`Failed to unlock checkpoint: ${upsertError.message}`);
         }
         
-        console.log('Progress upserted successfully, unlocked_at set');
+        console.log('Progress upserted successfully, unlocked_at set', upsertResult);
         
-        // Verify the update was successful by querying again
-        // Retry verification up to 5 times to handle database propagation delays
-        let verifyData = null;
-        let retries = 0;
-        const maxRetries = 5;
-        
-        while (retries < maxRetries) {
-          const { data, error: verifyError } = await supabase
-            .from('progress')
-            .select('unlocked_at, points_earned')
-            .eq('team_id', team.id)
-            .eq('checkpoint_id', checkpointId)
-            .single();
-          
-          if (verifyError) {
-            console.error('Error verifying unlock status:', verifyError);
-            // If it's a "not found" error, the upsert might not have worked
-            if (verifyError.code === 'PGRST116') {
-              throw new Error('Progress record not found after unlock. Please try again.');
-            }
-            // For other errors, retry
-            if (retries < maxRetries - 1) {
-              await new Promise(resolve => setTimeout(resolve, 300));
-              retries++;
-              continue;
-            }
-            break;
-          }
-          
-          verifyData = data;
-          
-          if (verifyData && verifyData.unlocked_at !== null) {
-            // Successfully unlocked
-            console.log('Verified: Checkpoint is unlocked in database');
-            break;
-          }
-          
-          // Wait a bit before retrying
-          if (retries < maxRetries - 1) {
-            console.log(`Verification attempt ${retries + 1}/${maxRetries}: unlocked_at still null, retrying...`);
-            await new Promise(resolve => setTimeout(resolve, 300));
-          }
-          retries++;
-        }
-        
-        if (!verifyData || verifyData.unlocked_at === null) {
-          // Even after retries, unlocked_at is still null
-          // This could be a propagation delay - log warning but proceed optimistically
-          // The database update should have worked, and checkIfUnlocked() will verify later
-          console.warn('Upsert completed but verification shows unlocked_at still null after retries. This may be a propagation delay. Proceeding optimistically.');
-        } else {
-          console.log('Successfully verified unlock in database');
-        }
+        // If upsert succeeded, proceed optimistically
+        // Verification is nice-to-have but shouldn't block unlock
+        // The database update should have worked, and checkIfUnlocked() will verify later
+        console.log('Proceeding with unlock - upsert succeeded');
       } else {
         // No progress exists, create new record
         console.log('Unlocking checkpoint...', { teamId: team.id, checkpointId, basePoints });
