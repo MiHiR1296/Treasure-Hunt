@@ -171,23 +171,41 @@ export default function CheckpointPage() {
         }
         
         // Verify the update was successful by querying again
-        const { data: verifyData } = await supabase
-          .from('progress')
-          .select('unlocked_at, points_earned')
-          .eq('team_id', team.id)
-          .eq('checkpoint_id', checkpointId)
-          .single();
+        // Retry verification up to 3 times to handle database propagation delays
+        let verifyData = null;
+        let retries = 0;
+        const maxRetries = 3;
         
-        if (verifyData && verifyData.unlocked_at === null) {
-          console.warn('Update completed but unlocked_at is still null - retrying...');
-          // Retry the update
-          await supabase
+        while (retries < maxRetries) {
+          const { data, error: verifyError } = await supabase
             .from('progress')
-            .update({
-              unlocked_at: new Date().toISOString(),
-            })
+            .select('unlocked_at, points_earned')
             .eq('team_id', team.id)
-            .eq('checkpoint_id', checkpointId);
+            .eq('checkpoint_id', checkpointId)
+            .single();
+          
+          if (verifyError) {
+            console.error('Error verifying unlock status:', verifyError);
+            break;
+          }
+          
+          verifyData = data;
+          
+          if (verifyData && verifyData.unlocked_at !== null) {
+            // Successfully unlocked
+            break;
+          }
+          
+          // Wait a bit before retrying
+          if (retries < maxRetries - 1) {
+            await new Promise(resolve => setTimeout(resolve, 200));
+          }
+          retries++;
+        }
+        
+        if (!verifyData || verifyData.unlocked_at === null) {
+          console.warn('Update completed but unlocked_at is still null after retries - this may indicate a database issue');
+          // Still proceed - the update should have worked, might be a caching issue
         }
         
         // Update current points display to match what's in DB
@@ -224,9 +242,9 @@ export default function CheckpointPage() {
 
       console.log('Checkpoint unlocked successfully!');
 
-      // Update state flags
-      setIsUnlocked(true);
-      setHasProgress(true);
+      // Refresh unlock status from database to ensure consistency
+      // This is especially important when hints were used before unlock
+      await checkIfUnlocked();
 
       // Show success popup
       setShowSuccessPopup(true);

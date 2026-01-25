@@ -98,28 +98,24 @@ export default function ClueDisplay({
   // Re-verify when parent indicates unlock status changed
   useEffect(() => {
     if (isUnlocked) {
-      // Parent says it's unlocked - trust the parent and set optimistically
-      // This handles the case where ClueDisplay mounts right after unlock
+      // Parent says it's unlocked - verify immediately from database
+      // This handles the case where hints were used before unlock
+      verifyCanComplete();
+      
+      // Also set optimistically for better UX
       setCanComplete(true);
       
-      // Then verify from database to ensure consistency
-      // Add delays to handle database propagation
-      const timeoutId = setTimeout(() => {
-        verifyCanComplete();
-      }, 200);
-      
-      // Retry after longer delay in case of slow database propagation
+      // Retry after a short delay in case of database propagation issues
       const retryTimeoutId = setTimeout(() => {
         verifyCanComplete();
-      }, 1000);
+      }, 500);
       
-      // Final retry after even longer delay
+      // Final retry after longer delay for slow database propagation
       const finalRetryTimeoutId = setTimeout(() => {
         verifyCanComplete();
-      }, 2000);
+      }, 1500);
       
       return () => {
-        clearTimeout(timeoutId);
         clearTimeout(retryTimeoutId);
         clearTimeout(finalRetryTimeoutId);
       };
@@ -139,26 +135,33 @@ export default function ClueDisplay({
     }
 
     try {
-      const { data: progressData } = await supabase
+      const { data: progressData, error: progressError } = await supabase
         .from('progress')
         .select('unlocked_at')
         .eq('team_id', team.id)
         .eq('checkpoint_id', checkpointId)
         .maybeSingle();
 
+      if (progressError) {
+        console.error('Error querying progress:', progressError);
+        // On error, keep current state (don't disable if already enabled)
+        return;
+      }
+
       // canComplete = unlocked_at !== null (correct QR/code/GPS was verified)
       if (progressData && progressData.unlocked_at !== null) {
+        console.log('Checkpoint verified as unlocked, enabling completion');
         setCanComplete(true);
       } else {
-        // Not unlocked yet - this shouldn't happen if parent is correct
-        // But be safe and disable completion
-        console.warn('ClueDisplay shown but checkpoint not unlocked - disabling completion');
+        // Not unlocked yet - this can happen if hints were used before unlock
+        // and the QR hasn't been scanned yet
+        console.log('Checkpoint not yet unlocked (unlocked_at is null)');
         setCanComplete(false);
       }
     } catch (err) {
       console.error('Error verifying canComplete status:', err);
-      // On error, disable completion for safety
-      setCanComplete(false);
+      // On error, keep current state (don't disable if already enabled)
+      // This prevents race conditions from causing issues
     }
   };
 
