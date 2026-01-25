@@ -454,7 +454,12 @@ export default function AdminPage() {
           };
 
           const { error: hintError } = await supabase.from('puzzle_hints').insert(hintData);
-          if (hintError) throw hintError;
+          if (hintError) {
+            if (hintError.message?.includes('puzzle_hints') || hintError.message?.includes('does not exist')) {
+              throw new Error('puzzle_hints table does not exist. Please run the migration: supabase/migrations/add_puzzle_hints_system.sql');
+            }
+            throw hintError;
+          }
         }
       }
 
@@ -585,7 +590,11 @@ export default function AdminPage() {
       }
 
       // Delete existing puzzle hints
-      await supabase.from('puzzle_hints').delete().eq('checkpoint_id', editingCheckpoint.id);
+      const { error: deleteError } = await supabase.from('puzzle_hints').delete().eq('checkpoint_id', editingCheckpoint.id);
+      if (deleteError && !deleteError.message?.includes('does not exist')) {
+        // Only throw if it's not a "table doesn't exist" error
+        console.warn('Error deleting puzzle hints (table may not exist):', deleteError);
+      }
 
       // Save new puzzle hints
       if (puzzleHints.length > 0) {
@@ -627,7 +636,12 @@ export default function AdminPage() {
           };
 
           const { error: hintError } = await supabase.from('puzzle_hints').insert(hintData);
-          if (hintError) throw hintError;
+          if (hintError) {
+            if (hintError.message?.includes('puzzle_hints') || hintError.message?.includes('does not exist')) {
+              throw new Error('puzzle_hints table does not exist. Please run the migration: supabase/migrations/add_puzzle_hints_system.sql');
+            }
+            throw hintError;
+          }
         }
       }
 
@@ -713,7 +727,17 @@ export default function AdminPage() {
       .eq('checkpoint_id', checkpoint.id)
       .order('hint_slot', { ascending: true });
 
-    if (!hintsError && hints) {
+    if (hintsError) {
+      // Check if error is due to missing table
+      if (hintsError.message?.includes('puzzle_hints') || hintsError.message?.includes('does not exist')) {
+        console.warn('puzzle_hints table does not exist. Please run the migration: supabase/migrations/add_puzzle_hints_system.sql');
+        // Don't show error to user, just set empty array
+        setPuzzleHints([]);
+      } else {
+        console.error('Error loading puzzle hints:', hintsError);
+        setPuzzleHints([]);
+      }
+    } else if (hints) {
       const hintConfigs: PuzzleHintConfig[] = hints.map((hint: any) => ({
         id: hint.id,
         hint_slot: hint.hint_slot,
