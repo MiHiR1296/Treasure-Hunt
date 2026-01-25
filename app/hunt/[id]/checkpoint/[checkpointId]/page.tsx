@@ -242,6 +242,10 @@ export default function CheckpointPage() {
 
       console.log('Checkpoint unlocked successfully!');
 
+      // Set unlocked state optimistically for immediate UI update
+      setIsUnlocked(true);
+      setHasProgress(true);
+
       // Refresh unlock status from database to ensure consistency
       // This is especially important when hints were used before unlock
       await checkIfUnlocked();

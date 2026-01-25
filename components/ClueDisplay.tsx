@@ -70,7 +70,8 @@ export default function ClueDisplay({
   //    - Only checks: unlocked_at !== null (correct QR/code/GPS was verified)
   //    - Does NOT depend on hints or points
   //    - Separate flag: canComplete
-  const [canComplete, setCanComplete] = useState(false); // Will be set after verification
+  // Initialize based on parent's isUnlocked prop - trust the parent
+  const [canComplete, setCanComplete] = useState(isUnlocked);
   
   // UI State
   const [showConfetti, setShowConfetti] = useState(false);
@@ -82,10 +83,11 @@ export default function ClueDisplay({
 
   useEffect(() => {
     loadHintUsage();
-    // Only verify if parent hasn't already indicated it's unlocked
-    // If isUnlocked is true, trust the parent and skip initial verification
-    // (it will be verified in the isUnlocked useEffect)
-    if (!isUnlocked) {
+    // Initial verification - only run once on mount, not when isUnlocked changes
+    // If isUnlocked is true from parent, trust it and set canComplete optimistically
+    if (isUnlocked) {
+      setCanComplete(true);
+    } else {
       verifyCanComplete();
     }
     console.log('ClueDisplay: Loading puzzle hints for checkpoint', checkpointId);
@@ -93,25 +95,29 @@ export default function ClueDisplay({
     if (usePuzzleChain) {
       loadPuzzleSteps();
     }
-  }, [checkpointId, team, usePuzzleChain, isUnlocked]);
+  }, [checkpointId, team, usePuzzleChain]); // Removed isUnlocked from deps to prevent re-running
 
   // Re-verify when parent indicates unlock status changed
   useEffect(() => {
+    console.log('ClueDisplay: isUnlocked prop changed to', isUnlocked);
     if (isUnlocked) {
-      // Parent says it's unlocked - verify immediately from database
+      // Parent says it's unlocked - trust it and set immediately for best UX
+      console.log('ClueDisplay: Setting canComplete to true (parent says unlocked)');
+      setCanComplete(true);
+      
+      // Then verify from database as a secondary check (but verifyCanComplete respects isUnlocked)
       // This handles the case where hints were used before unlock
       verifyCanComplete();
       
-      // Also set optimistically for better UX
-      setCanComplete(true);
-      
       // Retry after a short delay in case of database propagation issues
       const retryTimeoutId = setTimeout(() => {
+        console.log('ClueDisplay: Retrying verification after 500ms');
         verifyCanComplete();
       }, 500);
       
       // Final retry after longer delay for slow database propagation
       const finalRetryTimeoutId = setTimeout(() => {
+        console.log('ClueDisplay: Final retry verification after 1500ms');
         verifyCanComplete();
       }, 1500);
       
@@ -121,6 +127,7 @@ export default function ClueDisplay({
       };
     } else {
       // If parent says it's not unlocked, ensure canComplete is false
+      console.log('ClueDisplay: Setting canComplete to false (parent says not unlocked)');
       setCanComplete(false);
     }
   }, [isUnlocked]);
@@ -128,9 +135,11 @@ export default function ClueDisplay({
   // Clear flag check: canComplete = unlocked_at !== null
   // This explicitly verifies that the correct QR/code/GPS was given
   // Only when this is true can the user mark the checkpoint as complete
+  // NOTE: We trust the parent's isUnlocked prop - this is just a secondary verification
   const verifyCanComplete = async () => {
     if (!team) {
-      setCanComplete(false);
+      // If no team, trust parent's isUnlocked prop
+      setCanComplete(isUnlocked);
       return;
     }
 
@@ -144,24 +153,30 @@ export default function ClueDisplay({
 
       if (progressError) {
         console.error('Error querying progress:', progressError);
-        // On error, keep current state (don't disable if already enabled)
+        // On error, trust parent's isUnlocked prop
+        setCanComplete(isUnlocked);
         return;
       }
 
       // canComplete = unlocked_at !== null (correct QR/code/GPS was verified)
       if (progressData && progressData.unlocked_at !== null) {
-        console.log('Checkpoint verified as unlocked, enabling completion');
+        console.log('Checkpoint verified as unlocked in database');
         setCanComplete(true);
       } else {
-        // Not unlocked yet - this can happen if hints were used before unlock
-        // and the QR hasn't been scanned yet
-        console.log('Checkpoint not yet unlocked (unlocked_at is null)');
-        setCanComplete(false);
+        // Database says not unlocked - but trust parent if it says unlocked
+        // (parent might have just updated it and DB hasn't propagated yet)
+        if (isUnlocked) {
+          console.log('Parent says unlocked but DB not updated yet - trusting parent (optimistic)');
+          setCanComplete(true);
+        } else {
+          console.log('Checkpoint not yet unlocked (unlocked_at is null)');
+          setCanComplete(false);
+        }
       }
     } catch (err) {
       console.error('Error verifying canComplete status:', err);
-      // On error, keep current state (don't disable if already enabled)
-      // This prevents race conditions from causing issues
+      // On error, trust parent's isUnlocked prop
+      setCanComplete(isUnlocked);
     }
   };
 
