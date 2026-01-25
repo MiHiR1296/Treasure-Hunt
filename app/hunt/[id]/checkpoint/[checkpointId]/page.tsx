@@ -139,7 +139,7 @@ export default function CheckpointPage() {
       // Check if progress already exists (might have been created when hints were used)
       const { data: existingProgress } = await supabase
         .from('progress')
-        .select('id, points_earned, hints_used, unlocked_at')
+        .select('id, points_earned, hints_used, unlocked_at, completed_at')
         .eq('team_id', team.id)
         .eq('checkpoint_id', checkpointId)
         .maybeSingle();
