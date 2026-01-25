@@ -93,16 +93,21 @@ export default function ClueDisplay({
   }, [checkpointId, team, usePuzzleChain]);
 
   // Re-verify when parent indicates unlock status changed
-  // Use database as single source of truth, but check more frequently when parent says unlocked
+  // Trust parent's isUnlocked prop optimistically, then verify from database
   useEffect(() => {
     console.log('ClueDisplay: isUnlocked prop changed to', isUnlocked);
     
-    // Always verify from database (single source of truth)
-    verifyCanComplete();
-    
-    // If parent says unlocked, check more frequently to catch database updates
     if (isUnlocked) {
-      // Retry after short delays to catch database propagation
+      // Parent says unlocked - set optimistically for immediate UI update
+      // This prevents the error message from showing while database propagates
+      console.log('ClueDisplay: Parent says unlocked - setting canComplete optimistically');
+      setCanComplete(true);
+      
+      // Then verify from database in the background
+      // If database doesn't confirm, we'll still trust parent (it just unlocked)
+      verifyCanComplete();
+      
+      // Retry after short delays to catch database updates
       const retryTimeoutId = setTimeout(() => {
         console.log('ClueDisplay: Retrying verification after 500ms');
         verifyCanComplete();
@@ -123,15 +128,18 @@ export default function ClueDisplay({
         clearTimeout(retryTimeoutId2);
         clearTimeout(finalRetryTimeoutId);
       };
+    } else {
+      // Parent says not unlocked - verify from database
+      verifyCanComplete();
     }
   }, [isUnlocked]);
 
-  // Single source of truth: Database verification only
-  // canComplete = unlocked_at !== null in database
-  // This explicitly verifies that the correct QR/code/GPS was given
+  // Verify from database, but trust parent's isUnlocked prop if it says unlocked
+  // This prevents errors from showing when database hasn't propagated yet
   const verifyCanComplete = async () => {
     if (!team) {
-      setCanComplete(false);
+      // If no team, trust parent's isUnlocked prop
+      setCanComplete(isUnlocked);
       return;
     }
 
@@ -145,21 +153,30 @@ export default function ClueDisplay({
 
       if (progressError) {
         console.error('Error querying progress:', progressError);
-        setCanComplete(false);
+        // On error, trust parent's isUnlocked prop
+        setCanComplete(isUnlocked);
         return;
       }
 
-      // canComplete = unlocked_at !== null (single source of truth: database)
+      // canComplete = unlocked_at !== null (database confirms)
       if (progressData && progressData.unlocked_at !== null) {
         console.log('Checkpoint verified as unlocked in database');
         setCanComplete(true);
       } else {
-        console.log('Checkpoint not yet unlocked (unlocked_at is null)');
-        setCanComplete(false);
+        // Database says not unlocked
+        // But if parent says unlocked, trust parent (database might not have propagated yet)
+        if (isUnlocked) {
+          console.log('Database not updated yet but parent says unlocked - keeping canComplete true');
+          setCanComplete(true);
+        } else {
+          console.log('Checkpoint not yet unlocked (unlocked_at is null)');
+          setCanComplete(false);
+        }
       }
     } catch (err) {
       console.error('Error verifying canComplete status:', err);
-      setCanComplete(false);
+      // On error, trust parent's isUnlocked prop
+      setCanComplete(isUnlocked);
     }
   };
 
