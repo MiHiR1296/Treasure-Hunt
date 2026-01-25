@@ -74,6 +74,34 @@ If you get errors:
 
 After running the migration, refresh your admin panel and try adding a puzzle hint image again.
 
+## Storage Bucket Setup (Required for Image Uploads)
+
+**IMPORTANT:** You must create the `puzzle-images` storage bucket before uploading puzzle hint images.
+
+See `STORAGE_BUCKET_SETUP.md` for detailed instructions, or follow these quick steps:
+
+1. Go to Supabase Dashboard → **Storage**
+2. Click **New bucket**
+3. Name: `puzzle-images` (exact name, case-sensitive)
+4. ✅ Check **Public bucket** (uncheck "Private bucket")
+5. Click **Create bucket**
+6. Add policies for SELECT, INSERT, UPDATE, DELETE (see `STORAGE_BUCKET_SETUP.md` for details)
+
+**Quick SQL Setup** (run in SQL Editor):
+```sql
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('puzzle-images', 'puzzle-images', true)
+ON CONFLICT (id) DO NOTHING;
+
+CREATE POLICY IF NOT EXISTS "Public read access"
+ON storage.objects FOR SELECT
+USING (bucket_id = 'puzzle-images');
+
+CREATE POLICY IF NOT EXISTS "Anyone can upload"
+ON storage.objects FOR INSERT
+WITH CHECK (bucket_id = 'puzzle-images');
+```
+
 ## About the Old Puzzle Chain System
 
 **Do NOT remove the old puzzle chain system!** Both systems coexist:
