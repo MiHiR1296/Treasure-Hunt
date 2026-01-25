@@ -42,7 +42,7 @@ export default function CheckpointPage() {
   const router = useRouter();
   const huntId = params.id as string;
   const checkpointId = params.checkpointId as string;
-  const { team } = useTeam();
+  const { team, isLoading: teamLoading } = useTeam();
 
   const [checkpoint, setCheckpoint] = useState<Checkpoint | null>(null);
   // State flags - clear separation of concerns
@@ -59,6 +59,11 @@ export default function CheckpointPage() {
   const [dudQrMessage, setDudQrMessage] = useState<string | null>(null);
 
   useEffect(() => {
+    // Wait for team context to finish loading before checking
+    if (teamLoading) {
+      return;
+    }
+
     if (!team) {
       router.push('/join');
       return;
@@ -66,7 +71,7 @@ export default function CheckpointPage() {
 
     loadCheckpoint();
     checkIfUnlocked();
-  }, [team, checkpointId, router]);
+  }, [team, teamLoading, checkpointId, router]);
 
   const loadCheckpoint = async () => {
     try {
@@ -366,7 +371,7 @@ export default function CheckpointPage() {
     // Puzzles are now shown as hints in ClueDisplay after unlock
   };
 
-  if (isLoading) {
+  if (teamLoading || isLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
         <p className="text-gray-600">Loading checkpoint...</p>

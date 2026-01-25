@@ -67,11 +67,11 @@ export default function ClueDisplay({
   const [currentPoints, setCurrentPoints] = useState(checkpointPoints);
   
   // 3. COMPLETION SYSTEM - Independent verification
-  //    - Only checks: unlocked_at !== null (correct QR/code/GPS was verified)
+  //    - Only checks: unlocked_at !== null in database (single source of truth)
   //    - Does NOT depend on hints or points
   //    - Separate flag: canComplete
-  // Initialize based on parent's isUnlocked prop - trust the parent
-  const [canComplete, setCanComplete] = useState(isUnlocked);
+  // Initialize to false - will be set by database verification
+  const [canComplete, setCanComplete] = useState(false);
   
   // UI State
   const [showConfetti, setShowConfetti] = useState(false);
@@ -83,63 +83,55 @@ export default function ClueDisplay({
 
   useEffect(() => {
     loadHintUsage();
-    // Initial verification - only run once on mount, not when isUnlocked changes
-    // If isUnlocked is true from parent, trust it and set canComplete optimistically
-    if (isUnlocked) {
-      setCanComplete(true);
-    } else {
-      verifyCanComplete();
-    }
+    // Initial verification - always check database (single source of truth)
+    verifyCanComplete();
     console.log('ClueDisplay: Loading puzzle hints for checkpoint', checkpointId);
     loadPuzzleHints(); // Load individual puzzle hints
     if (usePuzzleChain) {
       loadPuzzleSteps();
     }
-  }, [checkpointId, team, usePuzzleChain]); // Removed isUnlocked from deps to prevent re-running
+  }, [checkpointId, team, usePuzzleChain]);
 
   // Re-verify when parent indicates unlock status changed
+  // Use database as single source of truth, but check more frequently when parent says unlocked
   useEffect(() => {
     console.log('ClueDisplay: isUnlocked prop changed to', isUnlocked);
+    
+    // Always verify from database (single source of truth)
+    verifyCanComplete();
+    
+    // If parent says unlocked, check more frequently to catch database updates
     if (isUnlocked) {
-      // Parent says it's unlocked - trust it and set immediately for best UX
-      console.log('ClueDisplay: Setting canComplete to true (parent says unlocked)');
-      setCanComplete(true);
-      
-      // Then verify from database as a secondary check (but verifyCanComplete respects isUnlocked)
-      // This handles the case where hints were used before unlock
-      verifyCanComplete();
-      
-      // Retry after a short delay in case of database propagation issues
+      // Retry after short delays to catch database propagation
       const retryTimeoutId = setTimeout(() => {
         console.log('ClueDisplay: Retrying verification after 500ms');
         verifyCanComplete();
       }, 500);
       
-      // Final retry after longer delay for slow database propagation
-      const finalRetryTimeoutId = setTimeout(() => {
-        console.log('ClueDisplay: Final retry verification after 1500ms');
+      const retryTimeoutId2 = setTimeout(() => {
+        console.log('ClueDisplay: Retrying verification after 1000ms');
         verifyCanComplete();
-      }, 1500);
+      }, 1000);
+      
+      const finalRetryTimeoutId = setTimeout(() => {
+        console.log('ClueDisplay: Final retry verification after 2000ms');
+        verifyCanComplete();
+      }, 2000);
       
       return () => {
         clearTimeout(retryTimeoutId);
+        clearTimeout(retryTimeoutId2);
         clearTimeout(finalRetryTimeoutId);
       };
-    } else {
-      // If parent says it's not unlocked, ensure canComplete is false
-      console.log('ClueDisplay: Setting canComplete to false (parent says not unlocked)');
-      setCanComplete(false);
     }
   }, [isUnlocked]);
 
-  // Clear flag check: canComplete = unlocked_at !== null
+  // Single source of truth: Database verification only
+  // canComplete = unlocked_at !== null in database
   // This explicitly verifies that the correct QR/code/GPS was given
-  // Only when this is true can the user mark the checkpoint as complete
-  // NOTE: We trust the parent's isUnlocked prop - this is just a secondary verification
   const verifyCanComplete = async () => {
     if (!team) {
-      // If no team, trust parent's isUnlocked prop
-      setCanComplete(isUnlocked);
+      setCanComplete(false);
       return;
     }
 
@@ -153,30 +145,21 @@ export default function ClueDisplay({
 
       if (progressError) {
         console.error('Error querying progress:', progressError);
-        // On error, trust parent's isUnlocked prop
-        setCanComplete(isUnlocked);
+        setCanComplete(false);
         return;
       }
 
-      // canComplete = unlocked_at !== null (correct QR/code/GPS was verified)
+      // canComplete = unlocked_at !== null (single source of truth: database)
       if (progressData && progressData.unlocked_at !== null) {
         console.log('Checkpoint verified as unlocked in database');
         setCanComplete(true);
       } else {
-        // Database says not unlocked - but trust parent if it says unlocked
-        // (parent might have just updated it and DB hasn't propagated yet)
-        if (isUnlocked) {
-          console.log('Parent says unlocked but DB not updated yet - trusting parent (optimistic)');
-          setCanComplete(true);
-        } else {
-          console.log('Checkpoint not yet unlocked (unlocked_at is null)');
-          setCanComplete(false);
-        }
+        console.log('Checkpoint not yet unlocked (unlocked_at is null)');
+        setCanComplete(false);
       }
     } catch (err) {
       console.error('Error verifying canComplete status:', err);
-      // On error, trust parent's isUnlocked prop
-      setCanComplete(isUnlocked);
+      setCanComplete(false);
     }
   };
 
@@ -575,15 +558,54 @@ export default function ClueDisplay({
       return;
     }
 
-    // Additional verification: Double-check in database
+    // Single source of truth: Verify from database only
     // COMPLETION SYSTEM ONLY - checks unlocked_at and completed_at
+    // Retry logic handles database propagation delays
     try {
-      const { data: progressCheck } = await supabase
-        .from('progress')
-        .select('unlocked_at, completed_at')
-        .eq('team_id', team.id)
-        .eq('checkpoint_id', checkpointId)
-        .maybeSingle();
+      let progressCheck = null;
+      let retries = 0;
+      const maxRetries = 5; // Increased retries for better reliability
+      
+      // Retry database check to handle propagation delays
+      while (retries < maxRetries) {
+        const { data, error: queryError } = await supabase
+          .from('progress')
+          .select('unlocked_at, completed_at')
+          .eq('team_id', team.id)
+          .eq('checkpoint_id', checkpointId)
+          .maybeSingle();
+
+        if (queryError) {
+          console.error('Error querying progress:', queryError);
+          // Retry on error (might be temporary)
+          if (retries < maxRetries - 1) {
+            await new Promise(resolve => setTimeout(resolve, 300));
+            retries++;
+            continue;
+          }
+          // Final attempt failed
+          setCompletionError('Unable to verify checkpoint status. Please try again.');
+          return;
+        }
+
+        progressCheck = data;
+        
+        // If we got data and it shows unlocked, we're good
+        if (progressCheck && progressCheck.unlocked_at !== null) {
+          break;
+        }
+        
+        // If not unlocked yet, retry (might be propagation delay)
+        if (retries < maxRetries - 1) {
+          console.log(`Database not updated yet (attempt ${retries + 1}/${maxRetries}), retrying...`);
+          await new Promise(resolve => setTimeout(resolve, 300));
+          retries++;
+          continue;
+        }
+        
+        // Exhausted retries - checkpoint is not unlocked
+        break;
+      }
 
       // Prevent double completion
       if (progressCheck && progressCheck.completed_at !== null) {
@@ -592,11 +614,10 @@ export default function ClueDisplay({
         return;
       }
 
-      // Final security check: Must have unlocked_at !== null
-      // This is the ONLY requirement for completion
+      // Final security check: Must have unlocked_at !== null (single source of truth: database)
       if (!progressCheck || progressCheck.unlocked_at === null) {
-        console.error('Security check failed: unlocked_at is null');
-        setCompletionError('Unable to verify checkpoint unlock status. Please refresh the page and try again.');
+        console.error('Security check failed: unlocked_at is null in database');
+        setCompletionError('Checkpoint is not unlocked yet. Please scan the QR code, enter the code, or reach the GPS location first.');
         return;
       }
     } catch (err) {
