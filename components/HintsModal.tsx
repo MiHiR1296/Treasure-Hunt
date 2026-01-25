@@ -308,6 +308,7 @@ export default function HintsModal({
           currentPoints={currentPoints}
           hintsUsed={hintsUsed}
           hintsAvailable={hintsAvailable}
+          hintCost={hintCost}
           onConfirm={handleConfirmHint}
           onCancel={() => {
             setShowConfirmation(false);
