@@ -658,7 +658,11 @@ export default function ClueDisplay({
   // Check each slot
   for (let slot = 1; slot <= 3; slot++) {
     // Check if there's a puzzle hint for this slot
-    const puzzleHint = puzzleHints.find(h => h.hint_slot === slot);
+    // Handle both number and string types for hint_slot (database might return string)
+    const puzzleHint = puzzleHints.find(h => {
+      const hintSlot = typeof h.hint_slot === 'string' ? parseInt(h.hint_slot, 10) : h.hint_slot;
+      return hintSlot === slot;
+    });
     if (puzzleHint) {
       console.log(`Slot ${slot}: Found puzzle hint`, puzzleHint);
       hintSlots.push({
