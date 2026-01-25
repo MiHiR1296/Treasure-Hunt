@@ -160,26 +160,45 @@ export default function CheckpointPage() {
       // Progress exists but not unlocked (hints were used before unlock)
       if (existingProgress) {
         console.log('Progress exists with hints used, unlocking now...', existingProgress);
-        // Update to mark as unlocked, preserve existing points_earned and hints_used
-        const { error: updateError } = await supabase
-          .from('progress')
-          .update({
-            unlocked_at: new Date().toISOString(),
-            // Keep existing points_earned and hints_used
-          })
-          .eq('team_id', team.id)
-          .eq('checkpoint_id', checkpointId);
         
-        if (updateError) {
-          console.error('Error updating progress to unlocked:', updateError);
-          throw updateError;
+        // Prepare upsert data - ensure all fields are properly set
+        const upsertData: any = {
+          team_id: team.id,
+          checkpoint_id: checkpointId,
+          unlocked_at: new Date().toISOString(),
+          hints_used: existingProgress.hints_used || 0, // Preserve existing hints_used
+          completed_at: existingProgress.completed_at || null, // Preserve completed_at if it exists
+        };
+        
+        // If points_earned is null/undefined, set it to base points (hints already deducted)
+        // Otherwise keep existing points_earned
+        if (existingProgress.points_earned === null || existingProgress.points_earned === undefined) {
+          upsertData.points_earned = basePoints;
+          setCurrentPoints(basePoints);
+        } else {
+          upsertData.points_earned = existingProgress.points_earned;
+          setCurrentPoints(existingProgress.points_earned);
         }
         
+        // Use upsert to handle both create and update cases reliably
+        const { error: upsertError } = await supabase
+          .from('progress')
+          .upsert(upsertData, {
+            onConflict: 'team_id,checkpoint_id',
+          });
+        
+        if (upsertError) {
+          console.error('Error upserting progress to unlocked:', upsertError);
+          throw new Error(`Failed to unlock checkpoint: ${upsertError.message}`);
+        }
+        
+        console.log('Progress upserted successfully, unlocked_at set');
+        
         // Verify the update was successful by querying again
-        // Retry verification up to 3 times to handle database propagation delays
+        // Retry verification up to 5 times to handle database propagation delays
         let verifyData = null;
         let retries = 0;
-        const maxRetries = 3;
+        const maxRetries = 5;
         
         while (retries < maxRetries) {
           const { data, error: verifyError } = await supabase
@@ -191,6 +210,16 @@ export default function CheckpointPage() {
           
           if (verifyError) {
             console.error('Error verifying unlock status:', verifyError);
+            // If it's a "not found" error, the upsert might not have worked
+            if (verifyError.code === 'PGRST116') {
+              throw new Error('Progress record not found after unlock. Please try again.');
+            }
+            // For other errors, retry
+            if (retries < maxRetries - 1) {
+              await new Promise(resolve => setTimeout(resolve, 300));
+              retries++;
+              continue;
+            }
             break;
           }
           
@@ -198,26 +227,25 @@ export default function CheckpointPage() {
           
           if (verifyData && verifyData.unlocked_at !== null) {
             // Successfully unlocked
+            console.log('Verified: Checkpoint is unlocked in database');
             break;
           }
           
           // Wait a bit before retrying
           if (retries < maxRetries - 1) {
-            await new Promise(resolve => setTimeout(resolve, 200));
+            console.log(`Verification attempt ${retries + 1}/${maxRetries}: unlocked_at still null, retrying...`);
+            await new Promise(resolve => setTimeout(resolve, 300));
           }
           retries++;
         }
         
         if (!verifyData || verifyData.unlocked_at === null) {
-          console.warn('Update completed but unlocked_at is still null after retries - this may indicate a database issue');
-          // Still proceed - the update should have worked, might be a caching issue
-        }
-        
-        // Update current points display to match what's in DB
-        if (existingProgress.points_earned !== null && existingProgress.points_earned !== undefined) {
-          setCurrentPoints(existingProgress.points_earned);
+          // Even after retries, unlocked_at is still null
+          // This could be a propagation delay - log warning but proceed optimistically
+          // The database update should have worked, and checkIfUnlocked() will verify later
+          console.warn('Upsert completed but verification shows unlocked_at still null after retries. This may be a propagation delay. Proceeding optimistically.');
         } else {
-          setCurrentPoints(basePoints);
+          console.log('Successfully verified unlock in database');
         }
       } else {
         // No progress exists, create new record
