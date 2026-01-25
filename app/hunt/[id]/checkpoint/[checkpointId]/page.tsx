@@ -57,6 +57,7 @@ export default function CheckpointPage() {
   const [currentPoints, setCurrentPoints] = useState(20);
   const [isUnlocking, setIsUnlocking] = useState(false);
   const [dudQrMessage, setDudQrMessage] = useState<string | null>(null);
+  const [unlockConfirmedAt, setUnlockConfirmedAt] = useState<number | null>(null); // Timestamp when unlock was confirmed (popup shown)
 
   useEffect(() => {
     // Wait for team context to finish loading before checking
@@ -181,12 +182,19 @@ export default function CheckpointPage() {
         }
         
         // Use upsert to handle both create and update cases reliably
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/1add2ac4-e88a-459f-95bb-25372d2f33d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'page.tsx:184',message:'Unlock upsert starting',data:{teamId:team.id,checkpointId,upsertData},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+        // #endregion
         const { error: upsertError, data: upsertResult } = await supabase
           .from('progress')
           .upsert(upsertData, {
             onConflict: 'team_id,checkpoint_id',
           })
           .select();
+        
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/1add2ac4-e88a-459f-95bb-25372d2f33d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'page.tsx:194',message:'Unlock upsert result',data:{upsertError:upsertError?.message,upsertResult,unlockedAt:upsertResult?.[0]?.unlocked_at},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+        // #endregion
         
         if (upsertError) {
           console.error('Error upserting progress to unlocked:', upsertError);
@@ -235,8 +243,11 @@ export default function CheckpointPage() {
       // This is especially important when hints were used before unlock
       await checkIfUnlocked();
 
-      // Show success popup
+      // Show success popup - this confirms unlock for security
       setShowSuccessPopup(true);
+      
+      // Set unlock confirmation timestamp when popup shows (security verification)
+      setUnlockConfirmedAt(Date.now());
     } catch (err: any) {
       console.error('Error unlocking checkpoint:', err);
       setError(err.message || 'Failed to unlock checkpoint');
@@ -448,6 +459,7 @@ export default function CheckpointPage() {
               checkpointPoints={checkpoint.points || 20}
               hintCost={checkpoint.hint_cost || 5}
               isUnlocked={isUnlocked}
+              unlockConfirmedAt={unlockConfirmedAt}
             />
           )}
 

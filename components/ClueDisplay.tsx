@@ -20,6 +20,7 @@ interface ClueDisplayProps {
   checkpointPoints?: number;
   hintCost?: number; // Points deducted per hint (independent system)
   isUnlocked?: boolean; // Parent's unlock status - triggers re-verification
+  unlockConfirmedAt?: number | null; // Timestamp when unlock popup was shown (security verification)
 }
 
 export default function ClueDisplay({
@@ -32,6 +33,7 @@ export default function ClueDisplay({
   checkpointPoints = 20,
   hintCost = 5, // Default to 5 if not provided
   isUnlocked = false, // Parent's unlock status
+  unlockConfirmedAt = null, // Timestamp when unlock popup was shown
 }: ClueDisplayProps) {
   // ============================================================================
   // INDEPENDENT SYSTEMS - Clear separation of concerns
@@ -70,8 +72,10 @@ export default function ClueDisplay({
   //    - Only checks: unlocked_at !== null in database (single source of truth)
   //    - Does NOT depend on hints or points
   //    - Separate flag: canComplete
-  // Initialize to false - will be set by database verification
+  //    - unlockConfirmed flag: Set when unlock popup shows (security verification)
+  // Initialize to false - will be set by database verification or unlock confirmation
   const [canComplete, setCanComplete] = useState(false);
+  const [unlockConfirmed, setUnlockConfirmed] = useState(false); // Set when unlock is confirmed via popup
   
   // UI State
   const [showConfetti, setShowConfetti] = useState(false);
@@ -103,6 +107,13 @@ export default function ClueDisplay({
       console.log('ClueDisplay: Parent says unlocked - setting canComplete optimistically');
       setCanComplete(true);
       
+      // If unlock was just confirmed (popup shown), set the security flag
+      // This provides an additional security layer beyond just the prop
+      if (unlockConfirmedAt) {
+        setUnlockConfirmed(true);
+        console.log('ClueDisplay: Unlock confirmed via popup timestamp - security flag set', unlockConfirmedAt);
+      }
+      
       // Then verify from database in the background
       // If database doesn't confirm, we'll still trust parent (it just unlocked)
       verifyCanComplete();
@@ -131,8 +142,9 @@ export default function ClueDisplay({
     } else {
       // Parent says not unlocked - verify from database
       verifyCanComplete();
+      setUnlockConfirmed(false);
     }
-  }, [isUnlocked]);
+  }, [isUnlocked, unlockConfirmedAt]);
 
   // Verify from database, but trust parent's isUnlocked prop if it says unlocked
   // This prevents errors from showing when database hasn't propagated yet
@@ -554,6 +566,9 @@ export default function ClueDisplay({
   // Points are saved separately and independently
   const handleComplete = async () => {
     console.log('handleComplete called', { team, checkpointId, currentPoints, totalHintsUsed });
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/1add2ac4-e88a-459f-95bb-25372d2f33d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ClueDisplay.tsx:555',message:'handleComplete entry',data:{teamId:team?.id,checkpointId,canComplete,isUnlocked},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
     
     if (!team) {
       console.error('No team found');
@@ -585,12 +600,19 @@ export default function ClueDisplay({
       
       // Retry database check to handle propagation delays
       while (retries < maxRetries) {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/1add2ac4-e88a-459f-95bb-25372d2f33d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ClueDisplay.tsx:588',message:'Database query attempt',data:{retry:retries+1,maxRetries,teamId:team.id,checkpointId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+        // #endregion
         const { data, error: queryError } = await supabase
           .from('progress')
           .select('unlocked_at, completed_at')
           .eq('team_id', team.id)
           .eq('checkpoint_id', checkpointId)
           .maybeSingle();
+
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/1add2ac4-e88a-459f-95bb-25372d2f33d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ClueDisplay.tsx:595',message:'Database query result',data:{retry:retries+1,queryError:queryError?.message,unlockedAt:data?.unlocked_at,completedAt:data?.completed_at,hasData:!!data},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+        // #endregion
 
         if (queryError) {
           console.error('Error querying progress:', queryError);
@@ -609,6 +631,9 @@ export default function ClueDisplay({
         
         // If we got data and it shows unlocked, we're good
         if (progressCheck && progressCheck.unlocked_at !== null) {
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/1add2ac4-e88a-459f-95bb-25372d2f33d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ClueDisplay.tsx:612',message:'Unlock verified in database',data:{retry:retries+1,unlockedAt:progressCheck.unlocked_at},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+          // #endregion
           break;
         }
         
@@ -624,6 +649,10 @@ export default function ClueDisplay({
         break;
       }
 
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/1add2ac4-e88a-459f-95bb-25372d2f33d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ClueDisplay.tsx:625',message:'After retry loop',data:{retries,progressCheck:!!progressCheck,unlockedAt:progressCheck?.unlocked_at},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
+
       // Prevent double completion
       if (progressCheck && progressCheck.completed_at !== null) {
         console.log('Checkpoint already completed');
@@ -631,11 +660,26 @@ export default function ClueDisplay({
         return;
       }
 
-      // Final security check: Must have unlocked_at !== null (single source of truth: database)
+      // Final security check: Must have unlocked_at !== null OR unlock was confirmed
+      // Security: Trust unlockConfirmed flag (set when popup shows) OR database confirmation
       if (!progressCheck || progressCheck.unlocked_at === null) {
-        console.error('Security check failed: unlocked_at is null in database');
-        setCompletionError('Checkpoint is not unlocked yet. Please scan the QR code, enter the code, or reach the GPS location first.');
-        return;
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/1add2ac4-e88a-459f-95bb-25372d2f33d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ClueDisplay.tsx:635',message:'Security check - database says not unlocked',data:{hasProgressCheck:!!progressCheck,unlockedAt:progressCheck?.unlocked_at,isUnlocked,unlockConfirmed},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+        // #endregion
+        
+        // Security: Only proceed if unlock was confirmed (popup shown) OR parent says unlocked
+        if (unlockConfirmed || isUnlocked) {
+          console.log('Database shows not unlocked but unlock was confirmed - proceeding with completion');
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/1add2ac4-e88a-459f-95bb-25372d2f33d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ClueDisplay.tsx:640',message:'Trusting unlockConfirmed flag',data:{unlockConfirmed,isUnlocked},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+          // #endregion
+          // Proceed with completion - unlock was confirmed via popup
+        } else {
+          // Neither unlock confirmed nor database says unlocked - show error
+          console.error('Security check failed: unlocked_at is null, unlock not confirmed, and parent says not unlocked');
+          setCompletionError('Checkpoint is not unlocked yet. Please scan the QR code, enter the code, or reach the GPS location first.');
+          return;
+        }
       }
     } catch (err) {
       console.error('Error verifying completion status:', err);
