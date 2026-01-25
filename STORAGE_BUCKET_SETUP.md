@@ -79,27 +79,33 @@ INSERT INTO storage.buckets (id, name, public)
 VALUES ('puzzle-images', 'puzzle-images', true)
 ON CONFLICT (id) DO NOTHING;
 
--- Public read access
-CREATE POLICY IF NOT EXISTS "Public read access"
+-- Public read access (drop if exists, then create)
+DROP POLICY IF EXISTS "Public read access" ON storage.objects;
+CREATE POLICY "Public read access"
 ON storage.objects FOR SELECT
 USING (bucket_id = 'puzzle-images');
 
 -- Anyone can upload
-CREATE POLICY IF NOT EXISTS "Anyone can upload"
+DROP POLICY IF EXISTS "Anyone can upload" ON storage.objects;
+CREATE POLICY "Anyone can upload"
 ON storage.objects FOR INSERT
 WITH CHECK (bucket_id = 'puzzle-images');
 
 -- Anyone can update
-CREATE POLICY IF NOT EXISTS "Anyone can update"
+DROP POLICY IF EXISTS "Anyone can update" ON storage.objects;
+CREATE POLICY "Anyone can update"
 ON storage.objects FOR UPDATE
 USING (bucket_id = 'puzzle-images')
 WITH CHECK (bucket_id = 'puzzle-images');
 
 -- Anyone can delete
-CREATE POLICY IF NOT EXISTS "Anyone can delete"
+DROP POLICY IF EXISTS "Anyone can delete" ON storage.objects;
+CREATE POLICY "Anyone can delete"
 ON storage.objects FOR DELETE
 USING (bucket_id = 'puzzle-images');
 ```
+
+**Note:** The `DROP POLICY IF EXISTS` statements may show a warning in Supabase, but it's safe - they only drop policies (not data) and immediately recreate them.
 
 ### Verify Setup
 
