@@ -156,7 +156,7 @@ export default function CheckpointPage() {
       if (existingProgress) {
         console.log('Progress exists with hints used, unlocking now...', existingProgress);
         // Update to mark as unlocked, preserve existing points_earned and hints_used
-        await supabase
+        const { error: updateError } = await supabase
           .from('progress')
           .update({
             unlocked_at: new Date().toISOString(),
@@ -164,6 +164,31 @@ export default function CheckpointPage() {
           })
           .eq('team_id', team.id)
           .eq('checkpoint_id', checkpointId);
+        
+        if (updateError) {
+          console.error('Error updating progress to unlocked:', updateError);
+          throw updateError;
+        }
+        
+        // Verify the update was successful by querying again
+        const { data: verifyData } = await supabase
+          .from('progress')
+          .select('unlocked_at, points_earned')
+          .eq('team_id', team.id)
+          .eq('checkpoint_id', checkpointId)
+          .single();
+        
+        if (verifyData && verifyData.unlocked_at === null) {
+          console.warn('Update completed but unlocked_at is still null - retrying...');
+          // Retry the update
+          await supabase
+            .from('progress')
+            .update({
+              unlocked_at: new Date().toISOString(),
+            })
+            .eq('team_id', team.id)
+            .eq('checkpoint_id', checkpointId);
+        }
         
         // Update current points display to match what's in DB
         if (existingProgress.points_earned !== null && existingProgress.points_earned !== undefined) {

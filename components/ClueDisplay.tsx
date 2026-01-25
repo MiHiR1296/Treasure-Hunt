@@ -92,21 +92,34 @@ export default function ClueDisplay({
   // Re-verify when parent indicates unlock status changed
   useEffect(() => {
     if (isUnlocked) {
-      // Parent says it's unlocked, re-verify to ensure database is in sync
-      // Add a small delay to ensure database update is committed
+      // Parent says it's unlocked - trust the parent and set optimistically
+      // This handles the case where ClueDisplay mounts right after unlock
+      setCanComplete(true);
+      
+      // Then verify from database to ensure consistency
+      // Add delays to handle database propagation
       const timeoutId = setTimeout(() => {
         verifyCanComplete();
-      }, 100);
+      }, 200);
       
-      // Also retry after a longer delay in case of slow database propagation
+      // Retry after longer delay in case of slow database propagation
       const retryTimeoutId = setTimeout(() => {
         verifyCanComplete();
-      }, 500);
+      }, 1000);
+      
+      // Final retry after even longer delay
+      const finalRetryTimeoutId = setTimeout(() => {
+        verifyCanComplete();
+      }, 2000);
       
       return () => {
         clearTimeout(timeoutId);
         clearTimeout(retryTimeoutId);
+        clearTimeout(finalRetryTimeoutId);
       };
+    } else {
+      // If parent says it's not unlocked, ensure canComplete is false
+      setCanComplete(false);
     }
   }, [isUnlocked]);
 
