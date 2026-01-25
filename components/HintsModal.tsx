@@ -12,6 +12,7 @@ interface HintsModalProps {
   hint2?: string | null;
   hint3?: string | null;
   checkpointPoints: number;
+  hintCost?: number; // Points deducted per hint (default: 5)
   onClose: () => void;
   onPointsUpdate?: (newPoints: number) => void;
 }
@@ -22,6 +23,7 @@ export default function HintsModal({
   hint2,
   hint3,
   checkpointPoints,
+  hintCost = 5, // Default to 5 if not provided
   onClose,
   onPointsUpdate,
 }: HintsModalProps) {
@@ -77,7 +79,7 @@ export default function HintsModal({
         if (progressData.points_earned !== null && progressData.points_earned !== undefined) {
           pointsToSet = progressData.points_earned;
         } else {
-          const points = calculatePoints(checkpointPoints, used);
+          const points = calculatePoints(checkpointPoints, used, hintCost);
           pointsToSet = points.pointsEarned;
         }
         setCurrentPoints(pointsToSet);
@@ -133,7 +135,7 @@ export default function HintsModal({
 
     try {
       const newHintsUsed = hintsUsed + 1;
-      const newPoints = getRemainingPointsAfterHint(currentPoints);
+        const newPoints = getRemainingPointsAfterHint(currentPoints, hintCost);
 
       // Check if progress exists
       const { data: existingProgress } = await supabase
@@ -260,14 +262,14 @@ export default function HintsModal({
                     ) : (
                       <div className="space-y-2">
                         <p className="text-gray-600 text-sm">
-                          This hint costs 5 points to reveal.
+                          This hint costs {hintCost} points to reveal.
                         </p>
                         <button
                           onClick={() => handleRequestHint(hint.id)}
                           disabled={!canUseHint(hintsUsed) || hintsAvailable === 0}
                           className="px-4 py-2 bg-yellow-500 text-white rounded-lg font-semibold hover:bg-yellow-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          Use Hint {hint.id} (-5 pts)
+                          Use Hint {hint.id} (-{hintCost} pts)
                         </button>
                       </div>
                     )}

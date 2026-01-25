@@ -46,6 +46,7 @@ interface Checkpoint {
   radius_m: number;
   use_puzzle_chain?: boolean;
   points?: number;
+  hint_cost?: number;
 }
 
 interface Team {
@@ -117,6 +118,7 @@ export default function AdminPage() {
   const [checkpointLng, setCheckpointLng] = useState('');
   const [checkpointRadius, setCheckpointRadius] = useState('50');
   const [checkpointPoints, setCheckpointPoints] = useState('20');
+  const [checkpointHintCost, setCheckpointHintCost] = useState('5');
   const [usePuzzleChain, setUsePuzzleChain] = useState(false);
   const [puzzleSteps, setPuzzleSteps] = useState<PuzzleStepConfig[]>([]);
   const qrCodeGeneratorRef = useRef<QRCodeGeneratorRef>(null);
@@ -348,6 +350,7 @@ export default function AdminPage() {
         unlock_method: checkpointUnlockMethod,
         use_puzzle_chain: usePuzzleChain,
         points: parseInt(checkpointPoints) || 20,
+        hint_cost: parseInt(checkpointHintCost) || 5,
       };
       if (checkpointUnlockMethod === 'qr_code') {
         checkpointData.qr_code_value = checkpointQRCode;
@@ -425,6 +428,7 @@ export default function AdminPage() {
       setCheckpointLng('');
       setCheckpointRadius('50');
       setCheckpointPoints('20');
+      setCheckpointHintCost('5');
       setUsePuzzleChain(false);
       setPuzzleSteps([]);
       loadCheckpoints();
@@ -455,6 +459,7 @@ export default function AdminPage() {
         unlock_method: checkpointUnlockMethod,
         use_puzzle_chain: usePuzzleChain,
         points: parseInt(checkpointPoints) || 20,
+        hint_cost: parseInt(checkpointHintCost) || 5,
       };
       if (checkpointUnlockMethod === 'qr_code') {
         checkpointData.qr_code_value = checkpointQRCode;
@@ -578,6 +583,7 @@ export default function AdminPage() {
     setCheckpointLng(checkpoint.lng?.toString() || '');
     setCheckpointRadius(checkpoint.radius_m?.toString() || '50');
     setCheckpointPoints(checkpoint.points?.toString() || '20');
+    setCheckpointHintCost(checkpoint.hint_cost?.toString() || '5');
     setUsePuzzleChain(checkpoint.use_puzzle_chain || false);
 
     // Load puzzle steps if using puzzle chain
@@ -944,6 +950,16 @@ export default function AdminPage() {
                         className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base text-gray-900 bg-white"
                       />
                     </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Hint Cost (points per hint, default: 5)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={checkpointHintCost}
+                        onChange={(e) => setCheckpointHintCost(e.target.value)}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg text-base text-gray-900 bg-white"
+                      />
+                    </div>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
@@ -957,7 +973,7 @@ export default function AdminPage() {
                     <div className="space-y-4">
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Hint 1 (Costs 5 points)
+                          Hint 1
                         </label>
                         <textarea
                           value={checkpointHint1}
@@ -992,7 +1008,7 @@ export default function AdminPage() {
                         />
                       </div>
                       <p className="text-xs text-gray-500">
-                        Each hint costs 5 points. Teams can use up to 3 hints per checkpoint.
+                        Teams can use up to 3 hints per checkpoint. The cost per hint is set above.
                       </p>
                     </div>
                     <div className="flex items-center gap-2 p-4 bg-indigo-50 border border-indigo-200 rounded-lg">

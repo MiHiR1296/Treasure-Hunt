@@ -8,7 +8,6 @@ import QRScanner from '@/components/QRScanner';
 import GPSDetector from '@/components/GPSDetector';
 import ManualCodeInput from '@/components/ManualCodeInput';
 import ClueDisplay from '@/components/ClueDisplay';
-import PuzzleChainRenderer from '@/components/puzzles/PuzzleChainRenderer';
 import ErrorPopup from '@/components/ErrorPopup';
 import SuccessPopup from '@/components/SuccessPopup';
 import HintsModal from '@/components/HintsModal';
@@ -35,6 +34,7 @@ interface Checkpoint {
   radius_m: number;
   use_puzzle_chain?: boolean;
   points?: number;
+  hint_cost?: number;
 }
 
 export default function CheckpointPage() {
@@ -313,12 +313,10 @@ export default function CheckpointPage() {
     router.push(`/hunt/${huntId}`);
   };
 
+  // Note: Puzzles are now used as hints after unlock, not before
+  // This handler is kept for backward compatibility but not used
   const handlePuzzleChainComplete = () => {
-    // Puzzles are complete - but this doesn't complete the checkpoint
-    // User still needs to unlock the checkpoint (scan QR, enter code, etc.)
-    // and then complete it via ClueDisplay
-    // Just show a message that puzzles are done - no popup needed
-    // The puzzle chain component will show its own completion message
+    // Puzzles are now shown as hints in ClueDisplay after unlock
   };
 
   if (isLoading) {
@@ -392,19 +390,7 @@ export default function CheckpointPage() {
 
           {!isUnlocked ? (
             <div className="space-y-4 md:space-y-6">
-              {/* Show puzzle chain if exists (optional hints to QR location) */}
-              {checkpoint.use_puzzle_chain && (
-                <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
-                  <p className="text-sm text-blue-800 mb-3">
-                    💡 These puzzles will help you find the QR code location. You can skip them and scan the QR code directly if you already know where it is.
-                  </p>
-                  <PuzzleChainRenderer
-                    checkpointId={checkpointId}
-                    onComplete={handlePuzzleChainComplete}
-                  />
-                </div>
-              )}
-
+              {/* Puzzles are now shown as hints after unlock, not before */}
               {checkpoint.unlock_method === 'gps' && checkpoint.lat && checkpoint.lng && (
                 <GPSDetector
                   targetLat={checkpoint.lat}
@@ -425,8 +411,10 @@ export default function CheckpointPage() {
               hint1={checkpoint.hint_1}
               hint2={checkpoint.hint_2}
               hint3={checkpoint.hint_3}
+              usePuzzleChain={checkpoint.use_puzzle_chain || false}
               onNext={handleNext}
               checkpointPoints={checkpoint.points || 20}
+              hintCost={checkpoint.hint_cost || 5}
             />
           )}
 
@@ -444,6 +432,7 @@ export default function CheckpointPage() {
               hint2={checkpoint.hint_2}
               hint3={checkpoint.hint_3}
               checkpointPoints={checkpoint.points || 20}
+              hintCost={checkpoint.hint_cost || 5}
               onClose={() => setShowHintsModal(false)}
               onPointsUpdate={setCurrentPoints}
             />

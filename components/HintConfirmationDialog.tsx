@@ -4,6 +4,7 @@ interface HintConfirmationDialogProps {
   currentPoints: number;
   hintsUsed: number;
   hintsAvailable: number;
+  hintCost: number; // Points deducted per hint
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -12,10 +13,11 @@ export default function HintConfirmationDialog({
   currentPoints,
   hintsUsed,
   hintsAvailable,
+  hintCost,
   onConfirm,
   onCancel,
 }: HintConfirmationDialogProps) {
-  const pointsAfterHint = Math.max(0, currentPoints - 5);
+  const pointsAfterHint = Math.max(0, currentPoints - hintCost);
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -27,7 +29,7 @@ export default function HintConfirmationDialog({
           </h3>
           <div className="bg-yellow-50 border-2 border-yellow-200 rounded-lg p-4 mb-4">
             <p className="text-gray-800 font-semibold mb-2">
-              ⚠️ Warning: This will deduct 5 points!
+              ⚠️ Warning: This will deduct {hintCost} points!
             </p>
             <div className="space-y-1 text-sm text-gray-700">
               <p>Current points: <span className="font-bold text-indigo-600">{currentPoints}</span></p>
@@ -47,7 +49,7 @@ export default function HintConfirmationDialog({
               onClick={onConfirm}
               className="px-6 py-3 bg-yellow-500 text-white rounded-lg font-semibold hover:bg-yellow-600 transition-colors"
             >
-              Use Hint (-5 points)
+              Use Hint (-{hintCost} points)
             </button>
           </div>
         </div>
