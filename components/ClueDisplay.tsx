@@ -24,21 +24,56 @@ export default function ClueDisplay({
   onNext,
   checkpointPoints = 20,
 }: ClueDisplayProps) {
+  // State flags - clear separation
   const [hintsUsed, setHintsUsed] = useState(0);
-  const [showHint, setShowHint] = useState(false);
+  const [hint1Used, setHint1Used] = useState(false);
+  const [hint2Used, setHint2Used] = useState(false);
+  const [hint3Used, setHint3Used] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
+  const [confirmingHint, setConfirmingHint] = useState<number | null>(null);
   const [currentPoints, setCurrentPoints] = useState(checkpointPoints);
   const [showConfetti, setShowConfetti] = useState(false);
   const [isCompleting, setIsCompleting] = useState(false);
   const [completionError, setCompletionError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isUnlocked, setIsUnlocked] = useState(false); // Track unlock status for security
   const { team } = useTeam();
 
   useEffect(() => {
     loadHintUsage();
+    verifyUnlockStatus();
   }, [checkpointId, team]);
 
-  const loadHintUsage = async () => {
+  // Security: Verify checkpoint is unlocked before showing completion button
+  const verifyUnlockStatus = async () => {
     if (!team) return;
+
+    try {
+      const { data: progressData } = await supabase
+        .from('progress')
+        .select('unlocked_at')
+        .eq('team_id', team.id)
+        .eq('checkpoint_id', checkpointId)
+        .maybeSingle();
+
+      // Set unlock status - this component should only be shown when unlocked
+      if (progressData && progressData.unlocked_at !== null) {
+        setIsUnlocked(true);
+      } else {
+        console.warn('ClueDisplay shown but checkpoint not unlocked - this should not happen');
+        setIsUnlocked(false);
+      }
+    } catch (err) {
+      console.error('Error verifying unlock status:', err);
+      setIsUnlocked(false);
+    }
+  };
+
+  const loadHintUsage = async () => {
+    if (!team) {
+      setIsLoading(false);
+      return;
+    }
 
     try {
       const { data: progressData } = await supabase
@@ -46,11 +81,17 @@ export default function ClueDisplay({
         .select('hints_used, points_earned')
         .eq('team_id', team.id)
         .eq('checkpoint_id', checkpointId)
-        .maybeSingle(); // Use maybeSingle instead of single to handle no record gracefully
+        .maybeSingle();
 
       if (progressData) {
         const used = progressData.hints_used || 0;
         setHintsUsed(used);
+        
+        // Restore which specific hints were used based on count
+        setHint1Used(used >= 1);
+        setHint2Used(used >= 2);
+        setHint3Used(used >= 3);
+        
         // Use points_earned from database if available (already accounts for hints)
         // Otherwise calculate from base points
         if (progressData.points_earned !== null && progressData.points_earned !== undefined) {
@@ -63,24 +104,34 @@ export default function ClueDisplay({
       } else {
         // No progress yet, use defaults
         setHintsUsed(0);
+        setHint1Used(false);
+        setHint2Used(false);
+        setHint3Used(false);
         setCurrentPoints(checkpointPoints);
       }
     } catch (err) {
+      console.error('Error loading hint usage:', err);
       // No progress yet, use defaults
       setHintsUsed(0);
+      setHint1Used(false);
+      setHint2Used(false);
+      setHint3Used(false);
       setCurrentPoints(checkpointPoints);
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const handleRequestHint = () => {
+  const handleRequestHint = (hintNumber: number) => {
     if (!canUseHint(hintsUsed)) {
       return;
     }
+    setConfirmingHint(hintNumber);
     setShowConfirmation(true);
   };
 
   const handleConfirmHint = async () => {
-    if (!team) return;
+    if (!team || confirmingHint === null) return;
 
     try {
       const newHintsUsed = hintsUsed + 1;
@@ -96,10 +147,17 @@ export default function ClueDisplay({
         .eq('team_id', team.id)
         .eq('checkpoint_id', checkpointId);
 
+      // Update local state
       setHintsUsed(newHintsUsed);
       setCurrentPoints(newPoints);
-      setShowHint(true);
+      
+      // Mark the specific hint as used
+      if (confirmingHint === 1) setHint1Used(true);
+      if (confirmingHint === 2) setHint2Used(true);
+      if (confirmingHint === 3) setHint3Used(true);
+      
       setShowConfirmation(false);
+      setConfirmingHint(null);
     } catch (err) {
       console.error('Error using hint:', err);
     }
@@ -116,6 +174,34 @@ export default function ClueDisplay({
 
     if (isCompleting || showConfetti) {
       console.log('Already completing or completed');
+      return;
+    }
+
+    // Security check: Verify checkpoint is actually unlocked before allowing completion
+    try {
+      const { data: progressCheck } = await supabase
+        .from('progress')
+        .select('unlocked_at, completed_at')
+        .eq('team_id', team.id)
+        .eq('checkpoint_id', checkpointId)
+        .maybeSingle();
+
+      // Must be unlocked (unlocked_at !== null) to complete
+      if (!progressCheck || progressCheck.unlocked_at === null) {
+        console.error('Cannot complete: Checkpoint not unlocked');
+        setCompletionError('You must unlock this checkpoint first by scanning the QR code, entering the code, or reaching the GPS location.');
+        return;
+      }
+
+      // Prevent double completion
+      if (progressCheck.completed_at !== null) {
+        console.log('Checkpoint already completed');
+        setShowConfetti(true);
+        return;
+      }
+    } catch (err) {
+      console.error('Error verifying unlock status:', err);
+      setCompletionError('Unable to verify checkpoint status. Please try again.');
       return;
     }
 
@@ -163,11 +249,21 @@ export default function ClueDisplay({
 
   const hintsAvailable = 3 - hintsUsed;
   const hints = [
-    { id: 1, text: hint1, used: hintsUsed >= 1 },
-    { id: 2, text: hint2, used: hintsUsed >= 2 },
-    { id: 3, text: hint3, used: hintsUsed >= 3 },
+    { id: 1, text: hint1, used: hint1Used },
+    { id: 2, text: hint2, used: hint2Used },
+    { id: 3, text: hint3, used: hint3Used },
   ].filter(h => h.text);
   const hasHints = hints.length > 0;
+
+  if (isLoading) {
+    return (
+      <div className="w-full space-y-6">
+        <div className="bg-gray-100 rounded-xl p-8 text-center">
+          <p className="text-gray-600">Loading hints...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full space-y-6">
@@ -197,7 +293,7 @@ export default function ClueDisplay({
       {/* Hints Section */}
       {hasHints && (
         <div className="space-y-3">
-          {hints.map((hint, index) => (
+          {hints.map((hint) => (
             <div
               key={hint.id}
               className={`border-2 rounded-xl p-4 ${
@@ -225,7 +321,7 @@ export default function ClueDisplay({
                       </p>
                       {hintsAvailable > 0 && (
                         <button
-                          onClick={handleRequestHint}
+                          onClick={() => handleRequestHint(hint.id)}
                           className="px-4 py-2 bg-yellow-500 text-white rounded-lg font-semibold hover:bg-yellow-600 transition-colors text-sm"
                         >
                           Use Hint {hint.id} (-5 pts)
@@ -288,31 +384,41 @@ export default function ClueDisplay({
         </div>
       )}
 
-      {/* Complete/Next Button - Hidden when completed */}
+      {/* Complete/Next Button - Hidden when completed, disabled if not unlocked */}
       {!showConfetti && (
         <div className="space-y-3" style={{ position: 'relative', zIndex: 10 }}>
           <button
             onClick={handleComplete}
             className="w-full bg-green-600 text-white py-3 rounded-lg font-semibold hover:bg-green-700 transition-colors text-lg disabled:opacity-50 disabled:cursor-not-allowed relative z-10"
-            disabled={isCompleting || !team}
+            disabled={isCompleting || !team || !isUnlocked}
             type="button"
           >
             {isCompleting ? 'Completing...' : 'Mark as Complete & Next Checkpoint →'}
           </button>
-          <p className="text-xs text-gray-500 text-center">
-            Click to mark this checkpoint as completed and proceed to the next one
-          </p>
+          {!isUnlocked && (
+            <p className="text-xs text-red-600 text-center font-semibold">
+              ⚠️ You must unlock this checkpoint first before marking it as complete
+            </p>
+          )}
+          {isUnlocked && (
+            <p className="text-xs text-gray-500 text-center">
+              Click to mark this checkpoint as completed and proceed to the next one
+            </p>
+          )}
         </div>
       )}
 
       {/* Confirmation Dialog */}
-      {showConfirmation && (
+      {showConfirmation && confirmingHint !== null && (
         <HintConfirmationDialog
           currentPoints={currentPoints}
           hintsUsed={hintsUsed}
           hintsAvailable={hintsAvailable}
           onConfirm={handleConfirmHint}
-          onCancel={() => setShowConfirmation(false)}
+          onCancel={() => {
+            setShowConfirmation(false);
+            setConfirmingHint(null);
+          }}
         />
       )}
     </div>

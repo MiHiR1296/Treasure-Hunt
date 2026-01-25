@@ -45,8 +45,9 @@ export default function CheckpointPage() {
   const { team } = useTeam();
 
   const [checkpoint, setCheckpoint] = useState<Checkpoint | null>(null);
-  const [isUnlocked, setIsUnlocked] = useState(false);
-  const [hasProgress, setHasProgress] = useState(false); // Track if any progress record exists (for hints)
+  // State flags - clear separation of concerns
+  const [isUnlocked, setIsUnlocked] = useState(false); // True when unlocked_at is not null (QR/code/GPS unlocked)
+  const [hasProgress, setHasProgress] = useState(false); // True when any progress record exists (for hints tracking)
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [showErrorPopup, setShowErrorPopup] = useState(false);
@@ -101,14 +102,15 @@ export default function CheckpointPage() {
         // Track if progress exists (for hints functionality)
         setHasProgress(true);
         
+        // Load points if available (hints may have been used before unlock)
+        if (data.points_earned !== undefined && data.points_earned !== null) {
+          setCurrentPoints(data.points_earned);
+        }
+        
         // Only consider unlocked if unlocked_at is not null
         // (hints can be used before unlocking, creating a progress record with unlocked_at: null)
         if (data.unlocked_at !== null) {
           setIsUnlocked(true);
-          // Load current points if checkpoint is already unlocked
-          if (data.points_earned !== undefined && data.points_earned !== null) {
-            setCurrentPoints(data.points_earned);
-          }
         }
       } else {
         setHasProgress(false);
@@ -132,40 +134,48 @@ export default function CheckpointPage() {
       // Check if progress already exists (might have been created when hints were used)
       const { data: existingProgress } = await supabase
         .from('progress')
-        .select('id, points_earned, hints_used')
+        .select('id, points_earned, hints_used, unlocked_at')
         .eq('team_id', team.id)
         .eq('checkpoint_id', checkpointId)
         .maybeSingle();
 
+      // Clear flag check: If already unlocked, just show success
+      if (existingProgress && existingProgress.unlocked_at !== null) {
+        console.log('Checkpoint already unlocked');
+        setIsUnlocked(true);
+        setHasProgress(true);
+        if (existingProgress.points_earned !== null && existingProgress.points_earned !== undefined) {
+          setCurrentPoints(existingProgress.points_earned);
+        }
+        setShowSuccessPopup(true);
+        setIsUnlocking(false);
+        return;
+      }
+
+      // Progress exists but not unlocked (hints were used before unlock)
       if (existingProgress) {
-        // Progress exists - check if already unlocked
-        if (existingProgress.hints_used !== undefined && existingProgress.points_earned !== undefined) {
-          // Hints were used before unlocking, preserve the existing points
-          console.log('Progress exists with hints used, preserving points:', existingProgress);
-          // Update to mark as unlocked, but keep existing points_earned
-          await supabase
-            .from('progress')
-            .update({
-              unlocked_at: new Date().toISOString(),
-            })
-            .eq('team_id', team.id)
-            .eq('checkpoint_id', checkpointId);
-          
-          // Update current points display to match what's in DB
+        console.log('Progress exists with hints used, unlocking now...', existingProgress);
+        // Update to mark as unlocked, preserve existing points_earned and hints_used
+        await supabase
+          .from('progress')
+          .update({
+            unlocked_at: new Date().toISOString(),
+            // Keep existing points_earned and hints_used
+          })
+          .eq('team_id', team.id)
+          .eq('checkpoint_id', checkpointId);
+        
+        // Update current points display to match what's in DB
+        if (existingProgress.points_earned !== null && existingProgress.points_earned !== undefined) {
           setCurrentPoints(existingProgress.points_earned);
         } else {
-          // Already unlocked, just show success
-          console.log('Checkpoint already unlocked, showing success popup');
-          setIsUnlocked(true);
-          setShowSuccessPopup(true);
-          setIsUnlocking(false);
-          return;
+          setCurrentPoints(basePoints);
         }
       } else {
         // No progress exists, create new record
         console.log('Unlocking checkpoint...', { teamId: team.id, checkpointId, basePoints });
 
-        // Record progress with initial points (will be updated when completed)
+        // Record progress with initial points (will be updated when hints are used or completed)
         const { error: progressError } = await supabase
           .from('progress')
           .insert({
@@ -189,10 +199,11 @@ export default function CheckpointPage() {
 
       console.log('Checkpoint unlocked successfully!');
 
-      // Update state to reflect unlock
+      // Update state flags
       setIsUnlocked(true);
+      setHasProgress(true);
 
-      // Show success popup, then redirect
+      // Show success popup
       setShowSuccessPopup(true);
     } catch (err: any) {
       console.error('Error unlocking checkpoint:', err);

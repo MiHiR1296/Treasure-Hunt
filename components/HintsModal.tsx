@@ -25,19 +25,21 @@ export default function HintsModal({
   onClose,
   onPointsUpdate,
 }: HintsModalProps) {
+  // State flags - clear separation
   const [hintsUsed, setHintsUsed] = useState(0);
-  const [showHint1, setShowHint1] = useState(false);
-  const [showHint2, setShowHint2] = useState(false);
-  const [showHint3, setShowHint3] = useState(false);
+  const [hint1Used, setHint1Used] = useState(false);
+  const [hint2Used, setHint2Used] = useState(false);
+  const [hint3Used, setHint3Used] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [confirmingHint, setConfirmingHint] = useState<number | null>(null);
   const [currentPoints, setCurrentPoints] = useState(checkpointPoints);
+  const [isLoading, setIsLoading] = useState(true);
   const { team } = useTeam();
 
   const hints = [
-    { id: 1, text: hint1, show: showHint1, setShow: setShowHint1 },
-    { id: 2, text: hint2, show: showHint2, setShow: setShowHint2 },
-    { id: 3, text: hint3, show: showHint3, setShow: setShowHint3 },
+    { id: 1, text: hint1, used: hint1Used, setUsed: setHint1Used },
+    { id: 2, text: hint2, used: hint2Used, setUsed: setHint2Used },
+    { id: 3, text: hint3, used: hint3Used, setUsed: setHint3Used },
   ].filter(h => h.text); // Only show hints that exist
 
   useEffect(() => {
@@ -45,7 +47,10 @@ export default function HintsModal({
   }, [checkpointId, team]);
 
   const loadHintUsage = async () => {
-    if (!team) return;
+    if (!team) {
+      setIsLoading(false);
+      return;
+    }
 
     try {
       const { data: progressData } = await supabase
@@ -53,27 +58,62 @@ export default function HintsModal({
         .select('hints_used, points_earned')
         .eq('team_id', team.id)
         .eq('checkpoint_id', checkpointId)
-        .maybeSingle(); // Use maybeSingle instead of single to handle no record gracefully
+        .maybeSingle();
 
       if (progressData) {
         const used = progressData.hints_used || 0;
         setHintsUsed(used);
+        
+        // Restore which specific hints were used based on count
+        // If hints_used >= 1, hint 1 was used
+        // If hints_used >= 2, hint 2 was used
+        // If hints_used >= 3, hint 3 was used
+        setHint1Used(used >= 1);
+        setHint2Used(used >= 2);
+        setHint3Used(used >= 3);
+        
         // Use points_earned from DB if available, otherwise calculate
+        let pointsToSet: number;
         if (progressData.points_earned !== null && progressData.points_earned !== undefined) {
-          setCurrentPoints(progressData.points_earned);
+          pointsToSet = progressData.points_earned;
         } else {
           const points = calculatePoints(checkpointPoints, used);
-          setCurrentPoints(points.pointsEarned);
+          pointsToSet = points.pointsEarned;
+        }
+        setCurrentPoints(pointsToSet);
+        
+        // Sync points to parent component
+        if (onPointsUpdate) {
+          onPointsUpdate(pointsToSet);
         }
       } else {
         // No progress yet - reset to defaults
         setHintsUsed(0);
+        setHint1Used(false);
+        setHint2Used(false);
+        setHint3Used(false);
         setCurrentPoints(checkpointPoints);
+        
+        // Sync points to parent component
+        if (onPointsUpdate) {
+          onPointsUpdate(checkpointPoints);
+        }
       }
     } catch (err) {
+      console.error('Error loading hint usage:', err);
       // No progress yet - reset to defaults
       setHintsUsed(0);
+      setHint1Used(false);
+      setHint2Used(false);
+      setHint3Used(false);
       setCurrentPoints(checkpointPoints);
+      
+      // Sync points to parent component
+      if (onPointsUpdate) {
+        onPointsUpdate(checkpointPoints);
+      }
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -115,7 +155,6 @@ export default function HintsModal({
           .eq('checkpoint_id', checkpointId);
       } else {
         // Create progress record if it doesn't exist (hints used before unlocking)
-        // Use upsert to handle race conditions
         await supabase
           .from('progress')
           .upsert({
@@ -130,12 +169,14 @@ export default function HintsModal({
           });
       }
 
+      // Update local state
       setHintsUsed(newHintsUsed);
       setCurrentPoints(newPoints);
-      hintToShow.setShow(true);
+      hintToShow.setUsed(true); // Mark this specific hint as used
       setShowConfirmation(false);
       setConfirmingHint(null);
 
+      // Sync points to parent component
       if (onPointsUpdate) {
         onPointsUpdate(newPoints);
       }
@@ -145,6 +186,16 @@ export default function HintsModal({
   };
 
   const hintsAvailable = 3 - hintsUsed;
+
+  if (isLoading) {
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-2xl shadow-2xl p-8">
+          <p className="text-gray-600">Loading hints...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -183,11 +234,11 @@ export default function HintsModal({
 
           {/* Hints List */}
           <div className="space-y-4">
-            {hints.map((hint, index) => (
+            {hints.map((hint) => (
               <div
                 key={hint.id}
                 className={`border-2 rounded-xl p-4 ${
-                  hint.show
+                  hint.used
                     ? 'bg-yellow-50 border-yellow-300'
                     : 'bg-gray-50 border-gray-200'
                 }`}
@@ -198,13 +249,13 @@ export default function HintsModal({
                       <span className="text-lg font-semibold text-gray-900">
                         Hint {hint.id}
                       </span>
-                      {hint.show && (
+                      {hint.used && (
                         <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded">
                           Revealed
                         </span>
                       )}
                     </div>
-                    {hint.show ? (
+                    {hint.used ? (
                       <p className="text-gray-800">{hint.text}</p>
                     ) : (
                       <div className="space-y-2">

@@ -86,7 +86,8 @@ export default function HuntPage() {
           .select('checkpoint_id, completed_at, points_earned')
           .eq('team_id', team.id);
 
-        // Only include checkpoints that are actually completed (have completed_at)
+        // Clear flag check: isCompleted = completed_at !== null
+        // Only include checkpoints that are actually completed
         const completed = new Set(
           progressData
             ?.filter((p) => p.completed_at !== null)
@@ -94,9 +95,9 @@ export default function HuntPage() {
         );
         setCompletedCheckpoints(completed);
 
-        // Calculate total team points from completed checkpoints
+        // Calculate total team points from completed checkpoints only
         const totalPoints = progressData
-          ?.filter((p) => p.completed_at)
+          ?.filter((p) => p.completed_at !== null)
           .reduce((sum, p) => sum + (p.points_earned || 0), 0) || 0;
         setTeamPoints(totalPoints);
 

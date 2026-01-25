@@ -119,15 +119,20 @@ export default function Leaderboard({ huntId, totalCheckpoints, compact = false 
       const teamProgress: Record<string, LeaderboardEntry> = {};
 
       teams.forEach((team) => {
-        // Include teams that have started (have at least one progress entry - unlocked or completed)
+        // Include teams that have started (have at least one progress entry)
         if (teamIdsWithProgress.has(team.id)) {
           const teamProgressData = progressData?.filter((p) => p.team_id === team.id) || [];
-          const completedCheckpoints = teamProgressData.filter((p) => p.completed_at).length;
-          const unlockedCheckpoints = teamProgressData.filter((p) => p.unlocked_at).length;
+          
+          // Clear flag checks:
+          // - isCompleted: completed_at !== null
+          // - isUnlocked: unlocked_at !== null
+          // - hasProgress: progress record exists
+          const completedCheckpoints = teamProgressData.filter((p) => p.completed_at !== null).length;
+          const unlockedCheckpoints = teamProgressData.filter((p) => p.unlocked_at !== null).length;
+          
+          // Only count points from completed checkpoints (completed_at !== null)
           const totalPoints = teamProgressData.reduce((sum, p) => {
-            // Only count points from completed checkpoints
-            // Handle both null/undefined and 0 values correctly
-            if (p.completed_at && p.points_earned != null) {
+            if (p.completed_at !== null && p.points_earned != null) {
               return sum + (p.points_earned || 0);
             }
             return sum;

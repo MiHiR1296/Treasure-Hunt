@@ -1489,12 +1489,12 @@ function HuntLeaderboard({ hunt }: { hunt: Hunt }) {
         // Only show teams that have started (have progress)
         if (teamIdsWithProgress.has(team.id)) {
           const teamProgressData = progress?.filter(p => p.team_id === team.id) || [];
-          const completedCheckpoints = teamProgressData.filter((p) => p.completed_at).length;
-          const unlockedCheckpoints = teamProgressData.filter((p) => p.unlocked_at).length;
+          // Clear flag checks: isCompleted = completed_at !== null, isUnlocked = unlocked_at !== null
+          const completedCheckpoints = teamProgressData.filter((p) => p.completed_at !== null).length;
+          const unlockedCheckpoints = teamProgressData.filter((p) => p.unlocked_at !== null).length;
           const totalPoints = teamProgressData.reduce((sum, p) => {
-            // Only count points from completed checkpoints
-            // Handle both null/undefined and 0 values correctly
-            if (p.completed_at && p.points_earned != null) {
+            // Only count points from completed checkpoints (completed_at !== null)
+            if (p.completed_at !== null && p.points_earned != null) {
               return sum + (p.points_earned || 0);
             }
             return sum;
