@@ -229,7 +229,7 @@ export default function HintsModal({
             </div>
             {currentPoints < checkpointPoints && (
               <p className="text-xs mt-2 opacity-75">
-                Started with {checkpointPoints} points • {hintsUsed * 5} points deducted
+                Started with {checkpointPoints} points • {hintsUsed * hintCost} points deducted
               </p>
             )}
           </div>

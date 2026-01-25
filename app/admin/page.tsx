@@ -985,7 +985,7 @@ export default function AdminPage() {
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Hint 2 (Costs 5 points)
+                          Hint 2
                         </label>
                         <textarea
                           value={checkpointHint2}
@@ -997,7 +997,7 @@ export default function AdminPage() {
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Hint 3 (Costs 5 points)
+                          Hint 3
                         </label>
                         <textarea
                           value={checkpointHint3}

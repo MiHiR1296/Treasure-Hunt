@@ -30,14 +30,14 @@ A comprehensive web-based treasure hunt application for community events. Featur
 
 ### 💰 Points System
 - **Configurable Points** - Set points per checkpoint (default: 20)
-- **Hint Penalties** - Each hint costs 5 points
+- **Hint Penalties** - Each hint costs points (configurable per checkpoint, default: 5)
 - **Up to 3 Hints** - Teams can use up to 3 hints per checkpoint
 - **Real-time Tracking** - See current points on checkpoint pages
 - **Points Leaderboard** - Rankings based on total points earned
 
 ### 💡 Hints System
 - **3-Tier Hints** - Up to 3 hints per checkpoint
-- **Point Deduction** - 5 points per hint used
+- **Point Deduction** - Configurable points per hint (default: 5)
 - **Pre/Post Unlock** - Hints available before or after unlocking checkpoint
 - **Hint Tracking** - System tracks which hints have been used
 
@@ -193,7 +193,7 @@ A comprehensive web-based treasure hunt application for community events. Featur
 
 1. After unlocking, you'll see the checkpoint question/clue
 2. Solve the puzzle or answer the question
-3. Use hints if stuck (costs 5 points each, up to 3 hints)
+3. Use hints if stuck (costs points per hint, up to 3 hints - cost is configurable per checkpoint)
 4. Submit your answer
 5. Earn points based on checkpoint value minus hint penalties
 
@@ -238,7 +238,7 @@ A comprehensive web-based treasure hunt application for community events. Featur
    - **Order Index**: Sequence number (1, 2, 3...)
    - **Description**: Additional context
    - **Points**: Points awarded (default: 20)
-   - **Hints**: Add up to 3 hints (each costs 5 points)
+   - **Hints**: Add up to 3 hints (each costs points - configurable per checkpoint, default: 5)
    - **Unlock Method**: Choose QR Code, GPS, or Manual Code
 4. **For QR Code**:
    - Enter QR code value

@@ -368,7 +368,7 @@ export default function CheckpointPage() {
                 💡 Show Hints for This Checkpoint
               </button>
               <p className="text-xs text-yellow-700 mt-2 text-center">
-                Each hint costs 5 points. You can use up to 3 hints.
+                Each hint costs {checkpoint.hint_cost || 5} points. You can use up to 3 hints.
               </p>
             </div>
           )}

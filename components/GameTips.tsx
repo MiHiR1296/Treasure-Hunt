@@ -21,7 +21,7 @@ const tips = [
   {
     icon: '💡',
     title: 'Hints Cost Points',
-    message: 'Use hints wisely! Each hint costs 5 points. Think carefully before using them.',
+    message: 'Use hints wisely! Each hint costs points (configurable per checkpoint). Think carefully before using them.',
   },
   {
     icon: '🎯',
