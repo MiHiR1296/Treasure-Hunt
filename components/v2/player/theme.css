@@ -1,0 +1,62 @@
+.hunt-player[data-button-shape='rounded'] {
+  --hunt-button-radius: 0.75rem;
+}
+
+.hunt-player[data-button-shape='pill'] {
+  --hunt-button-radius: 9999px;
+}
+
+.hunt-player[data-button-shape='square'] {
+  --hunt-button-radius: 0;
+}
+
+.hunt-player[data-button-shape] .hunt-action,
+.hunt-player[data-button-shape] .hunt-qr-actions button {
+  border-radius: var(--hunt-button-radius);
+}
+
+.hunt-player[data-hunt-background='true'] > .hunt-content {
+  padding-inline: 1rem;
+  background-color: #f5f3ed;
+}
+
+.hunt-success-mark {
+  display: inline-block;
+}
+
+@keyframes hunt-success-pulse {
+  0%, 100% { transform: scale(1); }
+  45% { transform: scale(1.1); }
+}
+
+@keyframes hunt-success-celebrate {
+  0%, 100% { transform: translateY(0) rotate(0); }
+  30% { transform: translateY(-8px) rotate(-10deg); }
+  60% { transform: translateY(-3px) rotate(8deg); }
+}
+
+@keyframes hunt-success-notice {
+  0% { box-shadow: 0 0 0 0 rgb(5 150 105 / 25%); }
+  100% { box-shadow: 0 0 0 8px rgb(5 150 105 / 0%); }
+}
+
+.hunt-player[data-success-animation='pulse'] .hunt-success-mark {
+  animation: hunt-success-pulse 650ms ease-out 1;
+}
+
+.hunt-player[data-success-animation='celebrate'] .hunt-success-mark {
+  animation: hunt-success-celebrate 900ms ease-out 1;
+}
+
+.hunt-player[data-success-animation='pulse'] .hunt-success-notice,
+.hunt-player[data-success-animation='celebrate'] .hunt-success-notice {
+  animation: hunt-success-notice 650ms ease-out 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hunt-player .hunt-success-mark,
+  .hunt-player .hunt-success-notice {
+    animation: none !important;
+    transform: none !important;
+  }
+}

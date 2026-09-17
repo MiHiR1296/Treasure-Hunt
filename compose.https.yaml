@@ -1,0 +1,21 @@
+# Optional domain-based HTTPS; requires DNS pointing at the Docker host.
+# docker compose -f compose.yaml -f compose.https.yaml up -d --build
+services:
+  proxy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      HUNT_DOMAIN: ${HUNT_DOMAIN:?Set HUNT_DOMAIN to your public hostname}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - hunt-certificates:/data
+      - hunt-proxy-config:/config
+    depends_on:
+      - web
+    restart: unless-stopped
+volumes:
+  hunt-certificates:
+  hunt-proxy-config:

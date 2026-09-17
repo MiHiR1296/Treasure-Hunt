@@ -2,22 +2,23 @@
 
 import { useState } from 'react';
 import QRScanner from '@/components/QRScanner';
+import type { ScanHandler } from '@/lib/utils/qrScanSession';
 
 interface PuzzleQRScannerProps {
-  onAnswerSubmit: (answer: string) => void;
+  onAnswerSubmit: ScanHandler;
   expectedValue?: string;
 }
 
 export default function PuzzleQRScanner({ onAnswerSubmit, expectedValue }: PuzzleQRScannerProps) {
   const [error, setError] = useState('');
 
-  const handleScan = (decodedText: string) => {
+  const handleScan: ScanHandler = async (decodedText) => {
     if (expectedValue && decodedText !== expectedValue) {
       setError('Incorrect QR code. Please scan the correct code.');
-      return;
+      return false;
     }
     setError('');
-    onAnswerSubmit(decodedText);
+    return onAnswerSubmit(decodedText);
   };
 
   const handleError = (errorMessage: string) => {

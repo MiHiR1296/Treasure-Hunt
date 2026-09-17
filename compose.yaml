@@ -1,0 +1,51 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: treasure_hunt
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - hunt-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d treasure_hunt"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+  web:
+    build: .
+    volumes:
+      - hunt-media:/app/.data/media
+    ports:
+      - "127.0.0.1:${WEB_PORT:-3000}:3000"
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/treasure_hunt
+      ORGANIZER_PASSWORD: ${ORGANIZER_PASSWORD:?Set ORGANIZER_PASSWORD in .env}
+      APP_ORIGIN: ${APP_ORIGIN:-http://localhost:3000}
+      ADDITIONAL_ORIGINS: ${ADDITIONAL_ORIGINS:-}
+      ENABLE_LEGACY_V1: "false"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/v2/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+  maintenance:
+    build: .
+    command: ["node", "scripts/v2-maintenance.mjs"]
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/treasure_hunt
+    volumes:
+      - hunt-media:/app/.data/media
+    depends_on:
+      web:
+        condition: service_healthy
+    restart: unless-stopped
+volumes:
+  hunt-data:
+  hunt-media:

@@ -183,7 +183,6 @@ export default function CheckpointPage() {
         
         // Use upsert to handle both create and update cases reliably
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/1add2ac4-e88a-459f-95bb-25372d2f33d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'page.tsx:184',message:'Unlock upsert starting',data:{teamId:team.id,checkpointId,upsertData},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
         // #endregion
         const { error: upsertError, data: upsertResult } = await supabase
           .from('progress')
@@ -193,7 +192,6 @@ export default function CheckpointPage() {
           .select();
         
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/1add2ac4-e88a-459f-95bb-25372d2f33d8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'page.tsx:194',message:'Unlock upsert result',data:{upsertError:upsertError?.message,upsertResult,unlockedAt:upsertResult?.[0]?.unlocked_at},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
         // #endregion
         
         if (upsertError) {
