@@ -2,6 +2,16 @@
 
 The demo runs on a **Render Free web service** with **Supabase Free PostgreSQL and a private Storage bucket**. The application, saved hunts, team progress and uploads are independent of the organizer computer. No paid disk, paid database or Railway subscription is required.
 
+## Current demo
+
+- [Player home](https://treasure-hunt-v2-demo.onrender.com/v2)
+- [Six-checkpoint showcase](https://treasure-hunt-v2-demo.onrender.com/v2?hunt=kalyan-demo)
+- [Organizer console](https://treasure-hunt-v2-demo.onrender.com/v2/admin), using the existing organizer password
+- [Render service dashboard](https://dashboard.render.com/web/srv-dam55f3m8hqs73bl7hf0)
+- [Supabase project dashboard](https://supabase.com/dashboard/project/yutjqywygwueudxishei)
+
+Verified on 2026-09-18 (IST), running commit `59e3079b8b368bc827ea62db4b19a987adab6d67`. Existing hunt definitions, published versions, team progress and three media assets were migrated and checked. The public six-checkpoint game reached 120 points; its session and exact uploaded image bytes survived a Render restart. Mobile Chrome at 390×844 passed organizer sign-in, repeated nearby wrong-answer feedback, floating success/points feedback and reload recovery. See the [cloud acceptance record](acceptance.md#free-cloud-deployment-verification).
+
 ## Free-plan limits
 
 Render sleeps after 15 minutes without inbound traffic and typically takes about a minute to wake. Open the link before a demonstration. Its free filesystem is temporary, so `MEDIA_STORAGE=supabase` is required for this setup. Render provides 750 free instance hours per workspace each month. See [Render's free service limits](https://render.com/docs/free).
@@ -69,4 +79,4 @@ The filesystem backend remains the default for local Docker Compose and servers 
 
 Vercel requires further upload-flow changes because [its function payload limit](https://vercel.com/docs/errors/function_payload_too_large) is 4.5 MB. Render preserves the existing 20 MB organizer upload flow.
 
-Local checks and pushed code are preparation. Cloud deployment is complete only after the real cloud endpoint, database and stored uploads have been verified.
+For subsequent releases, repeat the public endpoint, database, upload and restart checks before marking the deployment verified.
