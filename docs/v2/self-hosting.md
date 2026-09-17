@@ -1,6 +1,8 @@
 # Self-hosting and operations
 
-V2 runs on Node 22, PostgreSQL 17 and persistent filesystem media. It does not need a Vercel deployment or Supabase project. Docker Compose provides a self-contained application/database server; a tunnel or the optional Caddy configuration supplies public HTTPS.
+V2 runs on Node 22, PostgreSQL and either persistent filesystem media or a private Supabase Storage bucket. The default Docker Compose setup uses PostgreSQL 17 and filesystem media without a hosted database dependency; a tunnel or the optional Caddy configuration supplies public HTTPS.
+
+For a demo that stays available when the organizer computer is off, use the [free cloud hosting setup](cloud-hosting.md). It runs the web server and retention worker on Render, with PostgreSQL and private media in Supabase.
 
 ## Docker on an organizer computer
 

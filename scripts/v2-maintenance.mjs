@@ -1,11 +1,9 @@
 import { Pool } from 'pg';
-import { unlink } from 'node:fs/promises';
-import path from 'node:path';
 import { setTimeout } from 'node:timers/promises';
+import { drainMediaDeletions, removeMediaBytes } from '../lib/server/media-storage.mjs';
 
 if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is required.');
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1, statement_timeout: 10000 });
-const directory = process.env.MEDIA_DIRECTORY || path.join(process.cwd(), '.data', 'media');
 let running = true;
 const shutdown = new AbortController();
 process.on('SIGTERM', () => { running = false; shutdown.abort(); });
@@ -19,10 +17,10 @@ do {
       (h.status in ('ended','archived') or (v.definition->'settings'->>'endsAt')::timestamptz<=now()))`);
     for (const row of rows) {
       if (!/^[0-9a-f-]{73}$/i.test(row.storage_key)) continue;
-      try { await unlink(path.join(directory,row.storage_key)); }
-      catch (error) { if (error.code !== 'ENOENT') throw error; }
+      await removeMediaBytes(row.storage_key);
       await pool.query('delete from hunt_v2.media where id=$1', [row.id]);
     }
+    await drainMediaDeletions(pool);
     await pool.query('delete from hunt_v2.sessions where expires_at<=now()');
     await pool.query("delete from hunt_v2.rate_limits where window_start<now()-interval '1 day'");
     if (rows.length) console.log(`Removed ${rows.length} expired media files.`);

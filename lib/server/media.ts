@@ -1,6 +1,4 @@
 import { randomUUID, createHash } from 'node:crypto';
-import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
-import path from 'node:path';
 import sharp from 'sharp';
 import type { NextRequest } from 'next/server';
 import type { PuzzleDefinition } from '../engine/puzzles/types';
@@ -10,8 +8,8 @@ import { ADMIN_COOKIE, authenticate, HttpError, PREVIEW_COOKIE, TEAM_COOKIE } fr
 import { getTeamRecord, toTeamView } from './store';
 import { lockMediaReferences, visibleMediaUrls } from './media-references';
 import { assertPlayable } from './hunts';
+import { drainMediaDeletions, readMediaBytes, removeMediaBytes, writeMediaBytes } from './media-storage.mjs';
 
-const mediaDirectory = () => process.env.MEDIA_DIRECTORY || path.join(process.cwd(), '.data', 'media');
 const isUuid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 interface MediaRecord { id: string; hunt_id: string | null; team_id: string | null; checkpoint_id: string | null; node_id: string | null; kind: 'asset' | 'photo'; content_type: string; bytes: number; content_hash: string; storage_key: string; retention: string; expires_at: string | null; reviewed_at: string | null }
 const publicMedia = (media: MediaRecord) => ({ id: media.id, url: `/api/v2/media/${media.id}`, contentType: media.content_type, bytes: media.bytes });
@@ -48,19 +46,17 @@ async function saveMedia(input: { id: string; bytes: Buffer; contentType: string
     return publicMedia(row);
   }
   const key = `${input.id}-${randomUUID()}`;
-  const filePath = path.join(mediaDirectory(), key);
-  await mkdir(mediaDirectory(), { recursive: true, mode: 0o700 });
-  await writeFile(filePath, input.bytes, { flag: 'wx', mode: 0o600 });
+  await writeMediaBytes(key, input.bytes, input.contentType);
   try {
     const { rows } = await getPool().query(`insert into hunt_v2.media(id,hunt_id,team_id,checkpoint_id,node_id,kind,content_type,bytes,content_hash,storage_key,retention,expires_at)
       values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,case when $6='photo' and $11='after_review' then now()+interval '7 days' else null end) on conflict do nothing returning *`,
     [input.id,input.huntId ?? null,input.teamId ?? null,input.checkpointId ?? null,input.nodeId ?? null,input.kind,input.contentType,input.bytes.length,contentHash,key,input.retention || 'keep']);
     if (!rows[0]) {
-      await unlink(filePath);
+      await removeMediaBytes(key);
       return saveMedia(input);
     }
     return publicMedia(rows[0]);
-  } catch (error) { await unlink(filePath).catch(() => undefined); throw error; }
+  } catch (error) { await removeMediaBytes(key).catch(() => undefined); throw error; }
 }
 
 export async function uploadAsset(id: string, file: File) {
@@ -91,7 +87,13 @@ export async function uploadPhoto(teamId: string, input: { id: string; checkpoin
 
 async function readRecord(id: string): Promise<MediaRecord> {
   if (!isUuid(id)) throw new HttpError(404, 'Media not found.');
-  const { rows } = await getPool().query('select * from hunt_v2.media where id=$1 and (expires_at is null or expires_at>now())', [id]);
+  const { rows } = await getPool().query(`select m.* from hunt_v2.media m
+    left join hunt_v2.hunts h on h.id=m.hunt_id
+    left join hunt_v2.teams t on t.id=m.team_id
+    left join hunt_v2.hunt_versions v on v.hunt_id=t.hunt_id and v.version=(t.state->>'definitionVersion')::int
+    where m.id=$1 and (m.expires_at is null or m.expires_at>now())
+    and not (m.retention='after_event' and (coalesce(h.status in ('ended','archived'),false)
+      or coalesce((v.definition->'settings'->>'endsAt')::timestamptz<=now(),false)))`, [id]);
   if (!rows[0]) throw new HttpError(404, 'This media is no longer available.');
   return rows[0];
 }
@@ -125,7 +127,7 @@ export async function readMedia(request: NextRequest, id: string) {
   if (!await canReadMedia(request, media)) throw new HttpError(403, 'This media is not available for your current task.');
   if (!/^[0-9a-f-]{73}$/i.test(media.storage_key)) throw new HttpError(404, 'Media not found.');
   let bytes: Buffer;
-  try { bytes = await readFile(path.join(mediaDirectory(),media.storage_key)); }
+  try { bytes = await readMediaBytes(media.storage_key); }
   catch { throw new HttpError(404, 'This media is no longer available.'); }
   return { media, bytes };
 }
@@ -148,7 +150,7 @@ export async function deleteAsset(id: string) {
     await client.query('delete from hunt_v2.media where id=$1', [id]);
     return rows[0].storage_key as string;
   });
-  if (key) await unlink(path.join(mediaDirectory(),key)).catch(() => undefined);
+  if (key) await removeMediaBytes(key).catch(() => undefined);
 }
 
 export async function makeJigsaw(mediaId: string, rows: number, columns: number): Promise<PuzzleDefinition> {
@@ -156,7 +158,7 @@ export async function makeJigsaw(mediaId: string, rows: number, columns: number)
   const source = await readRecord(mediaId);
   if (source.kind !== 'asset' || source.content_type !== 'image/jpeg') throw new HttpError(400, 'Choose an image from the media library.');
   const size = 180;
-  const image = await sharp(await readFile(path.join(mediaDirectory(),source.storage_key))).resize(columns * size,rows * size,{fit:'cover'}).toBuffer();
+  const image = await sharp(await readMediaBytes(source.storage_key)).resize(columns * size,rows * size,{fit:'cover'}).toBuffer();
   const pieces: { id: string; imageUrl: string; alt: string }[] = [];
   const solution: string[] = [];
   for (let row=0;row<rows;row++) for (let column=0;column<columns;column++) {
@@ -173,7 +175,7 @@ export async function makeJigsaw(mediaId: string, rows: number, columns: number)
 export async function markPhotoReviewed(teamId: string, mediaId: string) {
   const { rows } = await getPool().query(`update hunt_v2.media set reviewed_at=now(),expires_at=case when retention='after_review' then now() else expires_at end
     where id=$1 and team_id=$2 and kind='photo' returning *`, [mediaId,teamId]);
-  if (rows[0]?.retention === 'after_review') await unlink(path.join(mediaDirectory(),rows[0].storage_key)).catch(() => undefined);
+  if (rows[0]?.retention === 'after_review') await removeMediaBytes(rows[0].storage_key).catch(() => undefined);
 }
 
 export async function cleanupMedia() {
@@ -183,9 +185,10 @@ export async function cleanupMedia() {
     where (m.expires_at is not null and m.expires_at<=now()) or (m.retention='after_event' and
       (h.status in ('ended','archived') or (v.definition->'settings'->>'endsAt')::timestamptz<=now()))`);
   for (const row of rows) {
-    await unlink(path.join(mediaDirectory(),row.storage_key)).catch(() => undefined);
+    await removeMediaBytes(row.storage_key);
     await getPool().query('delete from hunt_v2.media where id=$1', [row.id]);
   }
+  await drainMediaDeletions(getPool());
   return rows.length;
 }
 
@@ -201,5 +204,5 @@ export async function deleteHunt(huntId: string, confirmation: string) {
     await client.query('delete from hunt_v2.admin_events where hunt_id=$1', [huntId]);
     return media.rows;
   });
-  for (const file of files) await unlink(path.join(mediaDirectory(),file.storage_key)).catch(() => undefined);
+  for (const file of files) await removeMediaBytes(file.storage_key).catch(() => undefined);
 }

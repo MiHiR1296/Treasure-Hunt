@@ -127,6 +127,21 @@ create table if not exists hunt_v2.media (
   expires_at timestamptz
 );
 alter table hunt_v2.media add column if not exists content_hash text not null default '';
+-- Deletions survive provider outages and cascading event/team deletions.
+create table if not exists hunt_v2.media_deletions (
+  storage_key text primary key,
+  created_at timestamptz not null default now()
+);
+create or replace function hunt_v2.queue_media_deletion() returns trigger
+language plpgsql set search_path = hunt_v2, pg_temp as $$
+begin
+  insert into hunt_v2.media_deletions(storage_key) values (old.storage_key) on conflict do nothing;
+  return old;
+end;
+$$;
+drop trigger if exists queue_media_deletion on hunt_v2.media;
+create trigger queue_media_deletion after delete on hunt_v2.media
+  for each row execute function hunt_v2.queue_media_deletion();
 create table if not exists hunt_v2.preview_commands (
   team_id uuid not null references hunt_v2.teams(id) on delete cascade,
   request_id uuid not null,
@@ -142,6 +157,8 @@ alter table hunt_v2.members enable row level security;
 alter table hunt_v2.help_requests enable row level security;
 alter table hunt_v2.messages enable row level security;
 alter table hunt_v2.media enable row level security;
+alter table hunt_v2.media_deletions enable row level security;
+revoke all on function hunt_v2.queue_media_deletion() from public;
 revoke all on all tables in schema hunt_v2 from public;
 revoke all on all sequences in schema hunt_v2 from public;
 commit;

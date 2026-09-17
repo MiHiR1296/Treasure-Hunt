@@ -7,6 +7,7 @@
     "dev:mobile": "next dev -H 0.0.0.0",
     "build": "next build",
     "start": "next start",
+    "start:cloud": "node scripts/v2-cloud-start.mjs",
     "lint": "eslint app/v2 app/api/v2 components/v2 lib/engine lib/server tests --ext .ts,.tsx",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test tests/*.test.ts",

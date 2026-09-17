@@ -227,7 +227,9 @@ test('PostgreSQL: after-event photo retention follows pinned schedule and unused
   await publishHunt({...hunt,settings:{...hunt.settings,endsAt:new Date(Date.now()-1000).toISOString()}},{expectedVersion:1});
   await cleanupMedia();
   assert.equal((await readMedia(request,photo.id)).media.id,photo.id);
-  await setHuntStatus(hunt.id,'ended'); await cleanupMedia();
+  await setHuntStatus(hunt.id,'ended');
+  await assert.rejects(readMedia(request,photo.id),status(404), 'event expiry is enforced even while the cleanup worker is sleeping');
+  await cleanupMedia();
   await assert.rejects(readMedia(request,photo.id),status(404));
 });
 
