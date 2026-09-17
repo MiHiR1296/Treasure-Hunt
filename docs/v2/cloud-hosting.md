@@ -31,6 +31,8 @@ Supply these variables in Render:
 
 Use the Supabase dashboard's **Connect** panel to obtain the exact session-pooler hostname and username; do not infer them from the project URL. See [connecting to PostgreSQL](https://supabase.com/docs/guides/database/connecting-to-postgres). Do not use an anonymous browser key as a database credential.
 
+Use `sslmode=verify-full` in `DATABASE_URL`. Download the Supabase root CA from the project's Database settings, upload it to Render as the secret file `supabase-ca.crt`, and set `NODE_EXTRA_CA_CERTS=/etc/secrets/supabase-ca.crt`. For local import commands, set `NODE_EXTRA_CA_CERTS` to the absolute local certificate path; for `pg_restore`, use `PGSSLROOTCERT` and `PGSSLMODE=verify-full`. This verifies both the certificate and database hostname.
+
 The public origin is read from Render's `RENDER_EXTERNAL_URL`. For a custom domain, set `APP_ORIGIN` to its exact HTTPS origin, without a trailing slash. Do not point the database URL or media configuration back to the laptop.
 
 `start:cloud` validates the configuration and private bucket, applies the additive database schema, then supervises the web server and retention worker together. If either process exits, it stops the other and exits unsuccessfully for the host to restart. SIGTERM stops both cleanly. Startup does not automatically seed or overwrite any event.
@@ -40,7 +42,7 @@ The public origin is read from Render's `RENDER_EXTERNAL_URL`. For a custom doma
 Preserve custom puzzles, published versions, team progress and media together.
 
 1. Take a fresh, consistent backup using the [backup procedure](self-hosting.md#backups-and-restoration) with `COMPOSE_PROJECT_NAME=treasure-hunt-v2-preview`. It briefly pauses writes, then restores the prior running state. Keep this archive private.
-2. Keep the cloud web service stopped during import. Verify the destination project/database and that `hunt_v2` does not contain existing event data. Restore only the `hunt_v2` schema from the dump with `pg_restore --schema=hunt_v2 --no-owner --no-privileges --single-transaction --exit-on-error`. Existing Supabase auth/storage/public V1 tables must remain untouched. If the target already contains V2 event data, use a new database/project instead of overwriting it.
+2. Keep the cloud web service stopped during import. Verify the destination project/database and that `hunt_v2` does not contain existing event data. Apply `scripts/v2-migrate.mjs` to create the current empty V2 schema, verify all V2 tables are empty, then import only its data with `pg_restore --data-only --schema=hunt_v2 --no-owner --no-privileges --single-transaction --exit-on-error`. This includes the backup's sequence values. Existing Supabase auth/storage/public V1 tables must remain untouched. If the target already contains V2 event data, use a new database/project instead of overwriting it.
 3. Extract the media archive into a private local directory. With the **destination** database and Storage variables configured, run:
 
    ```sh
