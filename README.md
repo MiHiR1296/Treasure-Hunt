@@ -2,7 +2,7 @@
 
 A configurable, web-first engine for real-world treasure hunts. Organizers design checkpoints from reusable actions; participants open a link, join a team, and see one task at a time.
 
-**Hosted demo:** [Play](https://treasure-hunt-v2-demo.onrender.com/v2) · [Organizer console](https://treasure-hunt-v2-demo.onrender.com/v2/admin). The demo runs independently of the organizer's computer on Render Free with Supabase Free database and private media storage. Open it before a presentation because free hosting sleeps when idle; see [cloud hosting and limits](docs/v2/cloud-hosting.md).
+**Hosted demo:** [Play](https://treasure-hunt-v2-seven.vercel.app/v2) · [Organizer console](https://treasure-hunt-v2-seven.vercel.app/v2/admin). The demo runs independently of the organizer's computer in its own Vercel Hobby project, with the existing Supabase Free database and private media storage. `hunt.mrbtstudio.com` is attached to this project and awaits its GoDaddy CNAME record. The portfolio remains separate, with no navigation links between the two applications. See [Vercel hosting and domain setup](docs/v2/vercel-hosting.md).
 
 V2 supports:
 
@@ -66,7 +66,8 @@ The browser suite covers shared progress, retries, keyboard puzzle entry, narrow
 - [Architecture and data contracts](docs/v2/architecture.md)
 - [Creating action, puzzle, verification and hint modules](docs/v2/extensions.md)
 - [Self-hosting and operations](docs/v2/self-hosting.md)
-- [Free cloud demo and deployment](docs/v2/cloud-hosting.md)
+- [Vercel demo and MRBT subdomain](docs/v2/vercel-hosting.md)
+- [Earlier Render hosting and cloud migration](docs/v2/cloud-hosting.md)
 - [Demo and templates](docs/v2/showcase.md)
 - [V1 import and retirement](docs/v2/migration.md)
 - [All 92 product requirements and success evidence](docs/v2/acceptance.md)

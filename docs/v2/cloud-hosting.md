@@ -1,8 +1,10 @@
-# Free cloud demo hosting
+# Earlier Render deployment and cloud data migration
 
-The demo runs on a **Render Free web service** with **Supabase Free PostgreSQL and a private Storage bucket**. The application, saved hunts, team progress and uploads are independent of the organizer computer. No paid disk, paid database or Railway subscription is required.
+Treasure Hunt now has a [separate Vercel deployment](vercel-hosting.md) for `hunt.mrbtstudio.com`, using the same Supabase database and private storage. This document preserves the earlier Render setup, migration and backup procedures. The Render URL is retained temporarily as a fallback while the MRBT subdomain's DNS is connected.
 
-## Current demo
+The earlier deployment uses a **Render Free web service** with **Supabase Free PostgreSQL and a private Storage bucket**. Its saved hunts, team progress and uploads are independent of the organizer computer and remain available to the new Vercel application. No paid disk, paid database or Railway subscription is required.
+
+## Earlier demo and temporary fallback
 
 - [Player home](https://treasure-hunt-v2-demo.onrender.com/v2)
 - [Six-checkpoint showcase](https://treasure-hunt-v2-demo.onrender.com/v2?hunt=kalyan-demo)
@@ -77,6 +79,6 @@ A sleeping free service does not run its cleanup worker. Cleanup resumes when th
 
 The filesystem backend remains the default for local Docker Compose and servers with a persistent volume. Set an absolute `MEDIA_DIRECTORY` before using `npm run start:cloud` with that backend. Railway deployments additionally require an attached volume; this provider is not part of the free demo configuration.
 
-Vercel requires further upload-flow changes because [its function payload limit](https://vercel.com/docs/errors/function_payload_too_large) is 4.5 MB. Render preserves the existing 20 MB organizer upload flow.
+The [Vercel deployment](vercel-hosting.md) supports the same 20 MB organizer upload limit through authorized direct uploads to private storage. Downloads use short-lived signed URLs after application authorization. These changes avoid [Vercel's 4.5 MB function payload limit](https://vercel.com/docs/errors/function_payload_too_large).
 
 For subsequent releases, repeat the public endpoint, database, upload and restart checks before marking the deployment verified.

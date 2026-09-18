@@ -23,7 +23,8 @@ export async function uploadMedia(form: FormData, send: SendUpload): Promise<{ m
     // A lost response or an already-uploaded object is resolved by finalization.
     const response = await fetch(prepared.uploadUrl, { method: 'PUT', credentials: 'omit', cache: 'no-store',
       headers: { 'Content-Type': file.type, 'x-upsert': 'false', 'Cache-Control': 'no-store' }, body: file, signal: AbortSignal.timeout(120_000) });
-    await response.body?.cancel();
+    // Let storage finish its acknowledgement before checking the saved file.
+    await response.arrayBuffer();
   } catch { /* The server checks whether the complete file actually arrived. */ }
   const result = await send({ action: 'complete_upload', requestId: form.get('requestId') });
   if (!result.media) throw new Error('The upload could not be confirmed. Retry the same file.');

@@ -4,6 +4,8 @@ Treasure Hunt has its own Vercel project, `treasure-hunt-v2`, in the existing MR
 
 The existing Supabase database and private media bucket remain in place, preserving published hunts, custom puzzles, team progress and uploads. Vercel runs the Next.js application; Render is not needed for this runtime. Local Docker hosting remains supported.
 
+The [player demo](https://treasure-hunt-v2-seven.vercel.app/v2) and [organizer console](https://treasure-hunt-v2-seven.vercel.app/v2/admin) are live on Vercel. As of 2026-09-19 (IST), the custom domain is attached and ownership is verified, but GoDaddy has not yet published the `hunt` CNAME. The earlier Render URL remains available temporarily while this final domain step is completed.
+
 ## Project configuration
 
 Use Node 22, the Next.js framework preset and the repository root. [`vercel.json`](../../vercel.json) selects Singapore and a daily cleanup job. Keep the project on Hobby and Supabase on Free for the demo.
@@ -16,7 +18,7 @@ Configure these server-only environment variables for the deployment:
 | `DATABASE_CA_CERT` | Supabase root CA certificate in PEM format |
 | `ORGANIZER_PASSWORD` | Existing organizer password |
 | `APP_ORIGIN` | `https://hunt.mrbtstudio.com` |
-| `ADDITIONAL_ORIGINS` | `https://treasure-hunt-v2-mihirs-projects-067a6cd3.vercel.app` |
+| `ADDITIONAL_ORIGINS` | The exact Vercel aliases, comma-separated: `https://treasure-hunt-v2-mihirs-projects-067a6cd3.vercel.app,https://treasure-hunt-v2-seven.vercel.app` |
 | `MEDIA_STORAGE` | `supabase` |
 | `SUPABASE_URL` | Existing project's HTTPS origin |
 | `SUPABASE_SERVICE_ROLE_KEY` | Server-only service-role key |
@@ -39,6 +41,8 @@ vercel deploy --prod
 ```
 
 Run database integration tests against a dedicated test database, not the live Supabase database. Do not seed or restore over existing cloud data when moving between hosts.
+
+If the remote build queue is delayed, Vercel also accepts a prebuilt deployment. Run `vercel pull --environment=production`, then `vercel build --prod` in a Linux x64 environment with Node 22 and Linux dependencies, followed by `vercel deploy --prebuilt --prod`. Building in a temporary Docker container does not make the deployed app depend on that container. Keep real environment files excluded from uploads; the public `.env.example` template must remain available because Vercel includes it in the function file map.
 
 ## Uploads and private downloads
 
