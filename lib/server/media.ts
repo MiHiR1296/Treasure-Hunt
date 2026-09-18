@@ -8,7 +8,8 @@ import { ADMIN_COOKIE, authenticate, HttpError, PREVIEW_COOKIE, TEAM_COOKIE } fr
 import { getTeamRecord, toTeamView } from './store';
 import { lockMediaReferences, visibleMediaUrls } from './media-references';
 import { assertPlayable } from './hunts';
-import { drainMediaDeletions, readMediaBytes, removeMediaBytes, writeMediaBytes } from './media-storage.mjs';
+import { readMediaBytes, removeMediaBytes, writeMediaBytes } from './media-storage.mjs';
+import { cleanupExpiredMedia } from './maintenance.mjs';
 
 const isUuid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 interface MediaRecord { id: string; hunt_id: string | null; team_id: string | null; checkpoint_id: string | null; node_id: string | null; kind: 'asset' | 'photo'; content_type: string; bytes: number; content_hash: string; storage_key: string; retention: string; expires_at: string | null; reviewed_at: string | null }
@@ -66,8 +67,7 @@ export async function uploadAsset(id: string, file: File) {
   return saveMedia({ id, bytes: image ? await prepareImage(original) : original, contentType: image ? 'image/jpeg' : mediaType(original,file.type), kind:'asset' });
 }
 
-export async function uploadPhoto(teamId: string, input: { id: string; checkpointId: string; nodeId: string; file: File; location?: unknown }) {
-  if (!input.file.size || input.file.size > 10_000_000 || !input.file.type.startsWith('image/')) throw new HttpError(413, 'Choose a photo smaller than 10 MB.');
+export async function validatePhotoTask(teamId: string, input: { checkpointId: string; nodeId: string; location?: unknown }) {
   const team = await getTeamRecord(teamId);
   if (!team.is_preview) assertPlayable(team.status,team.definition);
   const checkpoint = team.definition.checkpoints.find(item => item.id === team.state.activeCheckpointId);
@@ -79,6 +79,12 @@ export async function uploadPhoto(teamId: string, input: { id: string; checkpoin
     if (!location || !Number.isFinite(location.latitude) || !Number.isFinite(location.longitude) || !Number.isFinite(location.accuracyMeters) || Math.abs(location.latitude!) > 90 || Math.abs(location.longitude!) > 180 || location.accuracyMeters! < 0) throw new HttpError(400, 'Check your location before photographing this landmark.');
     if (location.accuracyMeters! > node.location.maxAccuracyMeters || calculateDistance(location.latitude!,location.longitude!,node.location.latitude,node.location.longitude) > node.location.radiusMeters) throw new HttpError(409, 'Get closer to the search area and try another location reading before sending your photo.');
   }
+  return team;
+}
+
+export async function uploadPhoto(teamId: string, input: { id: string; checkpointId: string; nodeId: string; file: File; location?: unknown }) {
+  if (!input.file.size || input.file.size > 10_000_000 || !input.file.type.startsWith('image/')) throw new HttpError(413, 'Choose a photo smaller than 10 MB.');
+  const team = await validatePhotoTask(teamId, input);
   const bytes = await prepareImage(Buffer.from(await input.file.arrayBuffer()));
   const retention = team.definition.settings?.photoRetention;
   return saveMedia({ id:input.id,bytes,contentType:'image/jpeg',kind:'photo',huntId:team.hunt_id,teamId,checkpointId:input.checkpointId,nodeId:input.nodeId,
@@ -122,10 +128,15 @@ export async function canReadMedia(request: NextRequest, media: MediaRecord) {
   return false;
 }
 
-export async function readMedia(request: NextRequest, id: string) {
+export async function authorizeMedia(request: NextRequest, id: string) {
   const media = await readRecord(id);
   if (!await canReadMedia(request, media)) throw new HttpError(403, 'This media is not available for your current task.');
   if (!/^[0-9a-f-]{73}$/i.test(media.storage_key)) throw new HttpError(404, 'Media not found.');
+  return media;
+}
+
+export async function readMedia(request: NextRequest, id: string) {
+  const media = await authorizeMedia(request, id);
   let bytes: Buffer;
   try { bytes = await readMediaBytes(media.storage_key); }
   catch { throw new HttpError(404, 'This media is no longer available.'); }
@@ -179,17 +190,7 @@ export async function markPhotoReviewed(teamId: string, mediaId: string) {
 }
 
 export async function cleanupMedia() {
-  const { rows } = await getPool().query(`select m.* from hunt_v2.media m left join hunt_v2.hunts h on h.id=m.hunt_id
-    left join hunt_v2.teams t on t.id=m.team_id
-    left join hunt_v2.hunt_versions v on v.hunt_id=t.hunt_id and v.version=(t.state->>'definitionVersion')::int
-    where (m.expires_at is not null and m.expires_at<=now()) or (m.retention='after_event' and
-      (h.status in ('ended','archived') or (v.definition->'settings'->>'endsAt')::timestamptz<=now()))`);
-  for (const row of rows) {
-    await removeMediaBytes(row.storage_key);
-    await getPool().query('delete from hunt_v2.media where id=$1', [row.id]);
-  }
-  await drainMediaDeletions(getPool());
-  return rows.length;
+  return cleanupExpiredMedia(getPool());
 }
 
 export async function deleteHunt(huntId: string, confirmation: string) {

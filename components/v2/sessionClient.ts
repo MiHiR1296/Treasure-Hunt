@@ -22,7 +22,7 @@ export class PlayerRequestError extends Error {
 
 export async function playerRequest<T>(url: string, init: RequestInit = {}): Promise<T> {
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 15000);
+  const timeout = window.setTimeout(() => controller.abort(), url === '/api/v2/media' ? 120000 : 15000);
   try {
     const headers = new Headers(init.headers);
     if (!(init.body instanceof FormData)) headers.set('Content-Type', 'application/json');

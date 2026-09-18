@@ -1,14 +1,16 @@
 import { Pool, type PoolClient } from 'pg';
+import { attachDatabasePool } from '@vercel/functions';
+import { databaseConfig } from './database-config.mjs';
 
 const globalDb = globalThis as typeof globalThis & { huntPool?: Pool };
 export function getPool(): Pool {
-  if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is not configured');
-  return globalDb.huntPool ??= new Pool({
-    connectionString: process.env.DATABASE_URL,
-    max: 10,
-    connectionTimeoutMillis: 5_000,
-    statement_timeout: 10_000,
-  });
+  if (!globalDb.huntPool) {
+    const pool = new Pool({ ...databaseConfig(), max: process.env.VERCEL ? 3 : 10,
+      idleTimeoutMillis: 5_000, connectionTimeoutMillis: 5_000, statement_timeout: 10_000 });
+    if (process.env.VERCEL) attachDatabasePool(pool);
+    globalDb.huntPool = pool;
+  }
+  return globalDb.huntPool;
 }
 
 export async function transaction<T>(work: (client: PoolClient) => Promise<T>): Promise<T> {

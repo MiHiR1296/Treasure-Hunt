@@ -6,6 +6,11 @@ export function requireSameOrigin(request: NextRequest) {
   const origin = request.headers.get('origin');
   const expected = [process.env.APP_ORIGIN || new URL(request.url).origin,
     ...(process.env.ADDITIONAL_ORIGINS || '').split(',').map(value => value.trim()).filter(Boolean)];
+  if (process.env.VERCEL === '1') {
+    for (const host of [process.env.VERCEL_URL, process.env.VERCEL_PROJECT_PRODUCTION_URL]) {
+      if (host && /^[a-z0-9-]+(?:\.[a-z0-9-]+)*\.vercel\.app$/i.test(host)) expected.push(`https://${host}`);
+    }
+  }
   if (!origin || !expected.includes(origin)) throw new HttpError(403, 'Please open this page from the event website.');
 }
 

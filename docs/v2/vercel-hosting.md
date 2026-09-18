@@ -1,0 +1,71 @@
+# Treasure Hunt on Vercel
+
+Treasure Hunt has its own Vercel project, `treasure-hunt-v2`, in the existing MRBT account. Its custom address is `hunt.mrbtstudio.com`. The portfolio remains a separate project at `mrbtstudio.com`: there is no portfolio route for the game and no navigation link between the two applications.
+
+The existing Supabase database and private media bucket remain in place, preserving published hunts, custom puzzles, team progress and uploads. Vercel runs the Next.js application; Render is not needed for this runtime. Local Docker hosting remains supported.
+
+## Project configuration
+
+Use Node 22, the Next.js framework preset and the repository root. [`vercel.json`](../../vercel.json) selects Singapore and a daily cleanup job. Keep the project on Hobby and Supabase on Free for the demo.
+
+Configure these server-only environment variables for the deployment:
+
+| Variable | Value |
+| --- | --- |
+| `DATABASE_URL` | Existing Supabase session-pooler URL, with `sslmode=verify-full` |
+| `DATABASE_CA_CERT` | Supabase root CA certificate in PEM format |
+| `ORGANIZER_PASSWORD` | Existing organizer password |
+| `APP_ORIGIN` | `https://hunt.mrbtstudio.com` |
+| `ADDITIONAL_ORIGINS` | `https://treasure-hunt-v2-mihirs-projects-067a6cd3.vercel.app` |
+| `MEDIA_STORAGE` | `supabase` |
+| `SUPABASE_URL` | Existing project's HTTPS origin |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server-only service-role key |
+| `SUPABASE_STORAGE_BUCKET` | `treasure-hunt-v2-media` |
+| `SUPABASE_UPLOAD_BUCKET` | `treasure-hunt-v2-incoming` |
+| `ENABLE_LEGACY_V1` | `false` |
+| `CRON_SECRET` | Random secret of at least 32 characters |
+
+The inline CA enables certificate and hostname verification without a filesystem secret. Vercel's database pool uses three connections per instance and the official pool lifecycle helper. No connection strings or storage service keys go to the browser.
+
+Create both Storage buckets as **private**, with a 20,000,000-byte file limit and only the supported image/audio/video MIME types. Do not grant public upload/read policies. Apply the additive migration before publishing:
+
+```sh
+npm run db:migrate
+npm run typecheck
+npm run lint
+npm test
+npm run build
+vercel deploy --prod
+```
+
+Run database integration tests against a dedicated test database, not the live Supabase database. Do not seed or restore over existing cloud data when moving between hosts.
+
+## Uploads and private downloads
+
+Vercel functions have a [4.5 MB request and response limit](https://vercel.com/docs/functions/limitations#request-body-size). The browser obtains an authorized upload ticket, sends file bytes directly to the private incoming bucket, then asks the application to validate and commit the upload. Only small JSON requests pass through Vercel. Existing limits remain 20 MB for organizer assets and 10 MB for player photos.
+
+Tickets bind the session owner, request ID, file size, checksum and photo task. Finalization rechecks the player's current task and GPS requirements, validates the file bytes and strips image metadata. Retries return the same committed media record. Unvalidated files cannot be read through the application.
+
+Media reads still check organizer/player permissions and retention rules. Authorized reads redirect to an exact private object with a signed URL lasting at most 60 seconds; large audio/video downloads and range requests bypass the function response limit. A signed URL already issued can remain valid for its short lifetime.
+
+## Cleanup and free hosting
+
+The authenticated `/api/v2/maintenance` cron runs daily at 03:00 UTC. This follows [Hobby's daily cron limit](https://vercel.com/docs/cron-jobs/usage-and-pricing). It processes bounded batches of expired media, deletion receipts, temporary uploads, expired sessions and rate-limit windows. Large backlogs can take more than one run to drain. Expired media is denied by the application immediately, independently of the cleanup schedule.
+
+Raw incoming files are removed after successful finalization. Their receipts remain past the signed write token's lifetime so cleanup also catches abandoned uploads or late token replays. Provider failures retain receipts for a later attempt. The existing continuous maintenance worker remains available for Docker/container hosting.
+
+Supabase Free may pause after inactivity; check its [current plan limits](https://supabase.com/pricing) and resume the project before a scheduled demo if needed. This deployment does not require the laptop to run. Vercel deployment changes do not erase database rows or stored files.
+
+## MRBT subdomain
+
+Attach only `hunt.mrbtstudio.com` to this Vercel project. DNS is managed at GoDaddy. Vercel currently recommends this record:
+
+| Type | Name | Value |
+| --- | --- | --- |
+| CNAME | `hunt` | `9423d65eeb7953e8.vercel-dns-017.com` |
+
+Re-check the project's domain settings before applying DNS; Vercel may change the recommended value. Keep the portfolio's existing apex, `www`, nameservers and project configuration intact. Do not point `hunt` at the earlier Render service. Once DNS resolves, verify HTTPS, player entry, organizer sign-in and media on the custom address.
+
+The application accepts the configured custom origin, the explicitly configured stable Vercel alias, and its exact Vercel-provided deployment hostname. Other Vercel projects and the portfolio origin are not accepted as mutation origins. Switching hostnames requires signing in again or rejoining with the existing team PIN because cookies belong to their original hostname.
+
+Keep cloud database/media backups together; see the existing [backup notes](cloud-hosting.md#move-the-current-demo). Regenerate entry QR materials for the custom address after it is live.

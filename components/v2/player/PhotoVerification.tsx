@@ -6,6 +6,7 @@ import type { PlayerNode } from '@/lib/engine/types'
 import type { SendCommand } from '../CurrentTask'
 import { isPreviewSession, newRequestId, PlayerRequestError, playerRequest } from '../sessionClient'
 import { compressPhoto, photoRecord, type PendingPhoto } from './photoStore'
+import { uploadMedia } from '../mediaUpload'
 
 export default function PhotoVerification({ teamId, checkpointId, node, disabled, send }: { teamId: string; checkpointId: string; node: Extract<PlayerNode, { type: 'verify_image' }>; disabled: boolean; send: SendCommand }) {
   const key = `${isPreviewSession() ? 'preview' : 'live'}:${teamId}:${checkpointId}:${node.id}`
@@ -52,7 +53,7 @@ export default function PhotoVerification({ teamId, checkpointId, node, disabled
         const form = new FormData()
         form.append('file', current.blob, 'landmark.jpg'); form.append('requestId', current.requestId); form.append('teamId', teamId); form.append('checkpointId', checkpointId); form.append('nodeId', node.id)
         if (current.location) form.append('location', JSON.stringify(current.location))
-        const result = await playerRequest<{ media: { id: string } }>('/api/v2/media', { method: 'POST', body: form })
+        const result = await uploadMedia(form, body => playerRequest('/api/v2/media', { method: 'POST', body: body instanceof FormData ? body : JSON.stringify(body) }))
         current = { ...current, mediaId: result.media.id }; await remember(current)
       }
       const result = await send({ type: 'submit_photo', checkpointId, nodeId: node.id, mediaId: current.mediaId! })

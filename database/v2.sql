@@ -132,6 +132,22 @@ create table if not exists hunt_v2.media_deletions (
   storage_key text primary key,
   created_at timestamptz not null default now()
 );
+-- Temporary uploads are never referenced by published/player media URLs.
+-- Keep the receipt past the provider's two-hour upload-token lifetime, even
+-- after deleting the raw file, so a late token replay is cleaned up as well.
+create table if not exists hunt_v2.media_uploads (
+  id uuid primary key,
+  owner_key text not null,
+  kind text not null check (kind in ('asset','photo')),
+  storage_key text not null unique,
+  payload_hash text not null,
+  metadata jsonb not null,
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null default now()+interval '15 minutes',
+  cleanup_after timestamptz not null default now()+interval '125 minutes',
+  completed_at timestamptz
+);
+create index if not exists media_upload_cleanup on hunt_v2.media_uploads(cleanup_after);
 create or replace function hunt_v2.queue_media_deletion() returns trigger
 language plpgsql set search_path = hunt_v2, pg_temp as $$
 begin
@@ -158,6 +174,7 @@ alter table hunt_v2.help_requests enable row level security;
 alter table hunt_v2.messages enable row level security;
 alter table hunt_v2.media enable row level security;
 alter table hunt_v2.media_deletions enable row level security;
+alter table hunt_v2.media_uploads enable row level security;
 revoke all on function hunt_v2.queue_media_deletion() from public;
 revoke all on all tables in schema hunt_v2 from public;
 revoke all on all sequences in schema hunt_v2 from public;

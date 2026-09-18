@@ -12,7 +12,7 @@ export const PREVIEW_COOKIE = 'hunt_v2_preview';
 export class HttpError extends Error {
   constructor(public status: number, message: string, public details?: { issues?: { path: string; message: string }[] }) { super(message); }
 }
-export const digest = (value: string) => createHash('sha256').update(value).digest('hex');
+export const digest = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
 export async function hashPin(pin: string) {
   const salt = randomBytes(16).toString('hex');
   const hash = await scrypt(pin, salt, 64) as Buffer;

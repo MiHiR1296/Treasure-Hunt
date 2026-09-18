@@ -1,4 +1,5 @@
 import type { GameEvent, GameState, HuntDefinition, PlayerView, ScoreEntry, ValidationIssue } from '@/lib/engine/types';
+import { uploadMedia } from '../../mediaUpload';
 
 export type HuntStatus = 'ready' | 'live' | 'paused' | 'ended' | 'archived';
 export interface PublishedHunt { id: string; title: string; version: number; status: HuntStatus; definition: HuntDefinition }
@@ -16,8 +17,16 @@ export class AdminRequestError extends Error {
 }
 
 export async function adminRequest<T>(url: string, method = 'GET', body?: unknown): Promise<T> {
+  if(url === '/api/v2/admin/media' && method === 'POST' && body instanceof FormData) {
+    return await uploadMedia(body, value => adminRequestRaw(url, method, value)) as T;
+  }
+  return adminRequestRaw(url, method, body);
+}
+
+async function adminRequestRaw<T>(url: string, method = 'GET', body?: unknown): Promise<T> {
   const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), body instanceof FormData ? 60000 : 20000);
+  const upload = url === '/api/v2/admin/media' && method === 'POST';
+  const timer = window.setTimeout(() => controller.abort(), upload ? 120000 : 20000);
   try {
     const response = await fetch(url, { method, cache: 'no-store', credentials: 'same-origin', signal: controller.signal,
       headers: body === undefined || body instanceof FormData ? undefined : { 'Content-Type': 'application/json' },
