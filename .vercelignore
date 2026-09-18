@@ -1,5 +1,6 @@
 .data
 .env*
+!.env.example
 .git
 .next
 node_modules
