@@ -18,7 +18,7 @@ or configuration changes directly on `main`.
 
 Every change must follow:
 
-main
+main (or base branch during bootstrap phase)
 → dedicated branch
 → implementation
 → validation
@@ -28,7 +28,26 @@ main
 → merge
 → deployment
 
-No exceptions for "small" changes.
+No exceptions for "small" changes. (See Temporary Bootstrap Exception below for the one-time V2 setup).
+
+---
+
+## Temporary Bootstrap Exception
+
+This section describes a one-time transition exception for bootstrapping the repository workflow.
+
+1. **Permanent Rule**: The permanent rule remains that all normal future PRs target `main`.
+2. **Bootstrap Scope**: Before V2 promotion, repository-governance/setup changes required to establish the workflow may target `codex/treasure-hunt-v2-foundation`.
+3. **PR #1 Coverage**: PR #1 (`chore/repository-workflow`) is explicitly covered by this one-time exception.
+4. **Expiration**: After `codex/treasure-hunt-v2-foundation` is promoted and merged into `main`, this exception permanently expires.
+5. **Post-Promotion Enforcement**: After promotion, every `feature/*`, `fix/*`, `refactor/*`, `chore/*`, `docs/*`, `test/*`, and `hotfix/*` branch must be created from and target `main`.
+6. **Uncompromised Safeguards**: This temporary exception does **not** weaken:
+   - External review requirement;
+   - Exact-SHA approval (`MRBT_REVIEW: APPROVED`);
+   - Prohibitions against self-merging;
+   - Required validation checks;
+   - Post-merge deployment from `main` after promotion.
+7. **Promotion PR**: The V2 promotion itself (`codex/treasure-hunt-v2-foundation -> main`) remains a separate, externally reviewed PR.
 
 ---
 
@@ -73,7 +92,7 @@ Before editing anything:
 
 1. Read this AGENTS.md.
 2. Confirm the current branch.
-3. Ensure the branch is based on the latest `main`.
+3. Ensure the branch is based on the latest `main` (or `codex/treasure-hunt-v2-foundation` during the temporary bootstrap phase).
 4. Read the relevant architecture/docs for the requested feature.
 5. Inspect the existing implementation before proposing a replacement.
 6. State what will change and what should remain unchanged.
@@ -87,7 +106,7 @@ Understand the existing system first.
 
 # 4. Branch Rules
 
-All work must happen on a dedicated branch created from current `main`.
+All work must happen on a dedicated branch created from current `main` (or `codex/treasure-hunt-v2-foundation` during the temporary bootstrap phase; see Temporary Bootstrap Exception).
 
 Naming:
 
@@ -285,7 +304,7 @@ The agent must NEVER merge its own work immediately.
 After implementation:
 
 1. Push the branch.
-2. Open a Pull Request targeting `main`.
+2. Open a Pull Request targeting `main` (or `codex/treasure-hunt-v2-foundation` during the temporary bootstrap phase; see Temporary Bootstrap Exception).
 3. Fill the PR template completely.
 4. Provide:
    - what changed;
@@ -353,7 +372,7 @@ Do not mark review concerns as resolved without addressing them.
 
 A PR can be merged only when ALL are true:
 
-- PR targets `main`.
+- PR targets `main` (or `codex/treasure-hunt-v2-foundation` during the temporary bootstrap phase; see Temporary Bootstrap Exception).
 - Branch is up to date enough to merge safely.
 - Required CI/checks pass.
 - No unresolved blocking review comments remain.
