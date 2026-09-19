@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import type { MapPoint } from './maps/types'
+import { getMapProviderConfig } from './maps/config'
 import LeafletMapProvider from './maps/LeafletMapProvider'
 import GoogleMapProvider from './maps/GoogleMapProvider'
 
@@ -12,17 +13,19 @@ export default function RegionMap({ points }: { points: MapPoint[] }) {
 
   if (!points || points.length === 0) return null
 
-  const configuredProvider = (process.env.NEXT_PUBLIC_MAP_PROVIDER || 'osm').toLowerCase()
-  const googleApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY || ''
+  const config = getMapProviderConfig(
+    process.env.NEXT_PUBLIC_MAP_PROVIDER,
+    process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY
+  )
 
-  const useGoogle = configuredProvider === 'google' && googleApiKey && !googleFailed
+  const useGoogle = config.provider === 'google' && Boolean(config.googleApiKey) && !googleFailed
 
   return (
     <div>
-      {useGoogle ? (
+      {useGoogle && config.googleApiKey ? (
         <GoogleMapProvider
           points={points}
-          apiKey={googleApiKey}
+          apiKey={config.googleApiKey}
           onError={() => setGoogleFailed(true)}
         />
       ) : (

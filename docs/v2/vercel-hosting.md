@@ -41,6 +41,7 @@ If configuring `NEXT_PUBLIC_MAP_PROVIDER=google`, you must provide `NEXT_PUBLIC_
 2. **Billing & Quota Safeguards**:
    - Google Maps JavaScript API requires a Google Cloud project with billing enabled, even though monthly free tier usage covers standard volume.
    - Configure **Budget Alerts** and daily quota caps in Google Cloud Console under **Billing > Budgets & alerts** to prevent unexpected billing.
+   - **Fallback & Animation Note**: Automatic fallback to OpenStreetMap occurs on missing API keys and script load failures. Google Maps SDK controls its own viewport animations; exact parity with Leaflet reduced-motion handling is not guaranteed. Runtime authorization or quota exhaustion after SDK load is not guaranteed to auto-fallback.
 
 The inline CA enables certificate and hostname verification without a filesystem secret. Vercel's database pool uses three connections per instance and the official pool lifecycle helper. No connection strings or storage service keys go to the browser.
 

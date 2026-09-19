@@ -74,7 +74,7 @@ To enable Google Maps:
 1. Set `NEXT_PUBLIC_MAP_PROVIDER=google` in your environment files or container definitions.
 2. Set `NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY=<your-google-maps-browser-key>`.
 3. Restrict the browser API key in Google Cloud Console to authorized HTTP referrers (e.g. `https://hunt.example.com/*` and `http://localhost:3000/*`) and restrict usage to the Maps JavaScript API only.
-4. If `NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY` is missing or fails to load, the map renderer automatically falls back to OpenStreetMap without interrupting player sessions.
+4. If `NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY` is missing or the SDK script fails to load, the map renderer automatically falls back to OpenStreetMap. Runtime authorization failures after SDK load or quota exhaustion are not guaranteed to auto-fallback.
 
 ## Development and generic cloud hosting
 

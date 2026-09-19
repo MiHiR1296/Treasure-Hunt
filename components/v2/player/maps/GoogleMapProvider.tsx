@@ -2,7 +2,12 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type { MapProviderProps } from './types'
-import { loadGoogleMapsScript, type GoogleCircleInstance, type GoogleMapInstance } from './googleTypes'
+import {
+  loadGoogleMapsScript,
+  type GoogleCircleInstance,
+  type GoogleInfoWindowInstance,
+  type GoogleMapInstance,
+} from './googleTypes'
 
 export interface GoogleMapProviderProps extends MapProviderProps {
   apiKey: string
@@ -13,6 +18,7 @@ export default function GoogleMapProvider({ points, apiKey, onError }: GoogleMap
   const container = useRef<HTMLDivElement>(null)
   const mapRef = useRef<GoogleMapInstance | null>(null)
   const circlesRef = useRef<GoogleCircleInstance[]>([])
+  const infoWindowsRef = useRef<GoogleInfoWindowInstance[]>([])
   const [loaded, setLoaded] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -76,6 +82,11 @@ export default function GoogleMapProvider({ points, apiKey, onError }: GoogleMap
     mapRef.current = mapInstance
 
     return () => {
+      infoWindowsRef.current.forEach(iw => {
+        iw.close()
+        iw.setMap(null)
+      })
+      infoWindowsRef.current = []
       circlesRef.current.forEach(c => c.setMap(null))
       circlesRef.current = []
       mapRef.current = null
@@ -105,6 +116,11 @@ export default function GoogleMapProvider({ points, apiKey, onError }: GoogleMap
     const mapInstance = mapRef.current
     if (!loaded || !mapInstance || !window.google?.maps) return
 
+    infoWindowsRef.current.forEach(iw => {
+      iw.close()
+      iw.setMap(null)
+    })
+    infoWindowsRef.current = []
     circlesRef.current.forEach(c => c.setMap(null))
     circlesRef.current = []
 
@@ -112,6 +128,7 @@ export default function GoogleMapProvider({ points, apiKey, onError }: GoogleMap
     const locations = JSON.parse(content) as [number, number, number, string][]
 
     const createdCircles: GoogleCircleInstance[] = []
+    const createdInfoWindows: GoogleInfoWindowInstance[] = []
 
     for (const [latitude, longitude, radiusMeters, title] of locations) {
       const circleInstance = new mapsApi.Circle({
@@ -124,18 +141,26 @@ export default function GoogleMapProvider({ points, apiKey, onError }: GoogleMap
         strokeWeight: 2,
       })
 
-      const infoText = title || `Search within about ${radiusMeters} metres`
+      const containerEl = document.createElement('div')
+      containerEl.style.fontSize = '12px'
+      containerEl.style.fontWeight = '600'
+      containerEl.style.color = '#1c1917'
+      containerEl.style.padding = '2px'
+      containerEl.textContent = title || `Search within about ${radiusMeters} metres`
+
       const infoWindow = new mapsApi.InfoWindow({
-        content: `<div style="font-size:12px;font-weight:600;color:#1c1917;padding:2px;">${infoText}</div>`,
+        content: containerEl,
         position: { lat: latitude, lng: longitude },
       })
 
       infoWindow.open({ map: mapInstance })
 
       createdCircles.push(circleInstance)
+      createdInfoWindows.push(infoWindow)
     }
 
     circlesRef.current = createdCircles
+    infoWindowsRef.current = createdInfoWindows
   }, [loaded, content])
 
   if (!hasPoints) return null
