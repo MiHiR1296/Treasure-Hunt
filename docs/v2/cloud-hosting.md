@@ -1,10 +1,10 @@
 # Earlier Render deployment and cloud data migration
 
-Treasure Hunt now has a [separate Vercel deployment](vercel-hosting.md) for `hunt.mrbtstudio.com`, using the same Supabase database and private storage. This document preserves the earlier Render setup, migration and backup procedures. The Render URL is retained temporarily as a fallback while the MRBT subdomain's DNS is connected.
+Treasure Hunt now has a [separate Vercel deployment](vercel-hosting.md) at `hunt.mrbtstudio.com`, using the same Supabase database and private storage. This document preserves the earlier Render setup, migration and backup procedures. The Render service was suspended on 2026-09-19 after the custom-domain checks passed. It is retained for recovery, with automatic deployment off; the old Render URL is no longer the demo address.
 
 The earlier deployment uses a **Render Free web service** with **Supabase Free PostgreSQL and a private Storage bucket**. Its saved hunts, team progress and uploads are independent of the organizer computer and remain available to the new Vercel application. No paid disk, paid database or Railway subscription is required.
 
-## Earlier demo and temporary fallback
+## Earlier deployment (suspended)
 
 - [Player home](https://treasure-hunt-v2-demo.onrender.com/v2)
 - [Six-checkpoint showcase](https://treasure-hunt-v2-demo.onrender.com/v2?hunt=kalyan-demo)
@@ -16,7 +16,7 @@ Verified on 2026-09-18 (IST), running commit `59e3079b8b368bc827ea62db4b19a987ad
 
 ## Free-plan limits
 
-Render sleeps after 15 minutes without inbound traffic and typically takes about a minute to wake. Open the link before a demonstration. Its free filesystem is temporary, so `MEDIA_STORAGE=supabase` is required for this setup. Render provides 750 free instance hours per workspace each month. See [Render's free service limits](https://render.com/docs/free).
+If this service is resumed, Render sleeps after 15 minutes without inbound traffic and typically takes about a minute to wake. Its free filesystem is temporary, so `MEDIA_STORAGE=supabase` is required for this setup. Render provides 750 free instance hours per workspace each month. See [Render's free service limits](https://render.com/docs/free). Use the active Vercel address for demonstrations.
 
 Supabase Free includes a 500 MB database, 1 GB of file storage and 5 GB egress, and pauses projects after a week of inactivity. Check the project before a scheduled demonstration and resume it if necessary. See [Supabase pricing](https://supabase.com/pricing). Keep the organization on Free and use an existing free project or an available free project slot.
 

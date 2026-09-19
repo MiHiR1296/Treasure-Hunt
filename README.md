@@ -2,7 +2,7 @@
 
 A configurable, web-first engine for real-world treasure hunts. Organizers design checkpoints from reusable actions; participants open a link, join a team, and see one task at a time.
 
-**Hosted demo:** [Play](https://treasure-hunt-v2-seven.vercel.app/v2) · [Organizer console](https://treasure-hunt-v2-seven.vercel.app/v2/admin). The demo runs independently of the organizer's computer in its own Vercel Hobby project, with the existing Supabase Free database and private media storage. `hunt.mrbtstudio.com` is attached to this project and awaits its GoDaddy CNAME record. The portfolio remains separate, with no navigation links between the two applications. See [Vercel hosting and domain setup](docs/v2/vercel-hosting.md).
+**Hosted demo:** [Play](https://hunt.mrbtstudio.com/v2) · [Organizer console](https://hunt.mrbtstudio.com/v2/admin). The demo runs independently of the organizer's computer in its own Vercel Hobby project, with the existing Supabase Free database and private media storage. The custom domain's DNS, HTTPS, gameplay and uploads were verified on 2026-09-19; the earlier Render service is suspended. The portfolio remains separate, with no navigation links between the two applications. See [Vercel hosting and domain setup](docs/v2/vercel-hosting.md).
 
 V2 supports:
 

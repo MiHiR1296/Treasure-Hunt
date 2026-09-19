@@ -4,7 +4,7 @@ Treasure Hunt has its own Vercel project, `treasure-hunt-v2`, in the existing MR
 
 The existing Supabase database and private media bucket remain in place, preserving published hunts, custom puzzles, team progress and uploads. Vercel runs the Next.js application; Render is not needed for this runtime. Local Docker hosting remains supported.
 
-The [player demo](https://treasure-hunt-v2-seven.vercel.app/v2) and [organizer console](https://treasure-hunt-v2-seven.vercel.app/v2/admin) are live on Vercel. As of 2026-09-19 (IST), the custom domain is attached and ownership is verified, but GoDaddy has not yet published the `hunt` CNAME. The earlier Render URL remains available temporarily while this final domain step is completed.
+The [player demo](https://hunt.mrbtstudio.com/v2) and [organizer console](https://hunt.mrbtstudio.com/v2/admin) are live on the custom domain. On 2026-09-19 (IST), GoDaddy DNS, trusted HTTPS, organizer sign-in, the full game, mobile feedback and private uploads passed verification there. The organizer password is unchanged. The earlier Render service is suspended; the existing Supabase database and storage remain active.
 
 ## Project configuration
 
@@ -62,14 +62,14 @@ Supabase Free may pause after inactivity; check its [current plan limits](https:
 
 ## MRBT subdomain
 
-Attach only `hunt.mrbtstudio.com` to this Vercel project. DNS is managed at GoDaddy. Vercel currently recommends this record:
+Only `hunt.mrbtstudio.com` is attached to this Vercel project. DNS is managed at GoDaddy. This record was verified on 2026-09-19:
 
 | Type | Name | Value |
 | --- | --- | --- |
 | CNAME | `hunt` | `9423d65eeb7953e8.vercel-dns-017.com` |
 
-Re-check the project's domain settings before applying DNS; Vercel may change the recommended value. Keep the portfolio's existing apex, `www`, nameservers and project configuration intact. Do not point `hunt` at the earlier Render service. Once DNS resolves, verify HTTPS, player entry, organizer sign-in and media on the custom address.
+The record uses a one-hour TTL. Vercel reports the DNS configuration as valid and has issued an automatically renewing HTTPS certificate. Re-check the project's domain settings before future DNS changes; Vercel may change the recommended value. Keep the portfolio's existing apex, `www`, nameservers and project configuration intact.
 
 The application accepts the configured custom origin, the explicitly configured stable Vercel alias, and its exact Vercel-provided deployment hostname. Other Vercel projects and the portfolio origin are not accepted as mutation origins. Switching hostnames requires signing in again or rejoining with the existing team PIN because cookies belong to their original hostname.
 
-Keep cloud database/media backups together; see the existing [backup notes](cloud-hosting.md#move-the-current-demo). Regenerate entry QR materials for the custom address after it is live.
+Keep cloud database/media backups together; see the existing [backup notes](cloud-hosting.md#move-the-current-demo). Open **Events → QR materials** on the custom-domain organizer console to print entry codes using the new address. Replace any previously printed entry code that points to an older hostname; checkpoint payloads remain unchanged.
