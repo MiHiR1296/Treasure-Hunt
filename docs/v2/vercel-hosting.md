@@ -26,6 +26,21 @@ Configure these server-only environment variables for the deployment:
 | `SUPABASE_UPLOAD_BUCKET` | `treasure-hunt-v2-incoming` |
 | `ENABLE_LEGACY_V1` | `false` |
 | `CRON_SECRET` | Random secret of at least 32 characters |
+| `NEXT_PUBLIC_MAP_PROVIDER` | Optional: `google` (default is OpenStreetMap / `osm`) |
+| `NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY` | Optional: Public browser API key for Google Maps JavaScript API |
+
+### Google Maps API Key Security & Quotas
+
+If configuring `NEXT_PUBLIC_MAP_PROVIDER=google`, you must provide `NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY`.
+
+1. **Security & Restrictions**:
+   - Restrict the browser API key in Google Cloud Console under **API & Services > Credentials**.
+   - Enable **HTTP Referrers** restriction: add your production origin (`https://hunt.mrbtstudio.com/*`) and dev origins (`http://localhost:3000/*`).
+   - Enable **API Restrictions**: restrict key usage strictly to the **Maps JavaScript API**. Do NOT enable Places, Directions, Geocoding, or Routes APIs for this key.
+
+2. **Billing & Quota Safeguards**:
+   - Google Maps JavaScript API requires a Google Cloud project with billing enabled, even though monthly free tier usage covers standard volume.
+   - Configure **Budget Alerts** and daily quota caps in Google Cloud Console under **Billing > Budgets & alerts** to prevent unexpected billing.
 
 The inline CA enables certificate and hostname verification without a filesystem secret. Vercel's database pool uses three connections per instance and the official pool lifecycle helper. No connection strings or storage service keys go to the browser.
 
