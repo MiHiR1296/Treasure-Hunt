@@ -1,7 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { MapPoint } from '../components/v2/player/maps/types'
-import { getMapProviderConfig } from '../components/v2/player/maps/config'
+import { getMapProviderConfig, resolveActiveProvider } from '../components/v2/player/maps/config'
+import { loadGoogleMapsScript, resetGoogleMapsLoaderStateForTesting } from '../components/v2/player/maps/googleTypes'
 
 test('MapPoint interface handles single and multiple coordinates with optional titles', () => {
   const singlePoint: MapPoint[] = [{ latitude: 19.24, longitude: 73.13, radiusMeters: 50, title: 'Gate' }]
@@ -46,25 +47,34 @@ test('production getMapProviderConfig logic handles all environment configuratio
   })
 })
 
-test('provider selection fallback handling works when SDK loading fails or key is absent', () => {
-  // Missing key resolves to OSM provider
+test('production resolveActiveProvider helper returns active provider considering runtime failure state', () => {
+  const googleConfig = getMapProviderConfig('google', 'key-123')
+  const osmConfig = getMapProviderConfig('osm', 'key-123')
   const missingKeyConfig = getMapProviderConfig('google', '')
-  assert.equal(missingKeyConfig.provider, 'osm')
 
-  // Simulated fallback helper when Google SDK fails to load at runtime
-  const simulateRuntimeSelection = (
-    providerEnv?: string,
-    keyEnv?: string,
-    sdkLoadFailed = false
-  ) => {
-    const config = getMapProviderConfig(providerEnv, keyEnv)
-    if (config.provider === 'google' && (!config.googleApiKey || sdkLoadFailed)) {
-      return 'osm'
-    }
-    return config.provider
-  }
+  // 1. Google configured + key + no failure -> 'google'
+  assert.equal(resolveActiveProvider(googleConfig, false), 'google')
 
-  assert.equal(simulateRuntimeSelection('google', 'key-123', false), 'google')
-  assert.equal(simulateRuntimeSelection('google', 'key-123', true), 'osm')
-  assert.equal(simulateRuntimeSelection('google', '', false), 'osm')
+  // 2. Google configured + key + runtime failed (onError triggered) -> 'osm' (Leaflet fallback)
+  assert.equal(resolveActiveProvider(googleConfig, true), 'osm')
+
+  // 3. Missing key -> 'osm'
+  assert.equal(resolveActiveProvider(missingKeyConfig, false), 'osm')
+
+  // 4. OSM configured -> 'osm'
+  assert.equal(resolveActiveProvider(osmConfig, false), 'osm')
+})
+
+test('Google Maps loader script DOM cleanup and state reset allow retry after script error', () => {
+  resetGoogleMapsLoaderStateForTesting()
+
+  // Verify server-side load script rejection
+  return loadGoogleMapsScript('test-key')
+    .then(() => {
+      assert.fail('Should reject on server environment')
+    })
+    .catch((err: Error) => {
+      assert.ok(err instanceof Error)
+      assert.match(err.message, /server/i)
+    })
 })

@@ -84,7 +84,6 @@ export default function GoogleMapProvider({ points, apiKey, onError }: GoogleMap
     return () => {
       infoWindowsRef.current.forEach(iw => {
         iw.close()
-        iw.setMap(null)
       })
       infoWindowsRef.current = []
       circlesRef.current.forEach(c => c.setMap(null))
@@ -118,7 +117,6 @@ export default function GoogleMapProvider({ points, apiKey, onError }: GoogleMap
 
     infoWindowsRef.current.forEach(iw => {
       iw.close()
-      iw.setMap(null)
     })
     infoWindowsRef.current = []
     circlesRef.current.forEach(c => c.setMap(null))

@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import type { MapPoint } from './maps/types'
-import { getMapProviderConfig } from './maps/config'
+import { getMapProviderConfig, resolveActiveProvider } from './maps/config'
 import LeafletMapProvider from './maps/LeafletMapProvider'
 import GoogleMapProvider from './maps/GoogleMapProvider'
 
@@ -18,11 +18,11 @@ export default function RegionMap({ points }: { points: MapPoint[] }) {
     process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY
   )
 
-  const useGoogle = config.provider === 'google' && Boolean(config.googleApiKey) && !googleFailed
+  const activeProvider = resolveActiveProvider(config, googleFailed)
 
   return (
     <div>
-      {useGoogle && config.googleApiKey ? (
+      {activeProvider === 'google' && config.googleApiKey ? (
         <GoogleMapProvider
           points={points}
           apiKey={config.googleApiKey}

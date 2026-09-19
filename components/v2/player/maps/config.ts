@@ -21,3 +21,18 @@ export function getMapProviderConfig(
 
   return { provider: 'osm' }
 }
+
+/**
+ * Determines the active provider ('google' | 'osm') considering runtime failure state.
+ * This is the exact decision function used by RegionMap to switch between GoogleMapProvider
+ * and LeafletMapProvider (OSM).
+ */
+export function resolveActiveProvider(
+  config: MapProviderConfig,
+  runtimeFailed = false
+): 'google' | 'osm' {
+  if (config.provider === 'google' && config.googleApiKey && !runtimeFailed) {
+    return 'google'
+  }
+  return 'osm'
+}

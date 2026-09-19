@@ -45,7 +45,6 @@ export interface GoogleCircleInstance {
 export interface GoogleInfoWindowInstance {
   open(options?: { map?: unknown }): void
   close(): void
-  setMap(map: unknown | null): void
 }
 
 export interface GoogleMapsAPI {
@@ -65,6 +64,10 @@ declare global {
 
 let loaderPromise: Promise<GoogleMapsAPI> | null = null
 
+export function resetGoogleMapsLoaderStateForTesting() {
+  loaderPromise = null
+}
+
 export function loadGoogleMapsScript(apiKey: string): Promise<GoogleMapsAPI> {
   if (typeof window === 'undefined') {
     return Promise.reject(new Error('Google Maps script cannot be loaded on the server'))
@@ -78,22 +81,15 @@ export function loadGoogleMapsScript(apiKey: string): Promise<GoogleMapsAPI> {
     return loaderPromise
   }
 
+  const scriptId = 'google-maps-js-sdk'
+  const existingScript = document.getElementById(scriptId) as HTMLScriptElement | null
+
+  // If a failed or stale script tag exists in DOM without window.google.maps, remove it
+  if (existingScript) {
+    existingScript.remove()
+  }
+
   loaderPromise = new Promise((resolve, reject) => {
-    const scriptId = 'google-maps-js-sdk'
-    const existingScript = document.getElementById(scriptId) as HTMLScriptElement | null
-
-    if (existingScript) {
-      existingScript.addEventListener('load', () => {
-        if (window.google?.maps) resolve(window.google.maps)
-        else reject(new Error('Google Maps SDK object missing after script load'))
-      })
-      existingScript.addEventListener('error', (err) => {
-        loaderPromise = null
-        reject(err)
-      })
-      return
-    }
-
     const script = document.createElement('script')
     script.id = scriptId
     script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&v=weekly`
@@ -105,12 +101,14 @@ export function loadGoogleMapsScript(apiKey: string): Promise<GoogleMapsAPI> {
         resolve(window.google.maps)
       } else {
         loaderPromise = null
+        script.remove()
         reject(new Error('Google Maps SDK loaded but window.google.maps is undefined'))
       }
     }
 
     script.onerror = (err) => {
       loaderPromise = null
+      script.remove()
       reject(err)
     }
 
