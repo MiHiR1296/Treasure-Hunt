@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: treasure-hunt-v2-demo
+    runtime: docker
+    plan: free
+    region: singapore
+    repo: https://github.com/MiHiR1296/Treasure-Hunt
+    branch: codex/treasure-hunt-v2-foundation
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: node scripts/v2-cloud-start.mjs
+    healthCheckPath: /api/v2/health
+    autoDeployTrigger: off
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: ORGANIZER_PASSWORD
+        sync: false
+      - key: MEDIA_STORAGE
+        value: supabase
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        value: treasure-hunt-v2-media
+      - key: ENABLE_LEGACY_V1
+        value: "false"
+      - key: PORT
+        value: "3000"
+      - key: NODE_EXTRA_CA_CERTS
+        value: /etc/secrets/supabase-ca.crt

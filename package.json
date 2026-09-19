@@ -2,19 +2,34 @@
   "name": "treasure-hunt",
   "version": "0.1.0",
   "private": true,
+  "engines": { "node": "22.x" },
   "scripts": {
     "dev": "next dev",
     "dev:mobile": "next dev -H 0.0.0.0",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "start:cloud": "node scripts/v2-cloud-start.mjs",
+    "lint": "eslint app/v2 app/api/v2 components/v2 lib/engine lib/server tests --ext .ts,.tsx",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "test:integration": "node --import tsx --test --test-concurrency=1 tests/integration/*.test.ts",
+    "test:e2e": "playwright test",
+    "db:migrate": "node --env-file-if-exists=.env scripts/v2-migrate.mjs",
+    "db:seed": "node --env-file-if-exists=.env --import tsx scripts/v2-seed.ts",
+    "import:v1": "node --import tsx scripts/v2-import.ts",
+    "backup": "sh scripts/v2-backup.sh",
+    "restore": "sh scripts/v2-restore.sh",
+    "maintenance": "node --env-file-if-exists=.env scripts/v2-maintenance.mjs",
+    "smoke": "node --env-file-if-exists=.env scripts/v2-smoke.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",
+    "@vercel/functions": "^3.9.8",
     "html5-qrcode": "^2.3.8",
     "interactjs": "^1.10.27",
     "leaflet": "^1.9.4",
     "next": "^15.0.0",
+    "pg": "^8.23.0",
     "qrcode.react": "^4.2.0",
     "react": "^18.2.0",
     "react-beautiful-dnd": "^13.1.1",
@@ -22,11 +37,14 @@
     "react-highlight-words": "^0.20.0",
     "react-jigsaw-puzzle": "^1.0.5",
     "react-leaflet": "^4.2.1",
+    "sharp": "^0.35.4",
     "sudoku-core": "^1.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@types/leaflet": "^1.9.8",
     "@types/node": "^20",
+    "@types/pg": "^8.23.1",
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "autoprefixer": "^10.4.16",
@@ -36,5 +54,10 @@
     "tailwindcss": "^3.4.1",
     "tsx": "^4.7.0",
     "typescript": "^5"
+  },
+  "overrides": {
+    "next": {
+      "postcss": "^8.5.23"
+    }
   }
 }

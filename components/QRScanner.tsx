@@ -1,230 +1,189 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { Html5Qrcode } from 'html5-qrcode';
+import { useEffect, useId, useRef, useState } from 'react';
+import type { Html5Qrcode } from 'html5-qrcode';
+import { cameraErrorMessage, QRScanSession, type ScanHandler } from '@/lib/utils/qrScanSession';
 
 interface QRScannerProps {
-  onScanSuccess: (decodedText: string) => void;
+  onScanSuccess: ScanHandler;
   onError?: (error: string) => void;
 }
 
+type Camera = { scanner: Html5Qrcode; ready: Promise<unknown>; release?: Promise<void> };
+type Phase = 'idle' | 'starting' | 'scanning' | 'stopping';
+
+function releaseCamera(camera: Camera): Promise<void> {
+  if (!camera.release) {
+    camera.release = (async () => {
+      await camera.ready.catch(() => undefined);
+      try {
+        if (camera.scanner.isScanning) await camera.scanner.stop();
+      } finally {
+        try { camera.scanner.clear(); } catch { /* Already removed on unmount. */ }
+      }
+    })().catch(() => undefined);
+  }
+  return camera.release;
+}
+
 export default function QRScanner({ onScanSuccess, onError }: QRScannerProps) {
-  const [isScanning, setIsScanning] = useState(false);
-  const [error, setError] = useState<string>('');
-  const [flashlightOn, setFlashlightOn] = useState(false);
-  const [flashlightSupported, setFlashlightSupported] = useState(false);
-  const scannerRef = useRef<Html5Qrcode | null>(null);
+  const readerId = `qr-reader-${useId().replace(/:/g, '')}`;
   const containerRef = useRef<HTMLDivElement>(null);
-  const videoTrackRef = useRef<MediaStreamTrack | null>(null);
+  const mounted = useRef(true);
+  const generation = useRef(0);
+  const phaseRef = useRef<Phase>('idle');
+  const cameraRef = useRef<Camera | null>(null);
+  const sessionRef = useRef<QRScanSession | null>(null);
+  const trackRef = useRef<MediaStreamTrack | null>(null);
+  const onScanRef = useRef(onScanSuccess);
+  const onErrorRef = useRef(onError);
+  onScanRef.current = onScanSuccess;
+  onErrorRef.current = onError;
+  const [phase, setPhase] = useState<Phase>('idle');
+  const [message, setMessage] = useState('');
+  const [validating, setValidating] = useState(false);
+  const [torchSupported, setTorchSupported] = useState(false);
+  const [torchOn, setTorchOn] = useState(false);
+
+  const updatePhase = (next: Phase) => {
+    phaseRef.current = next;
+    if (mounted.current) setPhase(next);
+  };
 
   useEffect(() => {
+    mounted.current = true;
     return () => {
-      // Cleanup on unmount
-      if (scannerRef.current) {
-        scannerRef.current
-          .stop()
-          .then(() => {
-            scannerRef.current?.clear();
-          })
-          .catch(() => {});
-      }
+      mounted.current = false;
+      generation.current += 1;
+      sessionRef.current?.dispose();
+      trackRef.current?.stop();
+      trackRef.current = null;
+      const camera = cameraRef.current;
+      cameraRef.current = null;
+      if (camera) void releaseCamera(camera);
     };
   }, []);
 
-  const startScanning = async () => {
-    if (!containerRef.current) return;
+  const stop = async () => {
+    const currentGeneration = ++generation.current;
+    sessionRef.current?.dispose();
+    const camera = cameraRef.current;
+    cameraRef.current = null;
+    updatePhase('stopping');
+    if (camera) await releaseCamera(camera);
+    trackRef.current?.stop();
+    trackRef.current = null;
+    if (mounted.current && generation.current === currentGeneration) {
+      setValidating(false);
+      setTorchOn(false);
+      setTorchSupported(false);
+      updatePhase('idle');
+    }
+  };
 
+  const start = async () => {
+    if (phaseRef.current !== 'idle' || !containerRef.current) return;
+    const currentGeneration = ++generation.current;
+    const isCurrent = () => mounted.current && generation.current === currentGeneration;
+    const session = new QRScanSession();
+    sessionRef.current = session;
+    updatePhase('starting');
+    setMessage('');
+    let camera: Camera | undefined;
     try {
-      const html5QrCode = new Html5Qrcode('qr-reader');
-      scannerRef.current = html5QrCode;
-
-      // Adjust QR box size for mobile
-      const qrboxSize = Math.min(300, window.innerWidth * 0.8);
-      
-      await html5QrCode.start(
-        { facingMode: 'environment' }, // Use back camera
-        {
-          fps: 10,
-          qrbox: { width: qrboxSize, height: qrboxSize },
-        },
+      if (!window.isSecureContext) throw new Error('Camera requires a secure connection.');
+      const { Html5Qrcode: Scanner } = await import('html5-qrcode');
+      if (!isCurrent()) return;
+      const scanner = new Scanner(readerId, { verbose: false });
+      camera = { scanner, ready: Promise.resolve() };
+      cameraRef.current = camera;
+      camera.ready = scanner.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: (width, height) => {
+          const size = Math.floor(Math.min(width, height) * 0.75);
+          return { width: size, height: size };
+        } },
         (decodedText) => {
-          // Success callback
-          onScanSuccess(decodedText);
-          stopScanning();
-        },
-        (errorMessage) => {
-          // Error callback - ignore common scanning errors that occur during normal scanning
-          // These are expected when scanning wrong QR codes, taking time to focus, etc.
-          const ignorableErrors = [
-            'No QR code found',
-            'No MultiFormat readers were able to detect the code',
-            'QR code parse error',
-            'error_Z',
-            'NotFoundException',
-          ];
-          
-          const shouldIgnore = ignorableErrors.some(ignorable => 
-            errorMessage.includes(ignorable)
-          );
-          
-          if (!shouldIgnore) {
-            // Only show meaningful errors (like camera permission issues)
-            setError(errorMessage);
-          }
-        }
-      );
-
-      setIsScanning(true);
-      setError('');
-
-      // Get the video track from the scanner's video element after it starts
-      // Wait a bit for the video element to be created
-      setTimeout(() => {
-        try {
-          const videoElement = document.querySelector('#qr-reader video') as HTMLVideoElement;
-          if (videoElement && videoElement.srcObject) {
-            const stream = videoElement.srcObject as MediaStream;
-            const videoTrack = stream.getVideoTracks()[0];
-            if (videoTrack) {
-              videoTrackRef.current = videoTrack;
-              
-              // Check if flashlight is supported
-              const capabilities = videoTrack.getCapabilities() as any;
-              if (capabilities.torch !== undefined) {
-                setFlashlightSupported(true);
-              } else {
-                // Try to check if applyConstraints with torch works
-                videoTrack.applyConstraints({ advanced: [{ torch: false }] } as any)
-                  .then(() => {
-                    setFlashlightSupported(true);
-                  })
-                  .catch(() => {
-                    setFlashlightSupported(false);
-                  });
-              }
+          if (!isCurrent()) return;
+          void session.scan(decodedText, async (value) => {
+            if (isCurrent()) setValidating(true);
+            return onScanRef.current(value);
+          }).then(async (result) => {
+            if (!isCurrent() || result.status === 'ignored') return;
+            setValidating(false);
+            if (result.status === 'accepted') {
+              setMessage(result.message || 'Code accepted.');
+              await stop();
+            } else {
+              setMessage(result.message || 'That code does not match. Keep scanning or use a backup code.');
             }
-          }
-        } catch (err) {
-          console.warn('Could not access video track for flashlight:', err);
-          setFlashlightSupported(false);
-        }
-      }, 500);
-    } catch (err: any) {
-      console.error('Error starting scanner:', err);
-      setError(err.message || 'Failed to start camera');
-      onError?.(err.message);
+          }).catch(() => {
+            if (!isCurrent()) return;
+            setValidating(false);
+            setMessage('We could not check that code. Check your connection and try again.');
+          });
+        },
+        () => { /* Missing a code in a camera frame is normal. */ },
+      );
+      await camera.ready;
+      if (!isCurrent()) {
+        await releaseCamera(camera);
+        return;
+      }
+      updatePhase('scanning');
+      const video = containerRef.current?.querySelector('video');
+      const stream = video?.srcObject;
+      if (stream instanceof MediaStream) {
+        const track = stream.getVideoTracks()[0];
+        trackRef.current = track || null;
+        const capabilities = track?.getCapabilities?.() as MediaTrackCapabilities & { torch?: boolean };
+        setTorchSupported(capabilities?.torch === true);
+      }
+    } catch (error) {
+      if (camera) await releaseCamera(camera);
+      if (!isCurrent()) return;
+      cameraRef.current = null;
+      const friendly = !window.isSecureContext
+        ? 'Open the secure HTTPS link from your organizer to use the camera, or use a backup code.'
+        : cameraErrorMessage(error);
+      setMessage(friendly);
+      onErrorRef.current?.(friendly);
+      updatePhase('idle');
     }
   };
 
-  const stopScanning = async () => {
-    // Turn off flashlight before stopping
-    if (flashlightOn && videoTrackRef.current) {
-      try {
-        await toggleFlashlight(false);
-      } catch (err) {
-        console.warn('Error turning off flashlight:', err);
-      }
-    }
-
-    if (scannerRef.current) {
-      try {
-        await scannerRef.current.stop();
-        scannerRef.current.clear();
-        scannerRef.current = null;
-        setIsScanning(false);
-        setFlashlightOn(false);
-      } catch (err) {
-        console.error('Error stopping scanner:', err);
-      }
-    }
-
-    // Release video track
-    if (videoTrackRef.current) {
-      videoTrackRef.current.stop();
-      videoTrackRef.current = null;
-    }
-  };
-
-  const toggleFlashlight = async (turnOn: boolean) => {
-    if (!videoTrackRef.current) return;
-
+  const toggleTorch = async () => {
+    const track = trackRef.current;
+    if (!track) return;
     try {
-      const constraints: any = {
-        advanced: [{ torch: turnOn }]
-      };
-
-      await videoTrackRef.current.applyConstraints(constraints);
-      setFlashlightOn(turnOn);
-    } catch (err: any) {
-      console.warn('Flashlight not supported or error:', err);
-      setFlashlightSupported(false);
-      // Try alternative method for some browsers
-      try {
-        const settings = videoTrackRef.current.getSettings();
-        await videoTrackRef.current.applyConstraints({
-          ...settings,
-          torch: turnOn
-        } as any);
-        setFlashlightOn(turnOn);
-      } catch (altErr) {
-        console.warn('Alternative flashlight method also failed:', altErr);
+      const torchConstraint: MediaTrackConstraintSet & { torch: boolean } = { torch: !torchOn };
+      await track.applyConstraints({ advanced: [torchConstraint] });
+      if (mounted.current && trackRef.current === track) setTorchOn(!torchOn);
+    } catch {
+      if (mounted.current) {
+        setTorchSupported(false);
+        setMessage('Flashlight is unavailable on this device. Move to a brighter spot.');
       }
     }
-  };
-
-  const handleFlashlightToggle = () => {
-    toggleFlashlight(!flashlightOn);
   };
 
   return (
     <div className="w-full">
-      <div
-        id="qr-reader"
-        ref={containerRef}
-        className="w-full rounded-lg overflow-hidden"
-      />
-      
-      {!isScanning && (
-        <button
-          onClick={startScanning}
-          className="w-full mt-4 bg-indigo-600 text-white py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors text-base"
-        >
-          Start QR Scanner
+      <div id={readerId} ref={containerRef} className="w-full overflow-hidden rounded-xl" />
+      {phase === 'idle' ? (
+        <button type="button" onClick={() => void start()} className="mt-4 min-h-12 w-full rounded-xl bg-indigo-600 px-4 py-3 font-semibold text-white hover:bg-indigo-700">
+          Start QR scanner
         </button>
-      )}
-
-      {isScanning && (
-        <div className="flex gap-3 mt-4">
-          {flashlightSupported && (
-            <button
-              onClick={handleFlashlightToggle}
-              className={`flex-1 py-3 rounded-lg font-semibold transition-colors text-base ${
-                flashlightOn
-                  ? 'bg-yellow-500 text-gray-900 hover:bg-yellow-600'
-                  : 'bg-gray-600 text-white hover:bg-gray-700'
-              }`}
-              aria-label={flashlightOn ? 'Turn off flashlight' : 'Turn on flashlight'}
-            >
-              {flashlightOn ? '🔦 Flashlight On' : '💡 Flashlight Off'}
-            </button>
-          )}
-          <button
-            onClick={stopScanning}
-            className="flex-1 bg-red-600 text-white py-3 rounded-lg font-semibold hover:bg-red-700 transition-colors text-base"
-          >
-            Stop Scanner
+      ) : (
+        <div className="mt-4 flex gap-3">
+          {torchSupported && <button type="button" onClick={() => void toggleTorch()} aria-pressed={torchOn} className="min-h-12 flex-1 rounded-xl bg-gray-100 px-4 py-3 font-semibold text-gray-900">{torchOn ? 'Flashlight off' : 'Flashlight on'}</button>}
+          <button type="button" onClick={() => void stop()} disabled={phase === 'stopping'} className="min-h-12 flex-1 rounded-xl bg-gray-800 px-4 py-3 font-semibold text-white disabled:opacity-60">
+            {phase === 'starting' ? 'Cancel camera' : phase === 'stopping' ? 'Stopping…' : 'Stop scanner'}
           </button>
         </div>
       )}
-
-      {error && (
-        <div className="mt-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
-          {error}
-        </div>
-      )}
-
-      <p className="mt-4 text-xs md:text-sm text-gray-600 text-center">
-        Point your camera at the QR code
+      <p role="status" aria-live="polite" className="mt-3 text-sm text-gray-700">
+        {validating ? 'Checking code…' : message || (phase === 'starting' ? 'Opening your camera…' : 'Point your camera at the QR code. Incorrect codes keep the camera open.')}
       </p>
     </div>
   );

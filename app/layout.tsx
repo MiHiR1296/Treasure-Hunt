@@ -1,10 +1,9 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { TeamProvider } from "@/lib/context/TeamContext";
 
 export const metadata: Metadata = {
-  title: "Republic Day Treasure Hunt",
-  description: "Join the treasure hunt in Lokdhara, Kalyan East",
+  title: "Treasure Hunt Engine",
+  description: "Real-world adventures, one clue at a time.",
 };
 
 export default function RootLayout({
@@ -15,9 +14,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <TeamProvider>
-          {children}
-        </TeamProvider>
+        {children}
       </body>
     </html>
   );

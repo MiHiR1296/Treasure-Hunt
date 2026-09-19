@@ -1,0 +1,9 @@
+node_modules
+.next
+.git
+.env*
+test-results
+playwright-report
+*.log
+.data
+supabase/.temp
