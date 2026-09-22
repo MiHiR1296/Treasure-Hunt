@@ -19,7 +19,7 @@ const definition = (): HuntDefinition => ({
           { id: 'clue', type: 'show_text', text: 'Find the gate.', next: 'qr' },
           { id: 'qr', type: 'verify_qr', prompt: 'Scan the gate code.', token: 'a-SECRET-qr-token', backupCode: 'FALLBACK', next: 'route' },
           { id: 'route', type: 'choose_path', prompt: 'Choose how to verify.', choices: [{ id: 'answer', label: 'Answer', next: 'question' }, { id: 'gps', label: 'Location', next: 'location' }] },
-          { id: 'question', type: 'verify_answer', prompt: 'What do you see?', answers: ['the old gate'], next: 'done' },
+          { id: 'question', type: 'verify_answer', prompt: 'What do you see?', answers: ['the old gate'], recapAnswer: 'The old gate', next: 'done' },
           { id: 'location', type: 'verify_gps', prompt: 'Check your location.', latitude: 19.2403, longitude: 73.1305, radiusMeters: 100, maxAccuracyMeters: 50, next: 'done' },
           { id: 'done', type: 'complete' },
         ],
@@ -64,6 +64,29 @@ test('valid fixture and example validate; initializing starts only the first che
   assert.equal(state.checkpoints.second.status, 'locked')
   assert.equal(state.score, 0)
   assert.equal(state.events[0].type, 'checkpoint_started')
+})
+
+test('player history contains only reached stages and safe accepted responses', () => {
+  const hunt = definition()
+  let state = createInitialState(hunt, 'team-a', now)
+  let view = getPlayerView(hunt, state, now)
+  assert.equal(view.stages?.length, 1)
+  assert.equal(view.checkpoints?.[1].title, 'Stage 2')
+  assert.ok(!JSON.stringify(view).includes('Enter the final code.'))
+  assert.ok(!JSON.stringify(view).includes('FINISH'))
+
+  state = executeCommand(hunt, state, { type: 'continue', checkpointId: 'first', nodeId: 'clue' }, now).state
+  state = executeCommand(hunt, state, { type: 'verify', checkpointId: 'first', nodeId: 'qr', value: 'a-SECRET-qr-token' }, now).state
+  state = executeCommand(hunt, state, { type: 'choose_path', checkpointId: 'first', nodeId: 'route', choiceId: 'answer' }, now).state
+  state = executeCommand(hunt, state, { type: 'verify', checkpointId: 'first', nodeId: 'question', value: 'the old gate' }, now).state
+  view = getPlayerView(hunt, state, now)
+  const first = view.stages?.find(stage => stage.id === 'first')
+  assert.equal(first?.status, 'completed')
+  assert.equal(first?.steps.find(step => step.id === 'qr')?.response, 'QR scanned')
+  assert.equal(first?.steps.find(step => step.id === 'route')?.response, 'Answer')
+  assert.equal(first?.steps.find(step => step.id === 'question')?.response, 'The old gate')
+  assert.ok(!JSON.stringify(view).includes('a-SECRET-qr-token'))
+  assert.equal(view.stages?.some(stage => stage.id === 'second'), true, 'the newly reached current stage is available')
 })
 
 test('hint 3 can be purchased first and its identity survives persistence', () => {

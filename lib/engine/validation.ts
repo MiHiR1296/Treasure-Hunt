@@ -104,7 +104,7 @@ export function validateHunt(value: unknown): ValidationIssue[] {
         const np = `${path}.flow.nodes[${ni}]`
         if (!isObject(node)) { issue(np, 'Must be a node object.'); return }
         const fields: Record<string, string[]> = {
-          show_text: ['text', 'next'], show_media: ['content', 'next'], verify_qr: ['prompt', 'token', 'backupCode', 'next'], verify_code: ['prompt', 'code', 'caseSensitive', 'next'], verify_answer: ['prompt', 'answers', 'caseSensitive', 'next'],
+          show_text: ['text', 'next'], show_media: ['content', 'next'], verify_qr: ['prompt', 'token', 'backupCode', 'next'], verify_code: ['prompt', 'code', 'caseSensitive', 'recapAnswer', 'next'], verify_answer: ['prompt', 'answers', 'caseSensitive', 'recapAnswer', 'next'],
           verify_gps: ['prompt', 'latitude', 'longitude', 'radiusMeters', 'maxAccuracyMeters', 'next'], choose_path: ['prompt', 'choices'], puzzle: ['prompt', 'puzzle', 'next'], camera_guide: ['prompt', 'referenceImageUrl', 'latitude', 'longitude', 'next'], verify_organizer: ['prompt', 'next'], verify_image: ['prompt', 'referenceImages', 'location', 'next'],
           set_variable: ['key', 'value', 'next'], branch: ['condition', 'ifTrue', 'ifFalse'], random_branch: ['choices'], add_points: ['amount', 'label', 'next'], complete: [],
         }
@@ -120,6 +120,7 @@ export function validateHunt(value: unknown): ValidationIssue[] {
         if (node.type === 'verify_code') string(node.code, `${np}.code`, 2048)
         if (node.type === 'verify_answer' && array(node.answers, `${np}.answers`, 1, 100)) node.answers.forEach((answer, i) => string(answer, `${np}.answers[${i}]`, 2048))
         if (node.caseSensitive !== undefined) boolean(node.caseSensitive, `${np}.caseSensitive`)
+        if (node.recapAnswer !== undefined) string(node.recapAnswer, `${np}.recapAnswer`, 500)
         if (node.type === 'verify_gps') { coordinates(node, np); number(node.radiusMeters, `${np}.radiusMeters`, 1, 100000); number(node.maxAccuracyMeters, `${np}.maxAccuracyMeters`, 1, 100000) }
         if (node.type === 'camera_guide') { optionalCoordinates(node, np); if (node.referenceImageUrl !== undefined) url(node.referenceImageUrl, `${np}.referenceImageUrl`) }
         if (node.type === 'verify_image') { if (array(node.referenceImages, `${np}.referenceImages`, 0, 30)) node.referenceImages.forEach((ref, i) => url(ref, `${np}.referenceImages[${i}]`)); if (node.location !== undefined) region(node.location, `${np}.location`, true) }

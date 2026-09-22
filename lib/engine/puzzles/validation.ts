@@ -6,7 +6,7 @@ export function validatePuzzle(value: unknown): string[] {
   const fail = (message: string) => { errors.push(message) }
   if (!record(value) || typeof value.type !== 'string') return ['Puzzle must be an object with a supported type.']
   const fields: Record<string, string[]> = {
-    jigsaw: ['rows', 'columns', 'pieces', 'solution'], sudoku: ['size', 'givens'], word_search: ['grid', 'words'], crossword: ['rows', 'columns', 'entries'],
+    jigsaw: ['rows', 'columns', 'pieces', 'solution'], sudoku: ['size', 'givens'], word_search: ['grid', 'words', 'minimumWords', 'bonusPerExtraWord'], crossword: ['rows', 'columns', 'entries'],
     rotation: ['columns', 'tiles'], text: ['prompt', 'answers', 'caseSensitive'], multiple_choice: ['prompt', 'options', 'correctOptionId'], matching: ['left', 'right', 'solution'], sequence: ['items', 'solution'],
   }
   if (!Object.hasOwn(fields, value.type)) return ['Unsupported puzzle type.']
@@ -44,6 +44,8 @@ export function validatePuzzle(value: unknown): string[] {
         const words = (value.words as string[]).map(item => item.toUpperCase())
         if (new Set(words).size !== words.length) fail('Word search words must be unique.')
         for (const target of words) if (!containsWord(grid as string[][], target)) fail(`Word ${target} does not appear in a straight line in the grid.`)
+        if (value.minimumWords !== undefined && !integer(value.minimumWords, 1, words.length)) fail('Words required to continue must be between 1 and the number of hidden words.')
+        if (value.bonusPerExtraWord !== undefined && !integer(value.bonusPerExtraWord, 0, 100)) fail('The bonus for each extra word must be between 0 and 100 points.')
       }
       break
     }

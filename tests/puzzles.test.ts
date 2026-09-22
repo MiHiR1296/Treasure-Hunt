@@ -82,6 +82,24 @@ test('word search validates contiguous paths, restores discoveries, and deduplic
   assert.deepEqual(solve(definition, { path: [{ row: 1, column: 0 }, { row: 1, column: 1 }, { row: 1, column: 2 }] }).state, { type: 'word_search', foundWords: [] })
 })
 
+test('word search can unlock early and rewards only newly found extra words', () => {
+  const base = fixtures.word_search
+  if (base.type !== 'word_search') throw new Error('Fixture')
+  const definition: PuzzleDefinition = { ...base, minimumWords: 1, bonusPerExtraWord: 3 }
+  const cat = { path: [{ row: 0, column: 0 }, { row: 0, column: 1 }, { row: 0, column: 2 }] }
+  const dog = { path: [{ row: 2, column: 0 }, { row: 2, column: 1 }, { row: 2, column: 2 }] }
+  assert.throws(() => solve(definition, { finish: true }), invalid)
+  const first = solve(definition, cat)
+  assert.equal(first.completed, false, 'meeting the minimum leaves the bonus hunt open')
+  assert.deepEqual(first.rewards, undefined)
+  assert.equal(updatePuzzle(definition, first.state, { finish: true }).completed, true)
+  const repeated = updatePuzzle(definition, first.state, cat)
+  assert.deepEqual(repeated.rewards, undefined)
+  const extra = updatePuzzle(definition, repeated.state, dog)
+  assert.equal(extra.completed, true)
+  assert.deepEqual(extra.rewards, [{ id: 'word-search:DOG', amount: 3, label: 'Extra ingredient: DOG' }])
+})
+
 test('crossword keeps answers private and checks letters and black squares', () => {
   const definition = fixtures.crossword
   const correct = [['C', 'A', 'T'], ['A', '', ''], ['R', '', '']]
@@ -171,6 +189,8 @@ test('malformed configurations, impossible boards, unsafe assets, and unsupporte
     { type: 'word_search', grid: [['A', 'B'], ['C', 'D']], words: ['MISSING'] },
     { type: 'word_search', grid: [['A', 'B'], ['C']], words: ['AB'] },
     { type: 'word_search', grid: [['A', 'B'], ['C', 'D']], words: ['AB', 'ab'] },
+    { type: 'word_search', grid: [['A', 'B'], ['C', 'D']], words: ['AB'], minimumWords: 2 },
+    { type: 'word_search', grid: [['A', 'B'], ['C', 'D']], words: ['AB'], bonusPerExtraWord: 101 },
     { type: 'crossword', rows: 2, columns: 2, entries: [{ id: 'long', clue: 'Long', answer: 'LONG', row: 0, column: 0, direction: 'across' }] },
     { type: 'crossword', rows: 2, columns: 2, entries: [{ id: 'one', clue: 'One', answer: 'AB', row: 0, column: 0, direction: 'across' }, { id: 'two', clue: 'Two', answer: 'CD', row: 0, column: 0, direction: 'down' }] },
     { type: 'rotation', columns: 1, tiles: [{ id: 'one', imageUrl: 'javascript:alert(1)', correctRotation: 90 }] },

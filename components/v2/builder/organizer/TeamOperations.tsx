@@ -32,7 +32,7 @@ function privateSolution(node: FlowNode): string | null {
   switch (node.type) {
     case 'verify_answer': return `Accepted answers: ${node.answers.filter(Boolean).join(' · ')}`;
     case 'verify_code': return `Correct code: ${node.code}`;
-    case 'verify_qr': return node.backupCode ? `Backup code: ${node.backupCode}` : 'Scan the printed QR material.';
+    case 'verify_qr': return node.backupCode ? `Printed backup: ${node.backupCode}` : 'Scan the printed QR material.';
     case 'puzzle': {
       const puzzle = node.puzzle;
       if (puzzle.type === 'text') return `Accepted answers: ${puzzle.answers.join(' · ')}`;
@@ -40,7 +40,9 @@ function privateSolution(node: FlowNode): string | null {
       if (puzzle.type === 'multiple_choice') return `Correct choice: ${puzzle.options.find(option => option.id === puzzle.correctOptionId)?.label || puzzle.correctOptionId}`;
       if (puzzle.type === 'matching') return `Correct pairs: ${puzzle.solution.map(pair => `${puzzle.left.find(item => item.id === pair.leftId)?.label || pair.leftId} → ${puzzle.right.find(item => item.id === pair.rightId)?.label || pair.rightId}`).join(' · ')}`;
       if (puzzle.type === 'sequence') return `Correct order: ${puzzle.solution.map(id => puzzle.items.find(item => item.id === id)?.label || id).join(' → ')}`;
-      if (puzzle.type === 'word_search') return `Find all words: ${puzzle.words.join(' · ')}`;
+      if (puzzle.type === 'word_search') return `Find ${puzzle.minimumWords ?? puzzle.words.length} to continue: ${puzzle.words.join(' · ')}${puzzle.bonusPerExtraWord ? ` · +${puzzle.bonusPerExtraWord} points for each extra word` : ''}`;
+      if (puzzle.type === 'jigsaw') return `Correct tile order, row by row: ${puzzle.solution.join(' → ')}`;
+      if (puzzle.type === 'rotation') return `Correct rotations: ${puzzle.tiles.map(tile => `${tile.id}: ${tile.correctRotation}°`).join(' · ')}`;
       return `Puzzle type: ${puzzle.type}. Open Design if you need to inspect its visual solution.`;
     }
     default: return null;

@@ -17,20 +17,24 @@ import type { ActionNotice } from '@/components/v2/player/ActionFeedback';
 import FeedbackToast, { type FeedbackCue } from '@/components/v2/player/FeedbackToast';
 import { useFeedbackCues } from '@/components/v2/player/useFeedbackCues';
 import { describeActionFeedback } from '@/components/v2/player/feedbackModel';
+import StageReview from '@/components/v2/player/StageReview';
 import '@/components/v2/player/theme.css';
 const RegionMap = dynamic(() => import('@/components/v2/player/RegionMap'), { ssr: false });
 
 type HuntSummary = { id: string; title: string };
 type ScopedNotice = ActionNotice & { checkpointId?: string; nodeId?: string; hintId?: string };
 
-function HuntProgress({ checkpoints, activeId, iconStyle }: { checkpoints: NonNullable<ClientPlayerView['checkpoints']>; activeId?: string; iconStyle?: HuntTheme['checkpointIconStyle'] }) {
-  return <ol aria-label="Hunt progress" className="flex min-h-11 items-center gap-3">
+function HuntProgress({ checkpoints, stages, activeId, selectedId, iconStyle, onSelect }: { checkpoints: NonNullable<ClientPlayerView['checkpoints']>; stages: NonNullable<ClientPlayerView['stages']>; activeId?: string; selectedId?: string; iconStyle?: HuntTheme['checkpointIconStyle']; onSelect: (id: string | null) => void }) {
+  const unlocked = new Map(stages.map(stage => [stage.id, stage]));
+  return <ol aria-label="Hunt progress" className="flex min-h-11 items-center">
     {checkpoints.map((checkpoint, index) => {
       const current = checkpoint.id === activeId;
       const complete = checkpoint.status === 'completed' || checkpoint.status === 'skipped';
+      const stage = unlocked.get(checkpoint.id);
+      const selected = checkpoint.id === selectedId;
+      const dot = current && iconStyle && iconStyle !== 'none' ? <CheckpointBadge style={iconStyle} index={index} status={checkpoint.status} /> : <span aria-hidden="true" className={`block rounded-full transition-all motion-reduce:transition-none ${current ? 'h-4 w-4 bg-[var(--hunt-primary,#065f46)] ring-4 ring-stone-200' : complete ? 'h-2.5 w-2.5 bg-[var(--hunt-primary,#065f46)]' : 'h-2.5 w-2.5 bg-stone-300'} ${selected && !current ? 'ring-4 ring-amber-200' : ''}`} />;
       return <li key={checkpoint.id} aria-current={current ? 'step' : undefined} className="flex items-center">
-        <span className="sr-only">Question {index + 1}: {current ? 'current' : complete ? 'complete' : 'upcoming'}</span>
-        {current && iconStyle && iconStyle !== 'none' ? <CheckpointBadge style={iconStyle} index={index} status={checkpoint.status} /> : <span aria-hidden="true" className={`block rounded-full transition-all motion-reduce:transition-none ${current ? 'h-4 w-4 bg-[var(--hunt-primary,#065f46)] ring-4 ring-stone-200' : complete ? 'h-2.5 w-2.5 bg-[var(--hunt-primary,#065f46)]' : 'h-2.5 w-2.5 bg-stone-300'}`} />}
+        {stage ? <button type="button" onClick={() => onSelect(current ? null : checkpoint.id)} aria-label={`${stage.title}, ${current ? 'current stage' : 'completed stage'}`} aria-pressed={selected} title={stage.title} className="hunt-action flex h-11 w-8 items-center justify-center rounded-full">{dot}</button> : <span aria-label={`Stage ${index + 1}, locked`} className="flex h-11 w-8 items-center justify-center">{dot}</span>}
       </li>;
     })}
   </ol>;
@@ -40,6 +44,7 @@ export default function PlayerPage() {
   const [view, setView] = useState<ClientPlayerView | null>(null);
   const [previewMode, setPreviewMode] = useState(false);
   const [showMap, setShowMap] = useState(false);
+  const [reviewStageId, setReviewStageId] = useState<string | null>(null);
   const [hunts, setHunts] = useState<HuntSummary[]>([]);
   const [huntId, setHuntId] = useState('');
   const [huntListError, setHuntListError] = useState('');
@@ -77,6 +82,7 @@ export default function PlayerPage() {
     if (viewRef.current?.teamId === next.teamId && viewRef.current.revision > next.revision) return;
     viewRef.current = next;
     if (teamRef.current !== next.teamId) {
+      setReviewStageId(null);
       teamRef.current = next.teamId;
       const saved = savedCommand(next.teamId);
       pendingRef.current = saved;
@@ -127,6 +133,10 @@ export default function PlayerPage() {
     setPreviewMode(isPreviewSession());
     if (view && sessionVerified) storePlayerView(view);
   }, [view, sessionVerified]);
+
+  useEffect(() => {
+    if (reviewStageId && !view?.stages?.some(stage => stage.id === reviewStageId)) setReviewStageId(null);
+  }, [reviewStageId, view]);
 
   const loadHunts = useCallback(async () => {
     try {
@@ -276,6 +286,7 @@ export default function PlayerPage() {
   const disabled = busy || pending !== null || !sessionVerified || eventBlocked;
   const theme = view?.hunt.theme;
   const color = theme?.primaryColor || '#065f46';
+  const reviewStage = reviewStageId ? view?.stages?.find(stage => stage.id === reviewStageId) : undefined;
   const taskNotice = notice && notice.checkpointId === view?.checkpoint?.id && notice.nodeId === view?.node?.id ? notice : null;
   const hintNotice = notice && notice.checkpointId === view?.checkpoint?.id && notice.hintId ? notice : undefined;
   const recovery = (error || syncMessage || (pending && !busy)) && <div role="alert" className="my-5 space-y-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm leading-relaxed text-amber-950">
@@ -333,8 +344,8 @@ export default function PlayerPage() {
               <div className="min-w-0"><h1 className="truncate text-lg font-bold tracking-tight">{view.hunt.title}</h1>{view.teamName && <p className="mt-1 truncate text-sm text-stone-500">{view.teamName}</p>}</div>
               <p aria-label={`${view.score} points`} className="shrink-0 rounded-full bg-[var(--hunt-primary,#065f46)] px-3 py-1.5 text-sm font-semibold text-[var(--hunt-on-primary,#ffffff)]"><span key={cue?.points ? cue.id : 'score'} className={`tabular-nums ${cue?.points ? 'hunt-score-pop' : ''}`}>{view.score}</span> <span className="font-normal opacity-80">pts</span></p>
             </div>
-            <div className="mt-3 flex items-center justify-between gap-4">
-              {!!view.checkpoints?.length && <HuntProgress checkpoints={view.checkpoints} activeId={view.checkpoint?.id} iconStyle={theme?.checkpointIconStyle} />}
+            <div className="mt-3 flex items-center justify-between gap-2">
+              {!!view.checkpoints?.length && <HuntProgress checkpoints={view.checkpoints} stages={view.stages ?? []} activeId={view.checkpoint?.id} selectedId={reviewStageId ?? view.checkpoint?.id} iconStyle={theme?.checkpointIconStyle} onSelect={setReviewStageId} />}
               <div className="ml-auto flex items-center gap-1">
                 <button type="button" aria-label="Refresh" title="Refresh" onClick={() => void refresh()} disabled={busy} className="hunt-action flex h-11 w-11 items-center justify-center rounded-full text-xl text-stone-500 hover:bg-white disabled:opacity-50"><span aria-hidden="true">↻</span></button>
                 <button type="button" aria-label={soundEnabled ? 'Sound on' : 'Sound off'} title={soundEnabled ? 'Sound on' : 'Sound off'} aria-pressed={soundEnabled} onClick={toggleSound} className="hunt-action flex h-11 w-11 items-center justify-center rounded-full text-lg text-stone-500 hover:bg-white"><span aria-hidden="true">{soundEnabled ? '♪' : '♩'}</span></button>
@@ -343,7 +354,7 @@ export default function PlayerPage() {
           </section>
           {view.checkpoints && settings?.mode && settings.mode !== 'sequential' && <section aria-label="Choose checkpoint" className="mb-5 space-y-2"><h2 className="font-bold">Choose your next destination</h2>{view.checkpoints.map((checkpoint, index) => <button key={checkpoint.id} type="button" disabled={disabled || checkpoint.status !== 'available'} onClick={() => void send({ type: 'choose_checkpoint', checkpointId: checkpoint.id })} className="hunt-action flex min-h-12 w-full items-center justify-between gap-3 rounded-xl border border-stone-300 bg-white px-4 py-3 text-left disabled:opacity-60"><span className="flex items-center gap-3 font-semibold"><CheckpointBadge style={theme?.checkpointIconStyle} index={index} status={checkpoint.status} /><span>{checkpoint.title}{checkpoint.required ? '' : ' · optional'}</span></span><span className="text-xs capitalize">{checkpoint.status}</span></button>)}</section>}
           {view.checkpoints?.some(checkpoint => checkpoint.location) && <section className="mb-5"><button type="button" onClick={() => setShowMap(!showMap)} className="min-h-12 font-semibold text-emerald-900 underline">{showMap ? 'Hide hunt map' : 'Show hunt map'}</button>{showMap && <RegionMap points={view.checkpoints.filter(checkpoint => checkpoint.location).map(checkpoint => ({ ...checkpoint.location!, title: checkpoint.title }))} />}</section>}
-          {view.status === 'completed' ? <section className="hunt-task-arrive rounded-3xl border border-stone-200 bg-white p-7 text-center">
+          {reviewStage ? <StageReview stage={reviewStage} returnLabel={view.status === 'completed' ? 'Back to your finish' : 'Back to the current challenge'} onReturn={() => setReviewStageId(null)} /> : view.status === 'completed' ? <section className="hunt-task-arrive rounded-3xl border border-stone-200 bg-white p-7 text-center">
             {recovery}
             <span aria-hidden="true" className="hunt-success-mark text-5xl">✦</span><p className="mt-4 text-xs font-bold uppercase tracking-widest text-emerald-800">Every clue led here</p><h2 className="mt-3 text-3xl font-bold">You found your finish.</h2><p className="mt-4 leading-relaxed text-stone-600">{settings?.completionMessage || `Your team completed the hunt and earned ${view.score} points. Well played.`}</p>{view.summary && <div className="mt-5 space-y-3 text-left text-sm"><p>{Math.floor(view.summary.elapsedSeconds / 60)} minutes · {view.summary.hintsUsed} hints used</p><ul className="space-y-2">{view.summary.checkpoints.map((checkpoint, index) => <li key={checkpoint.id} className="flex items-center justify-between gap-3 border-t border-stone-100 pt-2"><span className="flex items-center gap-3"><CheckpointBadge style={theme?.checkpointIconStyle} index={index} status={checkpoint.status} /><span>{checkpoint.title} · {checkpoint.status}</span></span><strong>{checkpoint.points} points</strong></li>)}</ul></div>}
           </section> : view.checkpoint && view.node ? <div className="space-y-7">

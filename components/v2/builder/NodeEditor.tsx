@@ -56,10 +56,12 @@ export default function NodeEditor({ checkpoint, hunt, node, onChange, onConnect
     {'prompt' in node && <TextField label="What should the player do?" value={node.prompt} multiline onChange={prompt => onChange({ ...node, prompt })} />}
     {node.type === 'verify_answer' && <>
       <TextField label="Accepted answers — one per line" value={node.answers.join('\n')} multiline onChange={text => onChange({ ...node, answers: text.split('\n') })} hint="Answers are checked on the server. Players do not receive this list." />
+      <TextField label="Answer shown in completed-stage history (optional)" value={node.recapAnswer || ''} onChange={recapAnswer => { const result = { ...node }; if (recapAnswer) result.recapAnswer = recapAnswer; else delete result.recapAnswer; onChange(result); }} hint="Use a short public recap. Leave blank to show only ‘Answer accepted’." />
       <CheckField label="Answers must match letter case" checked={node.caseSensitive === true} onChange={caseSensitive => onChange({ ...node, caseSensitive })} />
     </>}
     {node.type === 'verify_code' && <>
       <TextField label="Correct code" value={node.code} onChange={code => onChange({ ...node, code })} />
+      <TextField label="Answer shown in completed-stage history (optional)" value={node.recapAnswer || ''} onChange={recapAnswer => { const result = { ...node }; if (recapAnswer) result.recapAnswer = recapAnswer; else delete result.recapAnswer; onChange(result); }} hint="Leave blank to keep the code private and show only ‘Code accepted’." />
       <CheckField label="Code must match letter case" checked={node.caseSensitive === true} onChange={caseSensitive => onChange({ ...node, caseSensitive })} />
     </>}
     {node.type === 'verify_qr' && <>

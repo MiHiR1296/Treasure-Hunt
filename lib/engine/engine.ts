@@ -2,9 +2,9 @@ import {
   EngineError, type CheckpointDefinition, type CheckpointProgress, type CommandResult, type Condition,
   type DisplayContent, type Feedback, type GameCommand, type GameEvent, type GameState,
   type HintDefinition, type HuntDefinition, type InteractiveNode, type OrganizerControl, type OrganizerOverride,
-  type PlayerHint, type PlayerNode, type PlayerView, type PublicHintContent, type PuzzleProgress, type ScoreEntry,
+  type PlayerHint, type PlayerNode, type PlayerStageReview, type PlayerView, type PublicHintContent, type PuzzleProgress, type ScoreEntry,
 } from './types'
-import { initialPuzzleState, publicPuzzle, updatePuzzle, PuzzleError, type PuzzleDefinition } from './puzzles'
+import { initialPuzzleState, publicPuzzle, updatePuzzle, PuzzleError, type PuzzleDefinition, type PuzzleReward, type PuzzleState } from './puzzles'
 import { parseCommand, parseControl, validateHunt } from './validation'
 
 const copy = <T>(value: T): T => JSON.parse(JSON.stringify(value))
@@ -141,16 +141,40 @@ export function distanceMeters(aLat: number, aLng: number, bLat: number, bLng: n
   return 6371000 * 2 * Math.atan2(Math.sqrt(Math.min(1, h)), Math.sqrt(Math.max(0, 1 - h)))
 }
 interface Context { definition: HuntDefinition; state: GameState; checkpoint: CheckpointDefinition; now: string }
-interface ActionOutcome { accepted: boolean; next?: string; message: string; dud?: boolean; audit?: GameEvent['type']; attempt?: boolean }
+interface ActionOutcome { accepted: boolean; next?: string; message: string; dud?: boolean; audit?: GameEvent['type']; attempt?: boolean; response?: string }
 interface ActionModule { commands: GameCommand['type'][]; execute: (node: InteractiveNode, command: GameCommand, context: Context) => ActionOutcome; toPlayer: (node: InteractiveNode, context: Context) => PlayerNode }
 function action<T extends InteractiveNode['type']>(type: T, implementation: { commands: GameCommand['type'][]; execute: (node: Extract<InteractiveNode, { type: T }>, command: GameCommand, context: Context) => ActionOutcome; toPlayer: (node: Extract<InteractiveNode, { type: T }>, context: Context) => PlayerNode }): ActionModule {
   return { commands: implementation.commands, execute(node, command, context) { if (node.type !== type) return invalidAction(); return implementation.execute(node as Extract<InteractiveNode, { type: T }>, command, context) }, toPlayer(node, context) { if (node.type !== type) return invalidAction(); return implementation.toPlayer(node as Extract<InteractiveNode, { type: T }>, context) } }
 }
 const invalidAction = (): never => { throw new EngineError('invalid_action', 'That action is not available for the current task.') }
-function puzzleUpdate(definition: PuzzleDefinition, progress: PuzzleProgress, command: { expectedRevision: number; value: unknown }, submit: boolean): PuzzleProgress {
+function puzzleUpdate(definition: PuzzleDefinition, progress: PuzzleProgress, command: { expectedRevision: number; value: unknown }, submit: boolean): { progress: PuzzleProgress; rewards: PuzzleReward[] } {
   if (command.expectedRevision !== progress.revision) throw new EngineError('puzzle_conflict', 'A teammate updated this puzzle. Refresh to see their work before making another move.')
-  try { const result = updatePuzzle(definition, progress.state, command.value); return { revision: progress.revision + 1, state: result.state, completed: submit && result.completed } }
+  try { const result = updatePuzzle(definition, progress.state, command.value); return { progress: { revision: progress.revision + 1, state: result.state, completed: submit && result.completed }, rewards: result.rewards ?? [] } }
   catch (error) { if (error instanceof PuzzleError) throw new EngineError(error.code, error.message); throw error }
+}
+function applyPuzzleRewards(state: GameState, checkpointId: string, now: string, rewards: PuzzleReward[], identity: { nodeId?: string; hintId?: string }): void {
+  for (const reward of rewards) {
+    const owner = identity.nodeId ?? `hint:${identity.hintId}`
+    const semanticId = `puzzle:${checkpointId}:${owner}:${reward.id}`
+    const activeAward = state.ledger.some(entry => (entry.id === semanticId || entry.id.startsWith(`${semanticId}:`)) && !state.ledger.some(refund => refund.reverses === entry.id))
+    if (activeAward) continue
+    score(state, { kind: 'action_points', checkpointId, ...identity, amount: reward.amount, at: now, reason: reward.label }, semanticId)
+    event(state, { type: 'points_changed', checkpointId, ...identity, amount: reward.amount, at: now, reason: reward.label })
+  }
+}
+function puzzleResponse(definition: PuzzleDefinition, state: PuzzleState): string {
+  if (definition.type !== state.type) return 'Puzzle completed'
+  switch (state.type) {
+    case 'jigsaw': return 'Frankie picture completed'
+    case 'sudoku': return 'Sudoku completed'
+    case 'word_search': return state.foundWords.join(', ')
+    case 'crossword': return 'Crossword completed'
+    case 'rotation': return 'Picture aligned'
+    case 'text': return 'Answer solved'
+    case 'multiple_choice': return definition.type === 'multiple_choice' ? definition.options.find(option => option.id === state.optionId)?.label ?? 'Choice completed' : 'Choice completed'
+    case 'matching': return `${state.pairs.length} pairs matched`
+    case 'sequence': return definition.type === 'sequence' ? state.order.map(id => definition.items.find(item => item.id === id)?.label ?? id).join(' ') : 'Sequence completed'
+  }
 }
 /** The registry owns interactive verification/projection; generic traversal is unchanged by puzzle adapters. */
 export const actionRegistry: Readonly<Record<InteractiveNode['type'], ActionModule>> = Object.freeze({
@@ -161,35 +185,38 @@ export const actionRegistry: Readonly<Record<InteractiveNode['type'], ActionModu
     commands: ['verify'], execute(node, command, context) {
       if (command.type !== 'verify') return invalidAction()
       const accepted = command.value === node.token || (node.backupCode !== undefined && normalize(command.value) === normalize(node.backupCode))
-      if (accepted) return { accepted: true, next: node.next, message: 'You found it!', attempt: true }
+      if (accepted) return { accepted: true, next: node.next, message: 'You found it!', attempt: true, response: command.value === node.token ? 'QR scanned' : 'Printed phrase accepted' }
       const index = context.definition.dudQrs?.findIndex(dud => dud.token === command.value) ?? -1, dud = context.definition.dudQrs?.[index]
       if (dud?.points && !context.state.ledger.some(entry => entry.id === `dud:${index}`)) score(context.state, { kind: 'dud_discovery', checkpointId: context.checkpoint.id, amount: dud.points, at: context.now, reason: dud.message }, `dud:${index}`)
       return { accepted: false, dud: !!dud, message: dud?.message ?? 'That is not the code for this task. Keep looking and try again.', attempt: true }
     }, toPlayer: node => ({ id: node.id, type: node.type, prompt: node.prompt, backupCodeEnabled: node.backupCode !== undefined }),
   }),
   verify_code: action('verify_code', {
-    commands: ['verify'], execute(node, command) { if (command.type !== 'verify') return invalidAction(); const accepted = normalize(command.value, node.caseSensitive) === normalize(node.code, node.caseSensitive); return { accepted, next: accepted ? node.next : undefined, message: accepted ? 'Code accepted!' : 'That code does not match. Check it and try again.', attempt: true } }, toPlayer: node => ({ id: node.id, type: node.type, prompt: node.prompt }),
+    commands: ['verify'], execute(node, command) { if (command.type !== 'verify') return invalidAction(); const accepted = normalize(command.value, node.caseSensitive) === normalize(node.code, node.caseSensitive); return { accepted, next: accepted ? node.next : undefined, message: accepted ? 'Code accepted!' : 'That code does not match. Check it and try again.', attempt: true, ...(accepted ? { response: node.recapAnswer ?? 'Code accepted' } : {}) } }, toPlayer: node => ({ id: node.id, type: node.type, prompt: node.prompt }),
   }),
   verify_answer: action('verify_answer', {
-    commands: ['verify'], execute(node, command) { if (command.type !== 'verify') return invalidAction(); const accepted = node.answers.some(answer => normalize(command.value, node.caseSensitive) === normalize(answer, node.caseSensitive)); return { accepted, next: accepted ? node.next : undefined, message: accepted ? 'Correct answer!' : 'Not quite. Give it another try.', attempt: true } }, toPlayer: node => ({ id: node.id, type: node.type, prompt: node.prompt }),
+    commands: ['verify'], execute(node, command) { if (command.type !== 'verify') return invalidAction(); const accepted = node.answers.some(answer => normalize(command.value, node.caseSensitive) === normalize(answer, node.caseSensitive)); return { accepted, next: accepted ? node.next : undefined, message: accepted ? 'Correct answer!' : 'Not quite. Give it another try.', attempt: true, ...(accepted ? { response: node.recapAnswer ?? 'Answer accepted' } : {}) } }, toPlayer: node => ({ id: node.id, type: node.type, prompt: node.prompt }),
   }),
   verify_gps: action('verify_gps', {
     commands: ['verify_gps'], execute(node, command) {
       if (command.type !== 'verify_gps') return invalidAction()
       if (command.location.accuracyMeters > node.maxAccuracyMeters) return { accepted: false, message: 'Your location reading is too uncertain. Move into an open area, try again, or ask the organizer for help.', attempt: true }
       const accepted = distanceMeters(node.latitude, node.longitude, command.location.latitude, command.location.longitude) <= node.radiusMeters
-      return { accepted, next: accepted ? node.next : undefined, message: accepted ? 'You appear to be in the right area!' : 'You do not appear to be in the search area yet. Get closer and try again.', attempt: true }
+      return { accepted, next: accepted ? node.next : undefined, message: accepted ? 'You appear to be in the right area!' : 'You do not appear to be in the search area yet. Get closer and try again.', attempt: true, ...(accepted ? { response: 'Location confirmed' } : {}) }
     }, toPlayer: node => ({ id: node.id, type: node.type, prompt: node.prompt }),
   }),
   choose_path: action('choose_path', {
-    commands: ['choose_path'], execute(node, command) { if (command.type !== 'choose_path') return invalidAction(); const selected = node.choices.find(item => item.id === command.choiceId); if (!selected) return invalidAction(); return { accepted: true, next: selected.next, message: 'Your next task is ready.' } }, toPlayer: node => ({ id: node.id, type: node.type, prompt: node.prompt, choices: node.choices.map(({ id, label }) => ({ id, label })) }),
+    commands: ['choose_path'], execute(node, command) { if (command.type !== 'choose_path') return invalidAction(); const selected = node.choices.find(item => item.id === command.choiceId); if (!selected) return invalidAction(); return { accepted: true, next: selected.next, message: 'Your next task is ready.', response: selected.label } }, toPlayer: node => ({ id: node.id, type: node.type, prompt: node.prompt, choices: node.choices.map(({ id, label }) => ({ id, label })) }),
   }),
   puzzle: action('puzzle', {
     commands: ['save_puzzle', 'submit_puzzle'], execute(node, command, context) {
       if (command.type !== 'save_puzzle' && command.type !== 'submit_puzzle') return invalidAction()
       const saved = context.state.checkpoints[context.checkpoint.id].nodes[node.id]
-      saved.puzzle = puzzleUpdate(node.puzzle, saved.puzzle ?? newPuzzle(node.puzzle), command, command.type === 'submit_puzzle')
-      return { accepted: true, next: saved.puzzle.completed ? node.next : undefined, message: saved.puzzle.completed ? 'Puzzle solved!' : 'Your puzzle progress is saved. Keep going.', audit: saved.puzzle.completed ? 'puzzle_completed' : 'puzzle_saved' }
+      const update = puzzleUpdate(node.puzzle, saved.puzzle ?? newPuzzle(node.puzzle), command, command.type === 'submit_puzzle')
+      saved.puzzle = update.progress
+      applyPuzzleRewards(context.state, context.checkpoint.id, context.now, update.rewards, { nodeId: node.id })
+      const bonus = update.rewards.reduce((sum, reward) => sum + reward.amount, 0)
+      return { accepted: true, next: saved.puzzle.completed ? node.next : undefined, message: saved.puzzle.completed ? 'Puzzle solved!' : bonus ? `Ingredient found — +${bonus} bonus points!` : 'Your puzzle progress is saved. Keep going.', audit: saved.puzzle.completed ? 'puzzle_completed' : 'puzzle_saved', ...(saved.puzzle.completed ? { response: puzzleResponse(node.puzzle, saved.puzzle.state) } : {}) }
     }, toPlayer: (node, context) => ({ id: node.id, type: node.type, prompt: node.prompt, puzzle: publicPuzzle(node.puzzle), progress: copy(context.state.checkpoints[context.checkpoint.id].nodes[node.id].puzzle ?? newPuzzle(node.puzzle)) }),
   }),
   verify_organizer: action('verify_organizer', { commands: [], execute: () => invalidAction(), toPlayer: node => ({ id: node.id, type: node.type, prompt: node.prompt }) }),
@@ -252,7 +279,10 @@ export function executeCommand(definition: HuntDefinition, original: GameState, 
     const checkpoint = definition.checkpoints.find(cp => cp.id === command.checkpointId), hint = checkpoint?.hints.find(item => item.id === command.hintId), usage = state.hintUsage[command.hintId]
     if (!checkpoint || !hint || hint.content.type !== 'puzzle' || !usage?.puzzle || state.activeCheckpointId !== checkpoint.id) throw new EngineError('invalid_hint', 'Open the purchased puzzle hint at its checkpoint before playing.')
     if (usage.puzzle.completed) return { state: original, feedback: { status: 'already_applied', message: 'Your team has already solved this hint.', scannerShouldStop: false } }
-    usage.puzzle = puzzleUpdate(hint.content.puzzle, usage.puzzle, command, command.type === 'submit_hint_puzzle'); state.revision++
+    const update = puzzleUpdate(hint.content.puzzle, usage.puzzle, command, command.type === 'submit_hint_puzzle')
+    usage.puzzle = update.progress
+    applyPuzzleRewards(state, checkpoint.id, at, update.rewards, { hintId: hint.id })
+    state.revision++
     event(state, { type: usage.puzzle.completed ? 'puzzle_completed' : 'puzzle_saved', checkpointId: checkpoint.id, hintId: hint.id, at })
     return { state, feedback: feedback(usage.puzzle.completed ? 'Puzzle solved. Your hint is revealed.' : 'Your puzzle progress is saved. Keep going.') }
   }
@@ -262,6 +292,7 @@ export function executeCommand(definition: HuntDefinition, original: GameState, 
   if (command.type === 'use_fallback') {
     if (!node.fallback || !(state.fallbacks?.[`${checkpoint.id}:${node.id}`] ?? node.fallback.enabled)) throw new EngineError('fallback_unavailable', 'That recovery option is not enabled. Ask the organizer for help.')
     event(state, { type: 'fallback_used', checkpointId: checkpoint.id, nodeId: node.id, at }); state.revision++
+    state.checkpoints[checkpoint.id].nodes[node.id].publicResponse = 'Used the recovery route'
     advance(definition, state, checkpoint, node, node.fallback.nodeId, at, true)
     return { state, feedback: feedback('Your alternative task is ready.', node.type === 'verify_qr') }
   }
@@ -271,6 +302,7 @@ export function executeCommand(definition: HuntDefinition, original: GameState, 
   state.revision++
   if (outcome.attempt) state.checkpoints[checkpoint.id].nodes[node.id].attempts++
   if (outcome.audit) event(state, { type: outcome.audit, checkpointId: checkpoint.id, nodeId: node.id, at })
+  if (outcome.accepted && outcome.response) state.checkpoints[checkpoint.id].nodes[node.id].publicResponse = outcome.response
   if (outcome.accepted && outcome.next) advance(definition, state, checkpoint, node, outcome.next, at)
   else if (!outcome.accepted) {
     event(state, { type: outcome.dud ? 'dud_qr_scanned' : 'verification_failed', checkpointId: checkpoint.id, nodeId: node.id, at })
@@ -301,6 +333,7 @@ export function executeControl(definition: HuntDefinition, original: GameState, 
     if (!usage || usage.checkpointId !== checkpoint.id) throw new EngineError('invalid_override', 'That hint has not been used at this checkpoint.')
     const charge = [...state.ledger].reverse().find(entry => entry.kind === 'hint_used' && entry.hintId === control.hintId && !state.ledger.some(refund => refund.reverses === entry.id))
     if (charge) score(state, { kind: 'refund', checkpointId: checkpoint.id, hintId: control.hintId, amount: -charge.amount, reverses: charge.id, reason, at })
+    for (const award of state.ledger.filter(entry => entry.kind === 'action_points' && entry.hintId === control.hintId && !state.ledger.some(refund => refund.reverses === entry.id))) score(state, { kind: 'refund', checkpointId: checkpoint.id, hintId: control.hintId, amount: -award.amount, reverses: award.id, reason, at })
     if (usage.puzzle) { state.hintPuzzleRevisions ??= {}; state.hintPuzzleRevisions[control.hintId] = usage.puzzle.revision + 1 }
     delete state.hintUsage[control.hintId]
     return { state, feedback: feedback('The organizer reset this hint and refunded its cost.') }
@@ -348,6 +381,7 @@ export function executeControl(definition: HuntDefinition, original: GameState, 
   }
   if (node.type === 'choose_path') throw new EngineError('invalid_override', 'A path choice cannot be approved directly. Enable a fallback or move the team instead.')
   if (node.type === 'verify_image' && nodeProgress.photoStatus === 'pending') nodeProgress.photoStatus = 'approved'
+  nodeProgress.publicResponse = control.type === 'skip_action' ? 'Skipped by organizer' : node.type === 'verify_image' ? 'Photo approved' : 'Approved by organizer'
   advance(definition, state, checkpoint, node, node.next, at, control.type === 'skip_action')
   return { state, feedback: feedback(control.type === 'skip_action' ? 'The organizer skipped this task.' : 'The organizer approved this task. Your next task is ready.', node.type === 'verify_qr') }
 }
@@ -373,19 +407,46 @@ function publicHint(hint: HintDefinition, state: GameState): PublicHintContent {
   const progress = state.hintUsage[hint.id].puzzle ?? newPuzzle(hint.content.puzzle)
   return { type: 'puzzle', puzzle: publicPuzzle(hint.content.puzzle), progress: copy(progress), ...(progress.completed ? { reveal: publicDisplay(hint.content.reveal) } : {}) }
 }
+function reviewText(node: InteractiveNode): string {
+  if (node.type === 'show_text') return node.text
+  if ('prompt' in node) return node.prompt
+  switch (node.content.type) {
+    case 'text': return node.content.text
+    case 'image': return node.content.alt
+    case 'audio': case 'video': return node.content.title
+    case 'map': return 'Map clue'
+    case 'camera': return node.content.description
+  }
+}
+function playerStages(definition: HuntDefinition, state: GameState): PlayerStageReview[] {
+  return definition.checkpoints.flatMap(checkpoint => {
+    const checkpointProgress = state.checkpoints[checkpoint.id]
+    if (!checkpointProgress.startedAt || checkpointProgress.status === 'locked' || checkpointProgress.status === 'available') return []
+    const steps = checkpoint.flow.nodes.flatMap(node => {
+      const nodeProgress = checkpointProgress.nodes[node.id]
+      if (!nodeProgress?.startedAt || !Object.hasOwn(actionRegistry, node.type)) return []
+      const interactive = node as InteractiveNode
+      const response = nodeProgress.publicResponse ?? (interactive.type === 'puzzle' && nodeProgress.puzzle?.completed ? puzzleResponse(interactive.puzzle, nodeProgress.puzzle.state) : undefined)
+      return [{ id: interactive.id, text: reviewText(interactive), ...(response ? { response } : {}) }]
+    })
+    return [{ id: checkpoint.id, title: checkpoint.title, status: checkpointProgress.status as PlayerStageReview['status'], steps }]
+  })
+}
 /** Allowlist projection; definitions, private answers, unpublished hints and media references never spread into player APIs. */
 export function getPlayerView(definition: HuntDefinition, state: GameState, now: string): PlayerView {
   assertDefinition(definition); assertState(definition, state)
   const at = timestamp(now), checkpoint = definition.checkpoints.find(cp => cp.id === state.activeCheckpointId)
   const required = definition.checkpoints.filter(cp => cp.required !== false)
   const startedAt = state.startedAt ?? Object.values(state.checkpoints).find(cp => cp.startedAt)?.startedAt ?? at
+  const visibleTitle = (checkpoint: CheckpointDefinition, index: number) => state.checkpoints[checkpoint.id].status === 'locked' ? `Stage ${index + 1}` : checkpoint.title
   const view: PlayerView = {
     hunt: { id: definition.id, title: definition.title, ...(definition.description !== undefined ? { description: definition.description } : {}), ...(definition.settings ? { settings: copy(definition.settings) } : {}), ...(definition.theme ? { theme: copy(definition.theme) } : {}) },
     teamId: state.teamId, revision: state.revision, status: state.status, score: state.score,
     progress: { completed: Object.values(state.checkpoints).filter(cp => cp.status === 'completed').length, total: definition.checkpoints.length, requiredCompleted: required.filter(cp => isSettled(state.checkpoints[cp.id])).length, requiredTotal: required.length },
     checkpoint: null, node: null, hints: [],
-    checkpoints: definition.checkpoints.map(cp => ({ id: cp.id, title: cp.title, status: state.checkpoints[cp.id].status, required: cp.required !== false, ...(cp.group ? { group: cp.group } : {}), ...(cp.location && (definition.settings?.map === 'all' || (definition.settings?.map === 'visited' && state.checkpoints[cp.id].startedAt)) ? { location: copy(cp.location) } : {}) })),
-    summary: { startedAt, ...(state.completedAt ? { completedAt: state.completedAt } : {}), elapsedSeconds: Math.max(0, Math.floor((Date.parse(state.completedAt ?? at) - Date.parse(startedAt)) / 1000)), hintsUsed: Object.keys(state.hintUsage).length, checkpoints: definition.checkpoints.map(cp => ({ id: cp.id, title: cp.title, status: state.checkpoints[cp.id].status, points: state.ledger.filter(entry => entry.checkpointId === cp.id).reduce((sum, entry) => sum + entry.amount, 0) })) },
+    checkpoints: definition.checkpoints.map((cp, index) => ({ id: cp.id, title: visibleTitle(cp, index), status: state.checkpoints[cp.id].status, required: cp.required !== false, ...(cp.group ? { group: cp.group } : {}), ...(cp.location && (definition.settings?.map === 'all' || (definition.settings?.map === 'visited' && state.checkpoints[cp.id].startedAt)) ? { location: copy(cp.location) } : {}) })),
+    stages: playerStages(definition, state),
+    summary: { startedAt, ...(state.completedAt ? { completedAt: state.completedAt } : {}), elapsedSeconds: Math.max(0, Math.floor((Date.parse(state.completedAt ?? at) - Date.parse(startedAt)) / 1000)), hintsUsed: Object.keys(state.hintUsage).length, checkpoints: definition.checkpoints.map((cp, index) => ({ id: cp.id, title: visibleTitle(cp, index), status: state.checkpoints[cp.id].status, points: state.ledger.filter(entry => entry.checkpointId === cp.id).reduce((sum, entry) => sum + entry.amount, 0) })) },
   }
   if (!checkpoint) return view
   const progress = state.checkpoints[checkpoint.id], node = checkpoint.flow.nodes.find(candidate => candidate.id === progress.activeNodeId)
