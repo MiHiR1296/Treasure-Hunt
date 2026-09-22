@@ -16,7 +16,7 @@ const definition: HuntDefinition = {
         { id: 'answer', type: 'verify_answer', prompt: 'What points north?', answers: ['compass'], next: 'done' },
         { id: 'done', type: 'complete' },
       ] },
-      hints: [1, 2, 3].map(i => ({ id: `hint-${i}`, title: `Clue ${i}`, cost: i * 2, content: { type: 'text' as const, text: `Helpful detail ${i}` } })),
+      hints: [1, 2, 3].map(i => ({ id: `hint-${i}`, title: `Clue ${i}`, cost: i === 1 ? 2 : 6, content: { type: 'text' as const, text: `Helpful detail ${i}` } })),
     },
     { id: 'qr', title: 'The Hidden Code', basePoints: 20,
       flow: { startNodeId: 'scan', nodes: [
@@ -61,10 +61,14 @@ test('two phones share hints and progression; retries, refresh, QR recovery and 
   const teammate = await second.newPage();
   await join(teammate, teamName, 'join');
 
-  await page.getByRole('button', { name: 'View hint options' }).nth(2).click();
+  await expect(page.getByRole('heading', { name: 'Clue 2', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Clue 3', exact: true })).toBeVisible();
+  await expect(page.getByText('−6 pts', { exact: true })).toHaveCount(2);
+  await page.getByRole('button', { name: 'Choose hint: Clue 3 (6 points)', exact: true }).click();
+  await expect(page.getByText('Reveal “Clue 3” for 6 points? Your team is charged once.', { exact: true })).toBeVisible();
   // A lost response must retain a retry ID through refresh.
   await page.route('**/api/v2/command', async route => { await route.fetch(); await route.abort(); });
-  await page.getByRole('button', { name: 'Reveal hint · 6 points' }).click();
+  await page.getByRole('button', { name: 'Reveal hint: Clue 3 (6 points)', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Retry last action' })).toBeVisible();
   await page.reload();
   await page.unroute('**/api/v2/command');

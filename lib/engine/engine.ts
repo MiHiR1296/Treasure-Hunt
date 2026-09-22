@@ -438,9 +438,11 @@ export function getPlayerView(definition: HuntDefinition, state: GameState, now:
   const at = timestamp(now), checkpoint = definition.checkpoints.find(cp => cp.id === state.activeCheckpointId)
   const required = definition.checkpoints.filter(cp => cp.required !== false)
   const startedAt = state.startedAt ?? Object.values(state.checkpoints).find(cp => cp.startedAt)?.startedAt ?? at
+  const settings = definition.settings ? copy(definition.settings) : undefined
+  if (settings && !state.completedAt) delete settings.completionMessage
   const visibleTitle = (checkpoint: CheckpointDefinition, index: number) => state.checkpoints[checkpoint.id].status === 'locked' ? `Stage ${index + 1}` : checkpoint.title
   const view: PlayerView = {
-    hunt: { id: definition.id, title: definition.title, ...(definition.description !== undefined ? { description: definition.description } : {}), ...(definition.settings ? { settings: copy(definition.settings) } : {}), ...(definition.theme ? { theme: copy(definition.theme) } : {}) },
+    hunt: { id: definition.id, title: definition.title, ...(definition.description !== undefined ? { description: definition.description } : {}), ...(settings ? { settings } : {}), ...(definition.theme ? { theme: copy(definition.theme) } : {}) },
     teamId: state.teamId, revision: state.revision, status: state.status, score: state.score,
     progress: { completed: Object.values(state.checkpoints).filter(cp => cp.status === 'completed').length, total: definition.checkpoints.length, requiredCompleted: required.filter(cp => isSettled(state.checkpoints[cp.id])).length, requiredTotal: required.length },
     checkpoint: null, node: null, hints: [],

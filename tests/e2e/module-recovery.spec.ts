@@ -39,8 +39,8 @@ for (const feature of ['puzzle', 'map'] as const) test(`a failed lazy ${feature}
   expect(joined.ok(), await joined.text()).toBeTruthy();
   const teamId = (await joined.json()).view.teamId;
   await page.goto(`/v2?hunt=${huntId}`);
-  await page.getByRole('button', { name: 'View hint options', exact: true }).click();
-  await page.getByRole('button', { name: 'Reveal hint · 2 points', exact: true }).click();
+  await page.getByRole('button', { name: 'Choose hint: A shared nudge (2 points)', exact: true }).click();
+  await page.getByRole('button', { name: 'Reveal hint: A shared nudge (2 points)', exact: true }).click();
   await expect(page.getByText('Your team kept this helpful clue.', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: feature === 'puzzle' ? 'Continue' : 'Show hunt map', exact: true }).click();
   await expect.poll(() => aborted.length).toBeGreaterThan(0);

@@ -108,6 +108,10 @@ test('all starter templates validate and independent instances regenerate QR sec
 test('Frankie challenge plays all eight stages, awards extra ingredient finds, and preserves its unlocked-word history', () => {
   const hunt = huntTemplates.find(template => template.id === 'frankie-code-hunt')!.definition
   const game = runner(hunt)
+  const campaignPhrase = 'GOOD FOOD TURNS STRANGERS INTO A TEAM'
+  const initialView = getPlayerView(hunt, game.state, now)
+  assert.equal(initialView.hunt.settings?.completionMessage, undefined)
+  assert.equal(JSON.stringify(initialView).includes(campaignPhrase), false)
   assert.equal(game.send({ type: 'verify', checkpointId: 'name-the-snack', nodeId: 'answer', value: 'roll' }).status, 'accepted')
   game.next('name-the-snack', 'word')
   game.send({ type: 'submit_puzzle', checkpointId: 'frankie-picture', nodeId: 'puzzle', expectedRevision: 0, value: { order: ['mint', 'copper', 'sesame', 'amber', 'paneer', 'chilli', 'onion', 'roti', 'plate'] } })
@@ -137,12 +141,16 @@ test('Frankie challenge plays all eight stages, awards extra ingredient finds, a
   game.send({ type: 'choose_path', checkpointId: 'choose-the-flavour', nodeId: 'route', choiceId: 'spicy' })
   game.send({ type: 'submit_puzzle', checkpointId: 'choose-the-flavour', nodeId: 'spicy', expectedRevision: 0, value: { optionId: 'chilli' } })
   game.next('choose-the-flavour', 'word')
+  const finaleView = getPlayerView(hunt, game.state, now)
+  assert.equal(finaleView.hunt.settings?.completionMessage, undefined)
+  assert.equal(JSON.stringify(finaleView).includes(campaignPhrase), false)
   game.send({ type: 'submit_puzzle', checkpointId: 'campaign-phrase', nodeId: 'puzzle', expectedRevision: 0, value: { order: ['good', 'food', 'turns', 'strangers', 'into', 'a', 'team'] } })
   assert.equal(game.state.status, 'completed')
   assert.equal(game.state.score, 215)
   assert.equal(game.state.ledger.filter(entry => entry.kind === 'checkpoint_completed').length, 8)
   assert.equal(game.state.ledger.filter(entry => entry.kind === 'time_bonus').length, 8)
   const view = getPlayerView(hunt, game.state, now)
+  assert.ok(view.hunt.settings?.completionMessage?.includes(campaignPhrase))
   assert.equal(view.stages?.length, 8)
   assert.equal(view.stages?.find(stage => stage.id === 'name-the-snack')?.steps.find(step => step.id === 'answer')?.response, 'Frankie, roll, or wrap')
   assert.ok(view.stages?.flatMap(stage => stage.steps).some(step => step.text.includes('STRANGERS')))

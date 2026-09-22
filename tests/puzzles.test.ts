@@ -97,7 +97,7 @@ test('word search can unlock early and rewards only newly found extra words', ()
   assert.deepEqual(repeated.rewards, undefined)
   const extra = updatePuzzle(definition, repeated.state, dog)
   assert.equal(extra.completed, true)
-  assert.deepEqual(extra.rewards, [{ id: 'word-search:DOG', amount: 3, label: 'Extra ingredient: DOG' }])
+  assert.deepEqual(extra.rewards, [{ id: 'word-search:extra:1', amount: 3, label: 'Extra ingredient: DOG' }])
 })
 
 test('crossword keeps answers private and checks letters and black squares', () => {

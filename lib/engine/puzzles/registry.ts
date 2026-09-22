@@ -75,7 +75,10 @@ export const puzzleRegistry: Readonly<Record<PuzzleType, RegistryEntry>> = Objec
       const isNew = !!found && !state.foundWords.includes(found)
       const foundWords = [...new Set([...state.foundWords, ...(found ? [found] : [])])]
       const bonus = definition.bonusPerExtraWord ?? 0
-      const rewards = isNew && foundWords.length > minimumWords && bonus > 0 ? [{ id: `word-search:${found}`, amount: bonus, label: `Extra ingredient: ${found}` }] : undefined
+      // Reward a fixed number of bonus slots, not particular words. A reset may
+      // change discovery order, but it must never create more active awards than
+      // the configured number of optional words.
+      const rewards = isNew && foundWords.length > minimumWords && bonus > 0 ? [{ id: `word-search:extra:${foundWords.length - minimumWords}`, amount: bonus, label: `Extra ingredient: ${found}` }] : undefined
       return { state: { type: 'word_search', foundWords }, completed: targetWords.every(word => foundWords.includes(word)), ...(rewards ? { rewards } : {}) }
     },
   }),

@@ -14,6 +14,11 @@ function puzzleHunt(): HuntDefinition {
   return hunt([cp('first', [{ id: 'puzzle', type: 'puzzle', prompt: 'Order the colors', puzzle: { type: 'sequence', items: [{ id: 'a', label: 'red' }, { id: 'b', label: 'green' }, { id: 'c', label: 'blue' }], solution: ['b', 'a', 'c'] }, next: 'done' }, { id: 'done', type: 'complete' }])])
 }
 
+const wordPath = (row: number) => ({ path: [0, 1, 2].map(column => ({ row, column })) })
+function bonusWordSearchHunt(): HuntDefinition {
+  return hunt([cp('first', [{ id: 'puzzle', type: 'puzzle', prompt: 'Find the animals', puzzle: { type: 'word_search', grid: [['C', 'A', 'T'], ['D', 'O', 'G'], ['O', 'W', 'L']], words: ['CAT', 'DOG', 'OWL'], minimumWords: 1, bonusPerExtraWord: 2 }, next: 'done' }, { id: 'done', type: 'complete' }])])
+}
+
 test('puzzle save is durable and private, stale teammate edits are rejected, submission advances once', () => {
   const h = puzzleHunt(), original = createInitialState(h, 'team', now)
   const initial = copy(original), publicView = getPlayerView(h, original, now)
@@ -127,6 +132,95 @@ test('reset puzzle and reopening completed checkpoint never accept stale pre-res
   state = executeControl(h, state, { type: 'move_checkpoint', checkpointId: 'first', expectedRevision: state.revision, reason: 'Replay puzzle' }, now).state
   assert.equal(state.checkpoints.first.nodes.puzzle.puzzle?.revision, 3)
   assert.throws(() => executeCommand(h, state, { type: 'save_puzzle', checkpointId: 'first', nodeId: 'puzzle', expectedRevision: 0, value: { order: ['a', 'b', 'c'] } }, now), code('puzzle_conflict'))
+})
+
+test('word-search bonus slots stay capped across changed order, duplicate submissions, repeated resets and checkpoint reopening', () => {
+  const h = bonusWordSearchHunt()
+  const submit = (state: GameState, row: number) => executeCommand(h, state, { type: 'submit_puzzle', checkpointId: 'first', nodeId: 'puzzle', expectedRevision: state.checkpoints.first.nodes.puzzle.puzzle!.revision, value: wordPath(row) }, now).state
+  const activeAwards = (state: GameState) => state.ledger.filter(entry => entry.kind === 'action_points' && entry.nodeId === 'puzzle' && !state.ledger.some(refund => refund.reverses === entry.id))
+  let state = createInitialState(h, 'team', now)
+
+  state = submit(state, 0) // CAT is the required word.
+  state = submit(state, 1) // DOG occupies bonus slot 1.
+  assert.equal(state.score, 2)
+  assert.deepEqual(activeAwards(state).map(entry => entry.id), ['puzzle:first:puzzle:word-search:extra:1'])
+
+  state = executeControl(h, state, { type: 'reset_action', checkpointId: 'first', nodeId: 'puzzle', expectedRevision: state.revision, reason: 'Try another discovery order' }, now).state
+  assert.equal(state.checkpoints.first.nodes.puzzle.puzzle?.revision, 3)
+  state = submit(state, 1) // DOG is now the required word.
+  state = submit(state, 0) // CAT maps to the already-active bonus slot 1.
+  const beforeDuplicate = copy(state.ledger)
+  state = submit(state, 0)
+  assert.deepEqual(state.ledger, beforeDuplicate, 'submitting the same found word cannot add another award')
+  assert.equal(state.score, 2)
+
+  state = executeControl(h, state, { type: 'reset_action', checkpointId: 'first', nodeId: 'puzzle', expectedRevision: state.revision, reason: 'First repeated reset' }, now).state
+  const revisionAfterFirstReset = state.checkpoints.first.nodes.puzzle.puzzle!.revision
+  state = executeControl(h, state, { type: 'reset_action', checkpointId: 'first', nodeId: 'puzzle', expectedRevision: state.revision, reason: 'Second repeated reset' }, now).state
+  const revisionAfterSecondReset = state.checkpoints.first.nodes.puzzle.puzzle!.revision
+  assert.equal(revisionAfterSecondReset, revisionAfterFirstReset + 1)
+  assert.throws(() => executeCommand(h, state, { type: 'submit_puzzle', checkpointId: 'first', nodeId: 'puzzle', expectedRevision: revisionAfterFirstReset, value: wordPath(2) }, now), code('puzzle_conflict'))
+
+  state = submit(state, 1)
+  state = submit(state, 0)
+  state = submit(state, 2)
+  assert.equal(state.status, 'completed')
+  assert.equal(state.score, 24, 'two optional words can contribute at most four bonus points')
+  assert.equal(activeAwards(state).length, 2)
+  assert.equal(activeAwards(state).reduce((sum, entry) => sum + entry.amount, 0), 4)
+
+  const completedRevision = state.checkpoints.first.nodes.puzzle.puzzle!.revision
+  const immutableHistory = copy(state.ledger)
+  state = executeControl(h, state, { type: 'move_checkpoint', checkpointId: 'first', expectedRevision: state.revision, reason: 'Replay the completed checkpoint' }, later).state
+  assert.deepEqual(state.ledger.slice(0, immutableHistory.length), immutableHistory)
+  assert.equal(state.score, 0, 'reopening compensates the completed checkpoint and its active puzzle bonuses')
+  assert.ok(state.checkpoints.first.nodes.puzzle.puzzle!.revision > completedRevision)
+  assert.throws(() => executeCommand(h, state, { type: 'submit_puzzle', checkpointId: 'first', nodeId: 'puzzle', expectedRevision: completedRevision, value: wordPath(0) }, now), code('puzzle_conflict'))
+
+  state = submit(state, 0)
+  state = submit(state, 1)
+  state = submit(state, 2)
+  assert.equal(state.score, 24)
+  assert.equal(activeAwards(state).length, 2)
+  assert.equal(state.ledger.filter(entry => entry.kind === 'action_points').length, 4, 'the replay appends a new compensated ledger generation')
+})
+
+test('word-search hint rewards compensate on hint reset, remain capped on replay, and follow checkpoint compensation', () => {
+  const h = hunt()
+  h.checkpoints[0].hints = [{ id: 'hint', title: 'Animal search', cost: 3, content: { type: 'puzzle', puzzle: { type: 'word_search', grid: [['C', 'A', 'T'], ['D', 'O', 'G'], ['O', 'W', 'L']], words: ['CAT', 'DOG', 'OWL'], minimumWords: 1, bonusPerExtraWord: 2 }, reveal: { type: 'text', text: 'Look toward the gate.' } } }]
+  const submit = (state: GameState, row: number) => executeCommand(h, state, { type: 'submit_hint_puzzle', checkpointId: 'first', hintId: 'hint', expectedRevision: state.hintUsage.hint.puzzle!.revision, value: wordPath(row) }, now)
+  const activeHintAwards = (state: GameState) => state.ledger.filter(entry => entry.kind === 'action_points' && entry.hintId === 'hint' && !state.ledger.some(refund => refund.reverses === entry.id))
+  let state = createInitialState(h, 'team', now)
+  state = executeCommand(h, state, { type: 'use_hint', checkpointId: 'first', hintId: 'hint' }, now).state
+  state = submit(state, 0).state
+  state = submit(state, 1).state
+  assert.equal(state.score, -1)
+  const firstGeneration = copy(state.ledger)
+
+  state = executeControl(h, state, { type: 'reset_hint', checkpointId: 'first', hintId: 'hint', expectedRevision: state.revision, reason: 'Reset the puzzle hint' }, now).state
+  assert.deepEqual(state.ledger.slice(0, firstGeneration.length), firstGeneration)
+  assert.equal(state.score, 0)
+  state = executeCommand(h, state, { type: 'use_hint', checkpointId: 'first', hintId: 'hint' }, now).state
+  assert.equal(state.hintUsage.hint.puzzle?.revision, 3)
+  state = submit(state, 1).state
+  state = submit(state, 0).state
+  const solved = submit(state, 2)
+  state = solved.state
+  assert.equal(state.score, 1)
+  assert.equal(activeHintAwards(state).length, 2)
+  const duplicate = executeCommand(h, state, { type: 'submit_hint_puzzle', checkpointId: 'first', hintId: 'hint', expectedRevision: 5, value: wordPath(2) }, now)
+  assert.equal(duplicate.feedback.status, 'already_applied')
+  assert.deepEqual(duplicate.state.ledger, state.ledger)
+
+  state = solve(h, state, 'first')
+  assert.equal(state.score, 21)
+  state = executeControl(h, state, { type: 'move_checkpoint', checkpointId: 'first', expectedRevision: state.revision, reason: 'Replay the main checkpoint' }, later).state
+  assert.equal(state.score, -3, 'checkpoint reopening compensates action-point rewards while preserving the hint charge')
+  assert.equal(activeHintAwards(state).length, 0)
+  state = executeControl(h, state, { type: 'reset_hint', checkpointId: 'first', hintId: 'hint', expectedRevision: state.revision, reason: 'Reset after checkpoint replay' }, later).state
+  assert.equal(state.score, 0)
+  assert.equal(activeHintAwards(state).length, 0)
+  assert.equal(state.hintPuzzleRevisions?.hint, 7)
 })
 
 test('puzzle hint reset refunds, keeps generation monotonic and hides prior reward until solved again', () => {
