@@ -4,7 +4,7 @@ import { uploadMedia } from '../../mediaUpload';
 export type HuntStatus = 'ready' | 'live' | 'paused' | 'ended' | 'archived';
 export interface PublishedHunt { id: string; title: string; version: number; status: HuntStatus; definition: HuntDefinition }
 export interface Draft { id: string; definition: HuntDefinition; revision: number; updatedAt: string; issues: ValidationIssue[] }
-export interface OrganizerTeam { id: string; name: string; huntId: string; version: number; isPreview: boolean; view: PlayerView; lastActivity: string; ledger: ScoreEntry[]; events: GameEvent[]; checkpoints: GameState['checkpoints'] }
+export interface OrganizerTeam { id: string; name: string; huntId: string; version: number; isPreview: boolean; view: PlayerView; lastActivity: string; ledger: ScoreEntry[]; events: GameEvent[]; checkpoints: GameState['checkpoints']; definition: HuntDefinition }
 export interface HelpRequest { id: string; team_id: string; team_name: string; hunt_id: string; checkpoint_id: string; node_id: string; kind: string; message: string; status: 'open' | 'resolved'; response?: string; created_at: string }
 export interface PhotoRequest { id: string; team_id: string; checkpoint_id: string; node_id: string; created_at: string; team_name: string; hunt_id: string; referenceImages: string[] }
 export interface Dashboard { hunts: PublishedHunt[]; drafts: Draft[]; teams: OrganizerTeam[]; help: HelpRequest[]; photos: PhotoRequest[]; example: HuntDefinition; templates?: { id: string; title: string; description: string; definition: HuntDefinition }[] }

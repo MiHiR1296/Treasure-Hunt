@@ -7,7 +7,7 @@ const origin = 'http://127.0.0.1:3100';
 const huntId = `browser-${randomUUID()}`;
 const title = `Browser adventure ${huntId.slice(-6)}`;
 const definition: HuntDefinition = {
-  schemaVersion: 1, id: huntId, version: 1, title,
+  schemaVersion: 1, id: huntId, version: 1, title, description: 'Two quick rounds.\nRead one task at a time.',
   dudQrs: [{ token: 'coffee-stash', message: 'Only coffee here. Keep looking!' }],
   checkpoints: [
     { id: 'riddle', title: 'The First Clue', basePoints: 20,
@@ -40,6 +40,8 @@ async function join(page: Page, name: string, mode: 'create' | 'join') {
   await page.getByLabel('Your name', { exact: true }).fill(mode === 'create' ? 'Alice' : 'Bob');
   await page.getByRole('button', { name: mode === 'create' ? 'Start our adventure' : 'Join the adventure' }).click();
   await expect(page.getByRole('heading', { name: 'The First Clue' })).toBeVisible();
+  await expect(page.getByText(/Two quick rounds\.\s*Read one task at a time\./)).toBeVisible();
+  await expect(page.getByText('Read this clue', { exact: true })).toBeVisible();
 }
 
 test.beforeAll(async ({ request }) => {

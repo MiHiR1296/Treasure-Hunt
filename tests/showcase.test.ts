@@ -84,15 +84,39 @@ test('alternate checkpoint genuinely supports GPS plus code and a live fallback 
 })
 
 test('all starter templates validate and independent instances regenerate QR secrets without mutating the template', () => {
-  assert.deepEqual(huntTemplates.map(item => item.id), ['simple-qr', 'puzzle-trail', 'landmark'])
+  assert.deepEqual(huntTemplates.map(item => item.id), ['frankie-code-hunt', 'simple-qr', 'puzzle-trail', 'landmark'])
   for (const template of huntTemplates) assert.deepEqual(validateHunt(template.definition), [], template.id)
+  const frankie = huntTemplates.find(template => template.id === 'frankie-code-hunt')!
+  assert.equal(frankie.definition.checkpoints.length, 5)
+  assert.equal(frankie.definition.settings?.ranking, 'points_time')
+  assert.ok(frankie.definition.description?.includes('\n\n'))
+  assert.ok(frankie.definition.checkpoints.every(checkpoint => checkpoint.hints.length > 0 && checkpoint.timeBonus))
   const one = instantiateTemplate('simple-qr'), two = instantiateTemplate('simple-qr')
+  const simple = huntTemplates.find(template => template.id === 'simple-qr')!
   assert.notEqual(one.id, two.id)
   const tokens = (definition: HuntDefinition) => definition.checkpoints.flatMap(cp => cp.flow.nodes.flatMap(node => node.type === 'verify_qr' ? [node.token] : []))
-  assert.notDeepEqual(tokens(one), tokens(two)); assert.notDeepEqual(tokens(one), tokens(huntTemplates[0].definition))
+  assert.notDeepEqual(tokens(one), tokens(two)); assert.notDeepEqual(tokens(one), tokens(simple.definition))
   one.checkpoints[0].title = 'Different'
-  assert.notEqual(huntTemplates[0].definition.checkpoints[0].title, 'Different')
+  assert.notEqual(simple.definition.checkpoints[0].title, 'Different')
   assert.deepEqual(validateHunt(one), []); assert.equal(two.version, 1)
+})
+
+test('Frankie code hunt plays through all five rounds with server-checked answers, puzzle and speed scoring', () => {
+  const hunt = huntTemplates.find(template => template.id === 'frankie-code-hunt')!.definition
+  const game = runner(hunt)
+  game.next('shared-wrap', 'brief')
+  assert.equal(game.send({ type: 'verify', checkpointId: 'shared-wrap', nodeId: 'answer', value: 'bread' }).status, 'accepted')
+  game.next('cold-case', 'brief')
+  game.send({ type: 'verify', checkpointId: 'cold-case', nodeId: 'answer', value: 'fridge' })
+  game.next('spice-code', 'brief')
+  game.send({ type: 'verify', checkpointId: 'spice-code', nodeId: 'answer', value: 'sauce' })
+  game.send({ type: 'submit_puzzle', checkpointId: 'word-grid', nodeId: 'puzzle', expectedRevision: 0, value: { path: Array.from({ length: 6 }, (_, index) => ({ row: index, column: index })) } })
+  game.next('final-order', 'brief')
+  game.send({ type: 'verify', checkpointId: 'final-order', nodeId: 'answer', value: 'frankie' })
+  assert.equal(game.state.status, 'completed')
+  assert.equal(game.state.score, 125)
+  assert.equal(game.state.ledger.filter(entry => entry.kind === 'checkpoint_completed').length, 5)
+  assert.equal(game.state.ledger.filter(entry => entry.kind === 'time_bonus').length, 5)
 })
 
 test('showcase vector assets exist locally and require no image or vision service', async () => {
