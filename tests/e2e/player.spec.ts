@@ -40,8 +40,8 @@ async function join(page: Page, name: string, mode: 'create' | 'join') {
   await page.getByLabel('Your name', { exact: true }).fill(mode === 'create' ? 'Alice' : 'Bob');
   await page.getByRole('button', { name: mode === 'create' ? 'Start our adventure' : 'Join the adventure' }).click();
   await expect(page.getByRole('heading', { name: 'The First Clue' })).toBeVisible();
-  await expect(page.getByText(/Two quick rounds\.\s*Read one task at a time\./)).toBeVisible();
-  await expect(page.getByText('Read this clue', { exact: true })).toBeVisible();
+  await expect(page.getByText('Find the explorer’s direction tool.', { exact: true })).toBeVisible();
+  await expect(page.getByText('Read this clue', { exact: true })).toHaveCount(0);
 }
 
 test.beforeAll(async ({ request }) => {

@@ -9,17 +9,21 @@ const view = {
   teamName: 'Wrap Raiders', members: ['Mira', 'Dev'], isPreview: false, eventStatus: 'live' as const,
 };
 
-test('Frankie player shows a short visual task card and formatted hunt instructions without leaking answers', async ({ page }, testInfo) => {
+test('Frankie player shows one direct question with dot progress and no repeated interface labels', async ({ page }, testInfo) => {
   await page.route('**/api/v2/session', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ view }) }));
   await page.route('**/api/v2/hunts', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ hunts: [{ id: definition.id, title: definition.title }] }) }));
   await page.route('**/api/v2/leaderboard**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ visible: true, entries: [] }) }));
   await page.goto(`/v2?hunt=${definition.id}`);
 
-  await expect(page.getByRole('heading', { name: 'Round 1 · The shared wrap' })).toBeVisible();
-  await expect(page.getByText(/Read this clue/i)).toBeVisible();
-  await expect(page.getByText(/5 quick rounds\. Work as a team/).first()).toBeVisible();
-  await expect(page.getByText('YOUR TASK ①', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Continue', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'What wraps every Frankie?' })).toBeVisible();
+  await expect(page.getByRole('list', { name: 'Hunt progress' })).toBeVisible();
+  await expect(page.getByRole('list', { name: 'Hunt progress' }).locator('[aria-current="step"]')).toHaveCount(1);
+  await expect(page.getByText(/every Frankie needs the same outer layer/)).toBeVisible();
+  await expect(page.getByLabel('Your answer')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Check answer', exact: true })).toBeVisible();
+  await expect(page.getByText('Checkpoint 1', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Read this clue', { exact: true })).toHaveCount(0);
+  await expect(page.getByText(/^Round 1/)).toHaveCount(0);
   await expect(page.getByText(/Accepted answers:/)).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
   if (testInfo.project.name === 'android-chrome') await page.screenshot({ path: '.data/verification/frankie-code-hunt-player.png', fullPage: true, animations: 'disabled' });
@@ -51,9 +55,9 @@ test('organizer can open the exact pinned route, see private solutions, and brow
   await page.getByRole('button', { name: 'Design', exact: true }).click();
   await page.getByRole('button', { name: /Frankie code hunt/ }).click();
   await expect(page.getByRole('button', { name: 'Previous step', exact: true })).toBeDisabled();
-  await page.getByRole('button', { name: 'Next step', exact: true }).click();
   await expect(page.getByLabel('Accepted answers — one per line', { exact: true })).toHaveValue('bread\nroti\nwrap');
+  await page.getByRole('button', { name: 'Next step', exact: true }).click();
   await page.getByRole('button', { name: 'Previous step', exact: true }).click();
-  await expect(page.getByLabel('Clue or instructions', { exact: true })).toHaveValue(/YOUR TASK ①/);
+  await expect(page.getByLabel('Accepted answers — one per line', { exact: true })).toHaveValue('bread\nroti\nwrap');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
 });

@@ -104,14 +104,10 @@ test('all starter templates validate and independent instances regenerate QR sec
 test('Frankie code hunt plays through all five rounds with server-checked answers, puzzle and speed scoring', () => {
   const hunt = huntTemplates.find(template => template.id === 'frankie-code-hunt')!.definition
   const game = runner(hunt)
-  game.next('shared-wrap', 'brief')
   assert.equal(game.send({ type: 'verify', checkpointId: 'shared-wrap', nodeId: 'answer', value: 'bread' }).status, 'accepted')
-  game.next('cold-case', 'brief')
   game.send({ type: 'verify', checkpointId: 'cold-case', nodeId: 'answer', value: 'fridge' })
-  game.next('spice-code', 'brief')
   game.send({ type: 'verify', checkpointId: 'spice-code', nodeId: 'answer', value: 'sauce' })
   game.send({ type: 'submit_puzzle', checkpointId: 'word-grid', nodeId: 'puzzle', expectedRevision: 0, value: { path: Array.from({ length: 6 }, (_, index) => ({ row: index, column: index })) } })
-  game.next('final-order', 'brief')
   game.send({ type: 'verify', checkpointId: 'final-order', nodeId: 'answer', value: 'frankie' })
   assert.equal(game.state.status, 'completed')
   assert.equal(game.state.score, 125)

@@ -15,11 +15,10 @@ export type SendCommand = (command: GameCommand) => Promise<Feedback | null>;
 export const primaryButton = 'hunt-action min-h-12 w-full rounded-xl bg-[var(--hunt-primary,#065f46)] px-5 py-3 font-semibold text-[var(--hunt-on-primary,#ffffff)] transition-shadow motion-reduce:transition-none hover:shadow-md disabled:cursor-wait disabled:opacity-50';
 export const inputStyle = 'mt-2 min-h-12 w-full rounded-xl border border-stone-300 bg-white px-4 py-3 text-base text-stone-900 focus:border-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-100';
 
-function TaskCopy({ text, kind }: { text: string; kind: 'clue' | 'task' }) {
+function TaskCopy({ text }: { text: string }) {
   const blocks = text.split(/\n\s*\n/).map(block => block.trim()).filter(Boolean);
-  return <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4 sm:p-5">
-    <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-amber-900"><span aria-hidden="true">{kind === 'clue' ? '👀' : '✦'}</span>{kind === 'clue' ? 'Read this clue' : 'Your task'}</p>
-    <div className="mt-3 space-y-3 text-lg leading-relaxed text-stone-800">{blocks.map((block, index) => <p key={index} className="whitespace-pre-line">{block}</p>)}</div>
+  return <div className="space-y-3 text-lg leading-relaxed text-stone-700">
+    {blocks.map((block, index) => <p key={index} className="whitespace-pre-line">{block}</p>)}
   </div>;
 }
 
@@ -62,7 +61,7 @@ export default function CurrentTask({ teamId, checkpointId, node, disabled, send
     }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
   };
   return <div className="space-y-6">
-    {node.type === 'show_text' ? <TaskCopy text={node.text} kind="clue" /> : 'prompt' in node ? <TaskCopy text={node.prompt} kind="task" /> : null}
+    {node.type === 'show_text' ? <TaskCopy text={node.text} /> : 'prompt' in node ? <TaskCopy text={node.prompt} /> : null}
     {node.type === 'show_media' && <MediaContent content={node.content} />}
     {(node.type === 'show_text' || node.type === 'show_media') && <button type="button" disabled={disabled} onClick={() => void send({ type: 'continue', ...address })} className={primaryButton}>Continue</button>}
     {node.type === 'verify_qr' && <div className="hunt-qr-actions"><QRScanner onScanSuccess={async (value) => {
