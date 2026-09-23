@@ -22,12 +22,12 @@ export function usePuzzleSubmission(onChange: PuzzlePlayerProps['onChange']) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const submit = async (value: unknown) => {
-    if (sending.current) return
+    if (sending.current) return false
     sending.current = true
     setBusy(true)
     setError('')
-    try { await onChange(value) }
-    catch { setError('This move could not be saved. Check your connection and use Retry to recover it.') }
+    try { await onChange(value); return true }
+    catch { setError('This move could not be saved. Check your connection and use Retry to recover it.'); return false }
     finally { sending.current = false; setBusy(false) }
   }
   return { submit, busy, error }
