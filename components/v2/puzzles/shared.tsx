@@ -9,6 +9,8 @@ export interface PuzzlePlayerProps {
   state: PuzzleState
   disabled: boolean
   draftKey?: string
+  /** Stable across puzzle saves; scoped to one team and main or hint puzzle. */
+  draftScope?: string
   feedback?: ActionNotice | null
   clearFeedback?: () => void
   onChange: (submission: unknown) => Promise<void>
@@ -34,5 +36,5 @@ export function usePuzzleSubmission(onChange: PuzzlePlayerProps['onChange']) {
 }
 
 export function PuzzleSaveMessage({ busy, error }: { busy: boolean; error: string }) {
-  return <p role={error ? 'alert' : 'status'} className={`mt-3 text-sm ${error ? 'text-amber-900' : 'text-stone-600'}`}>{error || (busy ? 'Saving your move…' : 'Your team shares this puzzle. Moves are checked and saved as you play.')}</p>
+  return <p role={error ? 'alert' : 'status'} className={`mt-3 text-sm ${error ? 'text-amber-900' : 'text-stone-600'}`}>{error || (busy ? 'Saving your move…' : 'Your team shares this puzzle. Moves are stored as you play; the server completes it only when the whole puzzle is solved.')}</p>
 }

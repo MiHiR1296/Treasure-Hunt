@@ -78,7 +78,7 @@ export default function CurrentTask({ teamId, checkpointId, node, disabled, send
     </form>}
     {node.type === 'verify_gps' && <div className="space-y-3"><p className="text-sm leading-relaxed text-stone-600">Your approximate location is checked only when you tap the button.</p><button type="button" disabled={disabled || locating} onClick={locate} className={primaryButton}>{locating ? 'Checking location…' : 'I’m here — check location'}</button>{locationMessage && <p role="status" className="text-sm leading-relaxed text-stone-600">{locationMessage}</p>}</div>}
     {node.type === 'choose_path' && <div className="space-y-3">{node.choices.map(choice => <button type="button" key={choice.id} disabled={disabled} className={primaryButton} onClick={() => void send({ type: 'choose_path', ...address, choiceId: choice.id })}>{choice.label}</button>)}</div>}
-    {node.type === 'puzzle' && <PuzzlePlayer definition={node.puzzle} state={node.progress.state} feedback={notice} clearFeedback={clearNotice} draftKey={`${teamId}:${checkpointId}:${node.id}:puzzle:${node.progress.revision}`} disabled={disabled} onChange={async value => {
+    {node.type === 'puzzle' && <PuzzlePlayer definition={node.puzzle} state={node.progress.state} feedback={notice} clearFeedback={clearNotice} draftKey={`${teamId}:${checkpointId}:${node.id}:puzzle:${node.progress.revision}`} draftScope={`${teamId}:${checkpointId}:${node.id}:main-puzzle`} disabled={disabled} onChange={async value => {
       const result = await send({ type: 'submit_puzzle', ...address, expectedRevision: node.progress.revision, value });
       if (!result) throw new Error('Puzzle move needs confirmation.');
     }} />}
