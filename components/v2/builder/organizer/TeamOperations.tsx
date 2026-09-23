@@ -3,7 +3,7 @@
 /* eslint-disable @next/next/no-img-element -- Private review photographs require the organizer cookie. */
 
 import { useEffect, useState } from 'react';
-import type { OrganizerControl } from '@/lib/engine/types';
+import type { FlowNode, HuntDefinition, OrganizerControl } from '@/lib/engine/types';
 import { parseControl } from '@/lib/engine/validation';
 import { actionClass, buttonClass, Field, inputClass, NumberField, TextField } from '../Fields';
 import { nodeLabels } from '../model';
@@ -25,6 +25,57 @@ function History({ team }: { team: OrganizerTeam }) {
       <div><h4 className="font-semibold">Recent activity</h4><ol className="mt-3 space-y-3 text-sm">{team.events.slice(-20).reverse().map(entry => <li key={entry.id} className={`rounded-lg border p-3 ${entry.reason ? 'border-amber-200 bg-amber-50' : 'border-slate-200'}`}><p className="font-semibold">{eventLabels[entry.type] || entry.type}</p>{entry.checkpointId && <p className="mt-1 text-slate-600">{checkpointTitle(entry.checkpointId)}</p>}{entry.reason && <p className="mt-2 whitespace-pre-wrap"><strong>Reason:</strong> {entry.reason}</p>}<time dateTime={entry.at} className="mt-2 block text-xs text-slate-500">{new Date(entry.at).toLocaleString()}</time></li>)}</ol></div>
       <p className="text-xs text-slate-500">Showing the latest 20 score entries and events. Totals include the full ledger.</p>
     </div>
+  </details>;
+}
+
+function privateSolution(node: FlowNode): string | null {
+  switch (node.type) {
+    case 'verify_answer': return `Accepted answers: ${node.answers.filter(Boolean).join(' · ')}`;
+    case 'verify_code': return `Correct code: ${node.code}`;
+    case 'verify_qr': return node.backupCode ? `Printed backup: ${node.backupCode}` : 'Scan the printed QR material.';
+    case 'puzzle': {
+      const puzzle = node.puzzle;
+      if (puzzle.type === 'text') return `Accepted answers: ${puzzle.answers.join(' · ')}`;
+      if (puzzle.type === 'crossword') return `Crossword answers: ${puzzle.entries.map(entry => `${entry.id}: ${entry.answer}`).join(' · ')}`;
+      if (puzzle.type === 'multiple_choice') return `Correct choice: ${puzzle.options.find(option => option.id === puzzle.correctOptionId)?.label || puzzle.correctOptionId}`;
+      if (puzzle.type === 'matching') return `Correct pairs: ${puzzle.solution.map(pair => `${puzzle.left.find(item => item.id === pair.leftId)?.label || pair.leftId} → ${puzzle.right.find(item => item.id === pair.rightId)?.label || pair.rightId}`).join(' · ')}`;
+      if (puzzle.type === 'sequence') return `Correct order: ${puzzle.solution.map(id => puzzle.items.find(item => item.id === id)?.label || id).join(' → ')}`;
+      if (puzzle.type === 'word_search') return `Find ${puzzle.minimumWords ?? puzzle.words.length} to continue: ${puzzle.words.join(' · ')}${puzzle.bonusPerExtraWord ? ` · +${puzzle.bonusPerExtraWord} points for each extra word` : ''}`;
+      if (puzzle.type === 'jigsaw') return `Correct tile order, row by row: ${puzzle.solution.join(' → ')}`;
+      if (puzzle.type === 'rotation') return `Correct rotations: ${puzzle.tiles.map(tile => `${tile.id}: ${tile.correctRotation}°`).join(' · ')}`;
+      return `Puzzle type: ${puzzle.type}. Open Design if you need to inspect its visual solution.`;
+    }
+    default: return null;
+  }
+}
+
+function stepCopy(node: FlowNode): string | null {
+  if (node.type === 'show_text') return node.text;
+  if ('prompt' in node) return node.prompt;
+  if (node.type === 'show_media') return `Show ${node.content.type} content to the team.`;
+  if (node.type === 'set_variable') return `Remember ${node.key} = ${String(node.value)}.`;
+  if (node.type === 'add_points') return `${node.label}: ${node.amount > 0 ? '+' : ''}${node.amount} points.`;
+  if (node.type === 'complete') return 'Complete this checkpoint and award its points.';
+  return null;
+}
+
+function TeamRouteAndSolutions({ team, definition }: { team: OrganizerTeam; definition?: HuntDefinition }) {
+  if (!definition) return null;
+  return <details className="mt-4 rounded-lg border border-teal-200 bg-teal-50/40 p-3">
+    <summary className="cursor-pointer py-2 text-sm font-semibold text-teal-900">Route & private solutions</summary>
+    <p className="mt-2 text-xs leading-5 text-slate-600">Organizer-only reference for this team’s pinned hunt version. The active step is marked below; answers never go to player devices.</p>
+    <ol className="mt-4 space-y-3">{definition.checkpoints.map((checkpoint, checkpointIndex) => {
+      const progress = team.checkpoints[checkpoint.id];
+      const isCurrent = team.view.checkpoint?.id === checkpoint.id;
+      return <li key={checkpoint.id}><details open={isCurrent} className="rounded-lg border border-slate-200 bg-white p-3"><summary className="cursor-pointer"><span className="font-semibold">{checkpointIndex + 1}. {checkpoint.title}</span><span className="ml-2 text-xs capitalize text-slate-600">· {progress?.status || 'not started'}</span></summary>
+        <ol className="mt-3 space-y-3 border-l-2 border-slate-100 pl-3">{checkpoint.flow.nodes.map((node, index) => {
+          const isActive = team.view.checkpoint?.id === checkpoint.id && team.view.node?.id === node.id;
+          const solution = privateSolution(node);
+          const copy = stepCopy(node);
+          return <li key={node.id} className={isActive ? 'rounded bg-amber-50 p-2 ring-1 ring-amber-300' : 'py-1'}><p className="text-sm"><span className="mr-2 font-mono text-xs text-slate-500">{index + 1}</span><strong>{nodeLabels[node.type] || node.type}</strong>{isActive && <span className="ml-2 text-xs font-semibold text-amber-800">TEAM IS HERE</span>}</p>{copy && <p className="mt-1 whitespace-pre-line text-xs leading-5 text-slate-600">{copy}</p>}{solution && <p className="mt-1 break-words rounded bg-teal-50 px-2 py-1 text-xs font-semibold leading-5 text-teal-950">{solution}</p>}</li>;
+        })}</ol>
+      </details></li>;
+    })}</ol>
   </details>;
 }
 
@@ -134,6 +185,7 @@ export default function TeamOperations(props: OperationProps) {
       {team.view.node && <p className="mt-3 whitespace-pre-wrap rounded-lg bg-slate-50 p-3 text-sm leading-6">{team.view.node.type === 'show_text' ? team.view.node.text : 'prompt' in team.view.node ? team.view.node.prompt : `Viewing ${team.view.node.content.type} content`}</p>}
       <p className="mt-3 text-xs text-slate-500">Last activity: {new Date(team.lastActivity).toLocaleString()}</p>
       <details className="mt-4 rounded-lg border border-slate-200 p-3"><summary className="cursor-pointer py-2 text-sm font-semibold">Checkpoint progression</summary><ol className="mt-3 space-y-3 text-sm">{team.view.checkpoints?.map(checkpoint => { const progress = team.checkpoints[checkpoint.id]; const nodes = Object.values(progress?.nodes || {}); const attempts = nodes.reduce((sum, node) => sum + node.attempts, 0); return <li key={checkpoint.id}><div className="flex justify-between gap-3"><span>{checkpoint.title}{!checkpoint.required ? ' (optional)' : ''}</span><span className="capitalize text-slate-600">{checkpoint.status}</span></div>{nodes.length > 0 && <p className="mt-1 text-xs text-slate-500">{nodes.filter(node => node.status === 'completed' || node.status === 'skipped').length} steps passed · {attempts} verification attempts</p>}</li>; })}</ol></details>
+      <TeamRouteAndSolutions team={team} definition={team.definition} />
       {dashboard.photos.filter(photo => photo.team_id === team.id).map(photo => <div key={photo.id} className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3"><p className="mb-3 font-semibold">Photo awaiting review</p><img src={`/api/v2/media/${photo.id}`} alt={`Checkpoint photograph submitted by ${team.name}`} className="max-h-80 w-full rounded-lg object-contain" /><a className="mt-2 inline-flex min-h-11 items-center text-sm font-semibold text-teal-800 underline" href={`/api/v2/media/${photo.id}`} target="_blank" rel="noreferrer">Open full image</a>{photo.referenceImages?.length > 0 && <div className="mt-3 space-y-3 border-t border-amber-200 pt-3"><p className="text-sm font-semibold">Expected landmark references</p><p className="text-xs text-slate-600">Compare with the references from this team’s hunt version.</p><div className="grid gap-3 sm:grid-cols-2">{photo.referenceImages.map((url, index) => <a key={`${url}:${index}`} href={url} target="_blank" rel="noreferrer" className="rounded-lg border border-amber-200 bg-white p-2"><img src={url} alt={`Expected landmark reference ${index + 1} for ${team.name}`} className="max-h-56 w-full object-contain" /><span className="mt-2 block text-xs font-semibold text-teal-800 underline">Open reference {index + 1}</span></a>)}</div></div>}<p className="mt-3 text-xs text-slate-600">Use Approve current step or Ask for another photo below.</p></div>)}
       <TeamControls key={`${team.id}:${team.view.checkpoint?.id}:${team.view.node?.id}`} team={team} pending={pending} run={run} refresh={refresh} notify={notify} />
       <History team={team} />

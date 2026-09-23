@@ -25,7 +25,13 @@ test('organizer builds branching checkpoints without JSON, recovers drafts, prev
   await page.getByLabel('Password', { exact: true }).fill('browser-test-password-only');
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await page.getByRole('button', { name: 'Design', exact: true }).click();
+  await expect(page.getByRole('button', { name: /Frankie challenge/ })).toBeVisible();
   await page.getByRole('button', { name: 'New hunt', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Previous step', exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: 'Next step', exact: true }).click();
+  await expect(page.getByLabel('Accepted answers — one per line', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Previous step', exact: true }).click();
+  await expect(page.getByLabel('Clue or instructions', { exact: true })).toBeVisible();
   await page.getByLabel('Hunt title', { exact: true }).fill(title);
   await page.getByLabel('Unique hunt ID', { exact: true }).fill(id);
   await page.getByLabel('Checkpoint title', { exact: true }).fill('The first clue');
@@ -158,7 +164,7 @@ test('printing isolates the selected event and keeps each QR on a readable page'
   expect(printedText).toContain('Printed checkpoint 1');
   expect(printedText).toContain('Printed checkpoint 2');
   expect(printedText).toContain('Mystery marker');
-  expect(printedText).toContain('Backup code: PLAYER-RECOVERY-1');
+  expect(printedText).toContain('Printed backup: PLAYER-RECOVERY-1');
   await expect(sheet.locator('.hunt-print-backup')).toHaveCount(1);
   await expect(sheet.locator('.hunt-print-card').filter({ has: page.getByRole('heading', { name: 'Printed checkpoint 2', exact: true }) }).locator('.hunt-print-backup')).toHaveCount(0);
   for (const hidden of ['Unrelated event must not print', 'Organizer console', 'PRIVATE-PRINT-ANSWER', 'Decoy 1', 'A private decoy message.']) expect(printedText).not.toContain(hidden);
@@ -196,10 +202,13 @@ test('organizer resolves help, enables recovery, and retries a score correction 
   expect((await post('/api/v2/help', { teamId: view.teamId, requestId: randomUUID(), kind: 'gps', message: 'Our location permission is blocked.', checkpointId: 'landmark', nodeId: 'gps' })).ok()).toBeTruthy();
   await page.goto('/v2/admin');
   await page.getByRole('button', { name: /^Live control/ }).click();
+  const team = page.locator('article').filter({ has: page.getByRole('heading', { name: teamName, exact: true }) });
+  await team.getByText('Route & private solutions', { exact: true }).click();
+  await expect(team.getByText('TEAM IS HERE', { exact: true })).toBeVisible();
+  await expect(team.getByText('Correct code: BRIDGE', { exact: true })).toBeVisible();
   await page.getByLabel(`Reply to ${teamName}`, { exact: true }).fill('Use the bridge code BRIDGE.');
   await page.getByRole('button', { name: 'Reply & resolve', exact: true }).click();
   await expect(page.getByText(`Reply sent to ${teamName}; the request is resolved.`, { exact: true })).toBeVisible();
-  const team = page.locator('article').filter({ has: page.getByRole('heading', { name: teamName, exact: true }) });
   await team.getByLabel('Organizer action', { exact: true }).selectOption('enable_fallback');
   await team.getByLabel('Reason for organizer action', { exact: true }).fill('GPS permission failed at the landmark.');
   await team.getByRole('button', { name: 'Change recovery route availability', exact: true }).click();

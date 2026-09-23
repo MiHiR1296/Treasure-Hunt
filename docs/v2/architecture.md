@@ -1,6 +1,6 @@
 # Architecture
 
-V2 has one authoritative game engine. A private published `HuntDefinition` describes the experience; a persisted `GameState` describes a team's progress; a redacted `PlayerView` describes what the participant may see now. React renders that view and submits commands. It never writes points, answers or checkpoint state directly to a database.
+V2 has one authoritative game engine. A private published `HuntDefinition` describes the experience; a persisted `GameState` describes a team's progress; a redacted `PlayerView` describes what the participant may see now. React renders that view and submits commands. It never writes points, answers or checkpoint state directly to a database. Configured completion messages are withheld from `PlayerView` until the team has completed the required hunt objective.
 
 ## Boundaries
 
@@ -69,11 +69,11 @@ Puzzle saves carry an additional **per-puzzle revision**. An outdated device can
 
 ## Hints and scoring
 
-One hint engine owns IDs, costs, usage and availability. Content types are text, image, audio/video, map, camera/direction guidance and puzzle. A puzzle hint uses the same puzzle registry and player renderer as a challenge, but reveals its reward only after successful submission. Private solution/configuration and an unsolved reward are excluded from `PlayerView`.
+One hint engine owns IDs, costs, usage and availability. Content types are text, image, audio/video, map, camera/direction guidance and puzzle. Public hint metadata includes each title, cost and availability so players can choose the intended hint before purchase; the content stays private until purchase. A puzzle hint uses the same puzzle registry and player renderer as a challenge, but reveals its reward only after successful submission. Private solution/configuration and an unsolved reward are excluded from `PlayerView`.
 
 Availability can require prior hints, elapsed seconds since checkpoint start, or completion of a particular node such as GPS. Presentation order is an array order; purchase identity never comes from a hint count.
 
-The score equals the sum of ledger entries. Entries identify checkpoint and optional action/hint, amount, time, reason and, for compensation, the reversed entry. Current causes include base completion, hint charge, wrong-attempt penalty, skip penalty, time bonus, configured action points, decoy discovery, organizer adjustment and refund. Negative interim totals are allowed; completion adds the full base value without subtracting hints again.
+The score equals the sum of ledger entries. Entries identify checkpoint and optional action/hint, amount, time, reason and, for compensation, the reversed entry. Current causes include base completion, hint charge, wrong-attempt penalty, skip penalty, time bonus, configured action points, decoy discovery, organizer adjustment and refund. Negative interim totals are allowed; completion adds the full base value without subtracting hints again. Incremental puzzle bonuses use stable ordinal reward slots, so changing discovery order after a reset cannot exceed the configured maximum; a compensated checkpoint replay appends a new ledger generation instead of rewriting history.
 
 Organizer adjustments append entries. Reset hint refunds its active charge. Reopening a completed checkpoint compensates its completion/time/action bonuses and skip penalty, then permits a fresh playthrough; hint charges and wrong attempts remain part of history. A simple action reset cannot farm an automatic bonus.
 

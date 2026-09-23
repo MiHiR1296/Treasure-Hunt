@@ -64,8 +64,8 @@ export type InteractiveNode = (
   | { id: string; type: 'show_text'; text: string; next: string }
   | { id: string; type: 'show_media'; content: DisplayContent; next: string }
   | { id: string; type: 'verify_qr'; prompt: string; token: string; backupCode?: string; next: string }
-  | { id: string; type: 'verify_code'; prompt: string; code: string; caseSensitive?: boolean; next: string }
-  | { id: string; type: 'verify_answer'; prompt: string; answers: string[]; caseSensitive?: boolean; next: string }
+  | { id: string; type: 'verify_code'; prompt: string; code: string; caseSensitive?: boolean; recapAnswer?: string; next: string }
+  | { id: string; type: 'verify_answer'; prompt: string; answers: string[]; caseSensitive?: boolean; recapAnswer?: string; next: string }
   | ({ id: string; type: 'verify_gps'; prompt: string; next: string } & GPSRegion)
   | { id: string; type: 'choose_path'; prompt: string; choices: { id: string; label: string; next: string }[] }
   | { id: string; type: 'puzzle'; prompt: string; puzzle: PuzzleDefinition; next: string }
@@ -126,6 +126,8 @@ export interface NodeProgress {
   pendingPhotoId?: string
   photoStatus?: 'pending' | 'rejected' | 'approved'
   reviewMessage?: string
+  /** A safe player recap. Never store raw QR tokens or expected answers here. */
+  publicResponse?: string
 }
 export interface CheckpointProgress {
   status: 'locked' | 'available' | 'active' | 'completed' | 'skipped'
@@ -209,6 +211,12 @@ export interface PlayerCheckpoint {
   group?: string
   location?: MapLocation
 }
+export interface PlayerStageReview {
+  id: string
+  title: string
+  status: 'active' | 'completed' | 'skipped'
+  steps: { id: string; text: string; response?: string }[]
+}
 export interface PlayerView {
   hunt: { id: string; title: string; description?: string; settings?: HuntSettings; theme?: HuntTheme }
   teamId: string
@@ -220,6 +228,8 @@ export interface PlayerView {
   node: PlayerNode | null
   hints: PlayerHint[]
   checkpoints?: PlayerCheckpoint[]
+  /** Only stages and steps this team has already reached. */
+  stages?: PlayerStageReview[]
   summary?: { startedAt: string; completedAt?: string; elapsedSeconds: number; hintsUsed: number; checkpoints: { id: string; title: string; status: CheckpointProgress['status']; points: number }[] }
 }
 export interface Feedback { status: 'accepted' | 'rejected' | 'dud' | 'already_applied'; message: string; scannerShouldStop: boolean }

@@ -58,8 +58,13 @@ export const puzzleRegistry: Readonly<Record<PuzzleType, RegistryEntry>> = Objec
   }),
   word_search: createPuzzleModule('word_search', {
     initial: () => ({ type: 'word_search', foundWords: [] }),
-    public: definition => ({ type: 'word_search', grid: definition.grid.map(row => row.map(letter => letter.toUpperCase())), words: definition.words.map(word => word.toUpperCase()) }),
+    public: definition => ({ type: 'word_search', grid: definition.grid.map(row => row.map(letter => letter.toUpperCase())), words: definition.words.map(word => word.toUpperCase()), ...(definition.minimumWords === undefined ? {} : { minimumWords: definition.minimumWords }), ...(definition.bonusPerExtraWord === undefined ? {} : { bonusPerExtraWord: definition.bonusPerExtraWord }) }),
     update(definition, state, value) {
+      const minimumWords = definition.minimumWords ?? definition.words.length
+      if (record(value) && Object.keys(value).length === 1 && value.finish === true) {
+        if (state.foundWords.length < minimumWords) return invalidMove(`Find at least ${minimumWords} words before continuing.`)
+        return { state: { type: 'word_search', foundWords: [...state.foundWords] }, completed: true }
+      }
       const { path } = submission(value, ['path'])
       if (!straightPath(path, definition.grid.length, definition.grid[0].length)) return invalidMove('Select one straight line of adjoining letters.')
       const letters = path.map(cell => definition.grid[cell.row][cell.column]).join('').toUpperCase()
@@ -67,8 +72,14 @@ export const puzzleRegistry: Readonly<Record<PuzzleType, RegistryEntry>> = Objec
       const targetWords = definition.words.map(word => word.toUpperCase())
       // Prefer the selected direction when two listed words reverse each other.
       const found = targetWords.find(word => word === letters) ?? targetWords.find(word => word === reverse)
+      const isNew = !!found && !state.foundWords.includes(found)
       const foundWords = [...new Set([...state.foundWords, ...(found ? [found] : [])])]
-      return { state: { type: 'word_search', foundWords }, completed: targetWords.every(word => foundWords.includes(word)) }
+      const bonus = definition.bonusPerExtraWord ?? 0
+      // Reward a fixed number of bonus slots, not particular words. A reset may
+      // change discovery order, but it must never create more active awards than
+      // the configured number of optional words.
+      const rewards = isNew && foundWords.length > minimumWords && bonus > 0 ? [{ id: `word-search:extra:${foundWords.length - minimumWords}`, amount: bonus, label: `Extra ingredient: ${found}` }] : undefined
+      return { state: { type: 'word_search', foundWords }, completed: targetWords.every(word => foundWords.includes(word)), ...(rewards ? { rewards } : {}) }
     },
   }),
   crossword: createPuzzleModule('crossword', {

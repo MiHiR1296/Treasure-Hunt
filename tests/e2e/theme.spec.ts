@@ -59,8 +59,8 @@ test('organizer theme presets render in player previews with readable background
     await expect(badge).toHaveCount(1);
     await expect(badge).toHaveAttribute('aria-hidden', 'true');
     if (preset.icons === 'numbers') await expect(badge).toHaveText('1');
-    await player.getByRole('button', { name: 'View hint options', exact: true }).click();
-    await player.getByRole('button', { name: 'Reveal hint', exact: true }).click();
+    await player.getByRole('button', { name: 'Choose hint: Picture rotation (Free)', exact: true }).click();
+    await player.getByRole('button', { name: 'Reveal hint: Picture rotation (Free)', exact: true }).click();
     await expect(player.getByRole('button', { name: /^Rotate tile 1 clockwise/ })).toHaveCSS('border-top-left-radius', '12px');
     if (preset.background) {
       const image = player.locator('[data-hunt-background-image]');

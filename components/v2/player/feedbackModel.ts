@@ -25,7 +25,7 @@ export function describeActionFeedback(id: string, command: GameCommand, before:
 
   const completedCheckpoint = next.progress.completed > before.progress.completed;
   const title = kind === 'error' ? command.type === 'verify_gps' ? 'Check your location' : 'Try again'
-    : celebrate ? next.status === 'completed' ? 'Adventure complete!' : completedCheckpoint ? 'Checkpoint complete!' : hintSolved ? 'Hint puzzle solved!' : 'Next clue unlocked!'
+    : celebrate ? next.status === 'completed' ? 'Adventure complete!' : completedCheckpoint ? 'Checkpoint complete!' : hintSolved ? 'Hint puzzle solved!' : points > 0 && !advanced ? 'Bonus found!' : 'Next clue unlocked!'
     : feedback.status === 'dud' ? 'Keep exploring'
     : command.type === 'use_hint' ? 'Clue revealed'
     : command.type === 'submit_photo' ? 'Photo sent for review' : 'Progress updated';

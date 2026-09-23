@@ -67,3 +67,22 @@ test('partial puzzle saves stay quiet and purchased hint puzzles distinguish wro
   assert.equal(quiet.cue, null);
   assert.equal(quiet.celebrate, false);
 });
+
+test('an optional word-search find shows its bonus without claiming the next clue unlocked', () => {
+  const hunt: HuntDefinition = {
+    schemaVersion: 1, id: 'bonus-feedback', version: 1, title: 'Bonus feedback',
+    checkpoints: [{ id: 'ingredients', title: 'Ingredients', basePoints: 20, hints: [], flow: { startNodeId: 'words', nodes: [
+      { id: 'words', type: 'puzzle', prompt: 'Find ingredients.', puzzle: { type: 'word_search', grid: [['C', 'A', 'T'], ['O', 'W', 'L'], ['D', 'O', 'G']], words: ['CAT', 'OWL', 'DOG'], minimumWords: 1, bonusPerExtraWord: 2 }, next: 'done' },
+      { id: 'done', type: 'complete' },
+    ] } }],
+  };
+  let state = createInitialState(hunt, 'bonus-team', now);
+  state = executeCommand(hunt, state, { type: 'submit_puzzle', checkpointId: 'ingredients', nodeId: 'words', expectedRevision: 0, value: { path: [0, 1, 2].map(column => ({ row: 0, column })) } }, now).state;
+  const before = getPlayerView(hunt, state, now);
+  const command: GameCommand = { type: 'submit_puzzle', checkpointId: 'ingredients', nodeId: 'words', expectedRevision: 1, value: { path: [0, 1, 2].map(column => ({ row: 1, column })) } };
+  const result = executeCommand(hunt, state, command, now);
+  const presentation = describeActionFeedback('bonus-word', command, before, getPlayerView(hunt, result.state, now), result.feedback);
+  assert.equal(presentation.cue?.title, 'Bonus found!');
+  assert.equal(presentation.cue?.points, 2);
+  assert.equal(presentation.celebrate, true);
+});

@@ -7,7 +7,7 @@ export type QuarterTurn = 0 | 90 | 180 | 270
 export type PuzzleDefinition =
   | { type: 'jigsaw'; rows: number; columns: number; pieces: ImagePiece[]; solution: string[] }
   | { type: 'sudoku'; size: 4 | 9; givens: number[][] }
-  | { type: 'word_search'; grid: string[][]; words: string[] }
+  | { type: 'word_search'; grid: string[][]; words: string[]; minimumWords?: number; bonusPerExtraWord?: number }
   | { type: 'crossword'; rows: number; columns: number; entries: { id: string; clue: string; answer: string; row: number; column: number; direction: 'across' | 'down' }[] }
   | { type: 'rotation'; columns: number; tiles: (ImagePiece & { correctRotation: QuarterTurn })[] }
   | { type: 'text'; prompt: string; answers: string[]; caseSensitive?: boolean }
@@ -18,7 +18,7 @@ export type PuzzleDefinition =
 export type PuzzlePublicDefinition =
   | { type: 'jigsaw'; rows: number; columns: number; pieces: ImagePiece[] }
   | { type: 'sudoku'; size: 4 | 9; givens: number[][] }
-  | { type: 'word_search'; grid: string[][]; words: string[] }
+  | { type: 'word_search'; grid: string[][]; words: string[]; minimumWords?: number; bonusPerExtraWord?: number }
   | { type: 'crossword'; rows: number; columns: number; entries: { id: string; clue: string; length: number; row: number; column: number; direction: 'across' | 'down' }[] }
   | { type: 'rotation'; columns: number; tiles: ImagePiece[] }
   | { type: 'text'; prompt: string }
@@ -38,7 +38,8 @@ export type PuzzleState =
   | { type: 'matching'; pairs: MatchingPair[] }
   | { type: 'sequence'; order: string[] }
 
-export interface PuzzleUpdate { state: PuzzleState; completed: boolean }
+export interface PuzzleReward { id: string; amount: number; label: string }
+export interface PuzzleUpdate { state: PuzzleState; completed: boolean; rewards?: PuzzleReward[] }
 
 export class PuzzleError extends Error {
   constructor(public readonly code: 'invalid_puzzle' | 'invalid_submission' | 'invalid_puzzle_state', message: string) {

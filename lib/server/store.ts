@@ -153,6 +153,6 @@ export async function organizerSnapshot() {
   return { hunts, drafts: await listDrafts(), help, photos: reviewPhotos, teams: teams.map((team: TeamRecord) => ({
     id: team.id, name: team.name, huntId: team.hunt_id, version: team.state.definitionVersion, isPreview: team.is_preview, lastActivity: team.last_activity,
     view: toTeamView(team), ledger: team.state.ledger, events: team.state.events,
-    checkpoints: team.state.checkpoints,
+    checkpoints: team.state.checkpoints, definition: team.definition,
   })) };
 }
