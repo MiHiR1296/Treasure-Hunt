@@ -108,7 +108,7 @@ async function paste(input: Locator, value: string) {
   }, value)
 }
 
-test('crossword drafts survive other moves, failures, conflicts and reload without losing positions or puzzle scope', async ({ page }) => {
+test('crossword drafts survive other moves, failures, conflicts and reload without losing positions or puzzle scope', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 320, height: 700 })
   const game = await installMockGame(page, crosswordDefinition, 'draft-team', state => preparedCrossword(state, true))
   await openGame(page, crosswordDefinition)
@@ -130,6 +130,7 @@ test('crossword drafts survive other moves, failures, conflicts and reload witho
   expect(new Set(ids).size).toBe(ids.length)
   await hints.locator('label').filter({ hasText: 'US city written without a space' }).click()
   await expect(hint).toBeFocused()
+  await testInfo.attach('Crossword drafts and shared progress', { body: await page.screenshot({ fullPage: true, animations: 'disabled' }), contentType: 'image/png' })
 
   await page.reload()
   await expect(across).toHaveValue('CAT')
@@ -209,7 +210,7 @@ test('draft storage is isolated when the active team changes', async ({ page }) 
   expect(await page.evaluate(() => sessionStorage.getItem('hunt-v2-draft:second-team:crosswords:main:main-puzzle'))).toBeNull()
 })
 
-test('dense word searches open enlarged for panning and replace checking text only after confirmation', async ({ page }) => {
+test('dense word searches open enlarged for panning and replace checking text only after confirmation', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 320, height: 700 })
   const game = await installMockGame(page, denseWordSearchDefinition, 'word-team')
   await openGame(page, denseWordSearchDefinition)
@@ -224,6 +225,7 @@ test('dense word searches open enlarged for panning and replace checking text on
   expect(firstBox!.width).toBeGreaterThanOrEqual(43)
   expect(Math.abs(firstBox!.width - firstBox!.height)).toBeLessThanOrEqual(1)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  await testInfo.attach('Dense word-search enlarged view', { body: await page.screenshot({ fullPage: true, animations: 'disabled' }), contentType: 'image/png' })
 
   game.delayNext(300)
   await first.click()
