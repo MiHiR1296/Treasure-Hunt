@@ -8,7 +8,13 @@ const huntId = `mobile-${randomUUID()}`;
 const definition: HuntDefinition = {
   schemaVersion: 1, id: huntId, version: 1, title: 'Keyboard and camera adventure', settings: { leaderboard: 'hidden' }, theme: { primaryColor: '#00aa00', feedback: true },
   checkpoints: [{ id: 'shared', title: 'Accessible puzzles', basePoints: 20, hints: [], flow: { startNodeId: 'sudoku', nodes: [
-    { id: 'sudoku', type: 'puzzle', prompt: 'Complete two squares.', puzzle: { type: 'sudoku', size: 4, givens: [[1, 0, 0, 4], [3, 4, 1, 2], [2, 1, 4, 3], [4, 3, 2, 1]] }, next: 'crossword' },
+    { id: 'sudoku', type: 'puzzle', prompt: 'Complete two squares.', puzzle: { type: 'sudoku', size: 4, givens: [[1, 0, 0, 4], [3, 4, 1, 2], [2, 1, 4, 3], [4, 3, 2, 1]] }, next: 'words' },
+    { id: 'words', type: 'puzzle', prompt: 'Find the hidden word.', puzzle: { type: 'word_search', grid: [
+      ['C', 'A', 'T', 'Q', 'R', 'S', 'T', 'U'], ['V', 'W', 'X', 'Y', 'Z', 'A', 'B', 'C'],
+      ['D', 'E', 'F', 'G', 'H', 'I', 'J', 'K'], ['L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S'],
+      ['T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'A'], ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'],
+      ['J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q'], ['R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y'],
+    ], words: ['CAT'] }, next: 'crossword' },
     { id: 'crossword', type: 'puzzle', prompt: 'Complete the crossing words.', puzzle: { type: 'crossword', rows: 3, columns: 3, entries: [
       { id: 'cat', row: 0, column: 0, direction: 'across', answer: 'CAT', clue: 'A pet that purrs' },
       { id: 'car', row: 0, column: 0, direction: 'down', answer: 'CAR', clue: 'A road vehicle' },
@@ -71,15 +77,36 @@ test('serial grid saves retain keyboard focus, skip printed cells and fit portra
   await expect(second).toBeFocused();
   await second.fill('3');
 
+  const wordSearch = page.getByRole('group', { name: 'Word search puzzle grid' });
+  await expect(wordSearch).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'How to select a word' })).toBeVisible();
+  for (const viewport of [{ width: 320, height: 568 }, { width: 390, height: 844 }, { width: 844, height: 390 }]) {
+    await page.setViewportSize(viewport);
+    const wordSearchBox = await wordSearch.boundingBox();
+    expect(wordSearchBox).not.toBeNull();
+    expect(wordSearchBox!.x + wordSearchBox!.width).toBeLessThanOrEqual(viewport.width);
+    expect(Math.abs(wordSearchBox!.width - wordSearchBox!.height)).toBeLessThanOrEqual(1);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  }
+  await page.setViewportSize({ width: 320, height: 568 });
+  await wordSearch.getByRole('button', { name: 'C, row 1, column 1', exact: true }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Now select the last letter' })).toBeVisible();
+  await wordSearch.getByRole('button', { name: 'T, row 1, column 3', exact: true }).click();
+
   const crossword = page.getByRole('group', { name: 'Crossword puzzle grid' });
   await expect(crossword).toBeVisible();
   const corner = crossword.getByRole('textbox', { name: 'Row 1, column 1, clue 1', exact: true });
-  await fillAndSave(page, corner, 'X', crossword);
-  await expect(corner).toBeFocused();
-  await page.keyboard.press('ArrowRight');
+  const quickAcross = page.getByRole('textbox', { name: 'Answer for 1 across', exact: true });
+  await quickAcross.fill('xat');
+  const quickSave = page.waitForResponse(result => result.url().endsWith('/api/v2/command') && result.request().method() === 'POST');
+  await page.getByRole('button', { name: 'Place 1 across in grid', exact: true }).click();
+  expect((await quickSave).ok()).toBeTruthy();
+  await expect(crossword).toHaveAttribute('aria-busy', 'false');
+  await expect(corner).toHaveValue('X');
   const across = crossword.getByRole('textbox', { name: 'Row 1, column 2', exact: true });
-  await expect(across).toBeFocused();
-  await fillAndSave(page, across, 'A', crossword);
+  await expect(across).toHaveValue('A');
+  await expect(crossword.getByRole('textbox', { name: 'Row 1, column 3', exact: true })).toHaveValue('T');
+  await corner.focus();
   await page.keyboard.press('ArrowLeft');
   await expect(corner).toBeFocused();
   const selection = await corner.evaluate(input => ({ start: (input as HTMLInputElement).selectionStart, end: (input as HTMLInputElement).selectionEnd }));
@@ -101,7 +128,7 @@ test('camera playback failures release acquired tracks, and leaving a live guide
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await join(page);
   expect((await post(request, '/api/v2/admin/session', { password: 'browser-test-password-only' })).ok()).toBeTruthy();
-  for (let step = 0; step < 2; step++) {
+  for (let step = 0; step < 3; step++) {
     const { view } = await (await page.request.get('/api/v2/session')).json();
     const result = await post(request, '/api/v2/admin/control', { teamId: view.teamId, requestId: randomUUID(), control: { type: 'approve_action', checkpointId: 'shared', nodeId: view.node.id, expectedRevision: view.revision, reason: 'Set up camera lifecycle compatibility verification.' } });
     expect(result.ok(), await result.text()).toBeTruthy();
