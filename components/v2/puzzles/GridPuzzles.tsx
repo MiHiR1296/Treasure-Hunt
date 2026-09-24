@@ -10,6 +10,7 @@ type CrosswordEntry = CrosswordDefinition['entries'][number]
 interface DraftState {
   scope: string | null
   answers: Record<string, string>
+  persisted: boolean
 }
 
 function normalizeAnswer(value: string, length: number): string {
@@ -42,7 +43,7 @@ function moveFocus(event: KeyboardEvent<HTMLInputElement>, row: number, column: 
 export default function GridPuzzles({ definition, state, disabled, onChange, draftScope }: PuzzlePlayerProps) {
   const instanceId = useId().replace(/:/g, '')
   const crosswordColumns = definition.type === 'crossword' ? definition.columns : 0
-  const [draftState, setDraftState] = useState<DraftState>({ scope: null, answers: {} })
+  const [draftState, setDraftState] = useState<DraftState>({ scope: null, answers: {}, persisted: false })
   const draftStateRef = useRef(draftState)
   const [enlarged, setEnlarged] = useState(crosswordColumns > 10)
   const { submit, busy, error } = usePuzzleSubmission(onChange)
@@ -50,10 +51,11 @@ export default function GridPuzzles({ definition, state, disabled, onChange, dra
 
   useEffect(() => {
     const scope = draftScope ?? null
+    if (draftStateRef.current.scope === scope) return
     const answers = definition.type === 'crossword' && draftScope
       ? restoredDrafts(savedDraft<unknown>(draftScope), definition.entries)
       : {}
-    const next = { scope, answers }
+    const next = { scope, answers, persisted: Boolean(draftScope) }
     draftStateRef.current = next
     setDraftState(next)
   }, [draftScope, definition])
@@ -63,10 +65,10 @@ export default function GridPuzzles({ definition, state, disabled, onChange, dra
   }, [definition.type, crosswordColumns])
 
   const persistDrafts = (scope: string | null, answers: Record<string, string>) => {
-    const next = { scope, answers }
+    const persisted = scope !== null && storeDraft(scope, Object.keys(answers).length ? answers : null)
+    const next = { scope, answers, persisted }
     draftStateRef.current = next
     setDraftState(next)
-    if (scope) storeDraft(scope, Object.keys(answers).length ? answers : null)
   }
 
   if (definition.type === 'sudoku' && state.type === 'sudoku') {
@@ -168,7 +170,7 @@ export default function GridPuzzles({ definition, state, disabled, onChange, dra
             }} onChange={event => updateDraft(entry, event.target.value)} className="min-h-12 min-w-0 flex-1 rounded-lg border border-stone-300 bg-white px-3 py-2 text-base uppercase tracking-widest text-stone-900 focus:border-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-100 read-only:opacity-60" placeholder={`Type ${entry.length} letters`} />
             <button type="submit" disabled={locked || answer.length !== entry.length} aria-label={`Place ${clueNumber} ${direction} in grid`} className="hunt-action min-h-12 rounded-lg border border-emerald-800 px-4 py-2 font-semibold text-emerald-900 disabled:opacity-50">Place in boxes</button>
           </div>
-          {answer && <p id={draftId} role="status" className="mt-2 text-xs text-amber-800">Draft saved on this device ({answer.length}/{entry.length} letters). Place in boxes to share with your team.</p>}
+          {answer && <p id={draftId} role="status" className="mt-2 text-xs text-amber-800">{draftState.persisted ? `Draft saved on this device (${answer.length}/${entry.length} letters).` : `Draft kept in this open page (${answer.length}/${entry.length} letters). Device storage is unavailable, so reloading may lose it.`} Place in boxes to share with your team.</p>}
         </form>
       })}</div></section>
     })}</div>

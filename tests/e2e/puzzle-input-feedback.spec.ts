@@ -45,6 +45,7 @@ type Rejection = { status: number; code: string; error: string }
 async function installMockGame(page: Page, definition: HuntDefinition, teamId: string, prepare?: (state: GameState) => GameState) {
   let state = prepare?.(createInitialState(definition, teamId, '2026-09-24T08:00:00.000Z')) ?? createInitialState(definition, teamId, '2026-09-24T08:00:00.000Z')
   let clock = 1
+  let sessionRequests = 0
   let rejection: Rejection | null = null
   let conflictValue: unknown
   let delay = 0
@@ -52,7 +53,7 @@ async function installMockGame(page: Page, definition: HuntDefinition, teamId: s
   const view = () => ({ ...getPlayerView(definition, state, now()), teamName: 'Mock team', members: ['Mira'], isPreview: false, eventStatus: 'live' as const })
   const json = (route: Route, value: unknown, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(value) })
 
-  await page.route('**/api/v2/session', route => json(route, { view: view() }))
+  await page.route('**/api/v2/session', route => { sessionRequests += 1; return json(route, { view: view() }) })
   await page.route('**/api/v2/hunts', route => json(route, { hunts: [{ id: definition.id, title: definition.title }] }))
   await page.route('**/api/v2/help', route => json(route, { help: [], messages: [] }))
   await page.route('**/api/v2/command', async route => {
@@ -80,6 +81,7 @@ async function installMockGame(page: Page, definition: HuntDefinition, teamId: s
     rejectNext(value: Rejection) { rejection = value },
     conflictNext(value: unknown) { conflictValue = value },
     delayNext(milliseconds: number) { delay = milliseconds },
+    sessionRequestCount() { return sessionRequests },
     replaceTeam(nextTeamId: string, nextPrepare?: (value: GameState) => GameState) {
       const fresh = createInitialState(definition, nextTeamId, now())
       state = nextPrepare?.(fresh) ?? fresh
@@ -208,6 +210,34 @@ test('draft storage is isolated when the active team changes', async ({ page }) 
   await expect(answer).toHaveValue('')
   expect(JSON.parse(await page.evaluate(() => sessionStorage.getItem('hunt-v2-draft:first-team:crosswords:main:main-puzzle')) || '{}')).toEqual({ shared: 'CAT' })
   expect(await page.evaluate(() => sessionStorage.getItem('hunt-v2-draft:second-team:crosswords:main:main-puzzle'))).toBeNull()
+})
+
+test('live crossword drafts survive polling and manual refresh when device storage is unavailable', async ({ page }) => {
+  await page.addInitScript(({ key, value }) => {
+    const nativeSetItem = Storage.prototype.setItem
+    nativeSetItem.call(sessionStorage, key, value)
+    Storage.prototype.setItem = function () { throw new DOMException('Storage quota exceeded', 'QuotaExceededError') }
+  }, {
+    key: 'hunt-v2-draft:storage-team:crosswords:main:main-puzzle',
+    value: JSON.stringify({ shared: 'DOG' }),
+  })
+  const game = await installMockGame(page, crosswordDefinition, 'storage-team', state => preparedCrossword(state))
+  await openGame(page, crosswordDefinition)
+  const answer = page.locator('section[aria-labelledby="current-question"]').getByRole('textbox', { name: 'Answer for 1 across', exact: true })
+  await expect(answer).toHaveValue('DOG')
+
+  await answer.fill('CAT')
+  await expect(page.getByText(/Draft kept in this open page/)).toBeVisible()
+  await expect(page.getByText(/Draft saved on this device/)).toHaveCount(0)
+
+  const beforePoll = game.sessionRequestCount()
+  await expect.poll(() => game.sessionRequestCount(), { timeout: 12_000 }).toBeGreaterThan(beforePoll)
+  await expect(answer).toHaveValue('CAT')
+
+  const beforeRefresh = game.sessionRequestCount()
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click()
+  await expect.poll(() => game.sessionRequestCount()).toBeGreaterThan(beforeRefresh)
+  await expect(answer).toHaveValue('CAT')
 })
 
 test('dense word searches open enlarged for panning and replace checking text only after confirmation', async ({ page }, testInfo) => {
