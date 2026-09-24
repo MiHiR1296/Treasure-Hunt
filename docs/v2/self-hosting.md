@@ -66,6 +66,16 @@ Caddy proxies to `web:3000` and persists certificates/configuration in separate 
 
 Use the same Compose files for future proxy operations. The application health endpoint and container logs distinguish app/database errors from DNS/certificate/tunnel errors.
 
+## Optional Map Provider Configuration
+
+Treasure Hunt V2 uses OpenStreetMap / Leaflet by default (`NEXT_PUBLIC_MAP_PROVIDER=osm`), requiring no API keys or Google Cloud setup.
+
+To enable Google Maps:
+1. Set `NEXT_PUBLIC_MAP_PROVIDER=google` in your environment files or container definitions.
+2. Set `NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY=<your-google-maps-browser-key>`.
+3. Restrict the browser API key in Google Cloud Console to authorized HTTP referrers (e.g. `https://hunt.example.com/*` and `http://localhost:3000/*`) and restrict usage to the Maps JavaScript API only.
+4. If `NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY` is missing or the SDK script fails to load, the map renderer automatically falls back to OpenStreetMap. Runtime authorization failures after SDK load or quota exhaustion are not guaranteed to auto-fallback.
+
 ## Development and generic cloud hosting
 
 Supply `DATABASE_URL`, `ORGANIZER_PASSWORD`, `APP_ORIGIN`, and optionally `MEDIA_DIRECTORY` in `.env` or the process environment. The default media directory is `.data/media`; use a persistent path in production. Remote PostgreSQL TLS settings belong in the connection URL.
