@@ -1,11 +1,10 @@
 'use client'
 
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { Cell } from '@/lib/engine/puzzles/types'
 import { PuzzleSaveMessage, usePuzzleSubmission, type PuzzlePlayerProps } from './shared'
 
 export default function WordSearch({ definition, state, disabled, onChange }: PuzzlePlayerProps) {
-  const instanceId = useId().replace(/:/g, '')
   const [start, setStart] = useState<Cell | null>(null)
   const [message, setMessage] = useState('')
   const dense = definition.type === 'word_search' && definition.grid[0].length > 10
@@ -32,19 +31,11 @@ export default function WordSearch({ definition, state, disabled, onChange }: Pu
       ? matches ? `${letters} found!` : `${letters} is not a listed word. Keep looking.`
       : `We could not confirm ${letters}. Try selecting it again.`))
   }
-  const tutorialId = `${instanceId}-word-search-tutorial`
   const expandedWidth = columns * 44 + Math.max(0, columns - 1) * 2
   return <div>
     <p className="mb-1 text-sm font-semibold text-stone-800">Find at least {minimumWords} of {definition.words.length} ingredients.</p>
     <p className="mb-3 text-sm text-stone-600">Words may run forward, backward, up, down, or diagonally.{bonus > 0 && minimumWords < definition.words.length ? ` Each extra ingredient is worth +${bonus} points.` : ''}</p>
-    <section aria-labelledby={tutorialId} className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
-      <h3 id={tutorialId} className="font-bold">How to select a word</h3>
-      <ol className="mt-2 grid gap-2 sm:grid-cols-3">
-        <li className="flex gap-2"><span aria-hidden="true" className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-amber-200 font-bold">1</span><span>Choose a word from the list.</span></li>
-        <li className="flex gap-2"><span aria-hidden="true" className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-amber-200 font-bold">2</span><span>Tap its first letter in the grid.</span></li>
-        <li className="flex gap-2"><span aria-hidden="true" className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-amber-200 font-bold">3</span><span>Tap its last letter to check it.</span></li>
-      </ol>
-    </section>
+    <p role="note" className="mb-4 rounded-xl border-2 border-amber-300 bg-amber-50 px-4 py-3 text-sm font-semibold leading-relaxed text-amber-950 shadow-sm"><span className="font-extrabold">How to play:</span> Tap the first letter of a word, then tap its last letter to select it.</p>
     <ul aria-label="Words to find" className="mb-4 flex flex-wrap gap-2">{definition.words.map(word => <li key={word} className={`rounded-lg px-3 py-2 text-sm font-semibold ${state.foundWords.includes(word) ? 'bg-emerald-100 text-emerald-900' : 'bg-stone-100 text-stone-700'}`}>{state.foundWords.includes(word) ? `✓ ${word} found` : word}</li>)}</ul>
     {dense && <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-950">
       <p className="min-w-0 flex-1">Large grid mode: {enlarged ? 'swipe inside the grid to pan between full-size letters.' : 'the whole grid is fitted to the screen, so letters are smaller.'}</p>

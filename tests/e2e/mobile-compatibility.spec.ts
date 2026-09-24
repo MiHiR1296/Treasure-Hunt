@@ -79,7 +79,7 @@ test('serial grid saves retain keyboard focus, skip printed cells and fit portra
 
   const wordSearch = page.getByRole('group', { name: 'Word search puzzle grid' });
   await expect(wordSearch).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'How to select a word' })).toBeVisible();
+  await expect(page.getByRole('note')).toHaveText('How to play: Tap the first letter of a word, then tap its last letter to select it.');
   for (const viewport of [{ width: 320, height: 568 }, { width: 390, height: 844 }, { width: 844, height: 390 }]) {
     await page.setViewportSize(viewport);
     const wordSearchBox = await wordSearch.boundingBox();
@@ -96,17 +96,13 @@ test('serial grid saves retain keyboard focus, skip printed cells and fit portra
   const crossword = page.getByRole('group', { name: 'Crossword puzzle grid' });
   await expect(crossword).toBeVisible();
   const corner = crossword.getByRole('textbox', { name: 'Row 1, column 1, clue 1', exact: true });
-  const quickAcross = page.getByRole('textbox', { name: 'Answer for 1 across', exact: true });
-  await quickAcross.fill('xat');
-  const quickSave = page.waitForResponse(result => result.url().endsWith('/api/v2/command') && result.request().method() === 'POST');
-  await page.getByRole('button', { name: 'Place 1 across in grid', exact: true }).click();
-  expect((await quickSave).ok()).toBeTruthy();
-  await expect(crossword).toHaveAttribute('aria-busy', 'false');
-  await expect(corner).toHaveValue('X');
+  await expect(page.getByRole('textbox', { name: /Answer for/ })).toHaveCount(0);
+  await fillAndSave(page, corner, 'X', crossword);
+  await expect(corner).toBeFocused();
+  await page.keyboard.press('ArrowRight');
   const across = crossword.getByRole('textbox', { name: 'Row 1, column 2', exact: true });
-  await expect(across).toHaveValue('A');
-  await expect(crossword.getByRole('textbox', { name: 'Row 1, column 3', exact: true })).toHaveValue('T');
-  await corner.focus();
+  await expect(across).toBeFocused();
+  await fillAndSave(page, across, 'A', crossword);
   await page.keyboard.press('ArrowLeft');
   await expect(corner).toBeFocused();
   const selection = await corner.evaluate(input => ({ start: (input as HTMLInputElement).selectionStart, end: (input as HTMLInputElement).selectionEnd }));

@@ -4,9 +4,9 @@ import type { GameCommand, GameState, HuntDefinition } from '../../lib/engine/ty
 
 const crosswordDefinition: HuntDefinition = {
   schemaVersion: 1,
-  id: 'mock-crossword-recovery',
+  id: 'mock-crossword-cells',
   version: 1,
-  title: 'Crossword recovery check',
+  title: 'Crossword cell entry check',
   settings: { leaderboard: 'hidden' },
   checkpoints: [{
     id: 'crosswords',
@@ -25,6 +25,21 @@ const crosswordDefinition: HuntDefinition = {
   }],
 }
 
+const denseCrosswordAnswer = 'ABCDEFGHIJKLMNO'
+const denseCrosswordDefinition: HuntDefinition = {
+  schemaVersion: 1,
+  id: 'mock-dense-crossword',
+  version: 1,
+  title: 'Dense crossword check',
+  settings: { leaderboard: 'hidden' },
+  checkpoints: [{ id: 'crossword', title: 'Large crossword', basePoints: 20, hints: [], flow: { startNodeId: 'grid', nodes: [
+    { id: 'grid', type: 'puzzle', prompt: 'Fill the long word.', puzzle: { type: 'crossword', rows: 2, columns: 15, entries: [
+      { id: 'long', clue: 'The alphabet from A to O', answer: denseCrosswordAnswer, row: 0, column: 0, direction: 'across' },
+    ] }, next: 'done' },
+    { id: 'done', type: 'complete' },
+  ] } }],
+}
+
 const denseGrid = Array.from({ length: 25 }, (_, row) => Array.from({ length: 25 }, (_, column) => String.fromCharCode(65 + (row * 7 + column * 11) % 26)))
 denseGrid[0][0] = 'C'; denseGrid[0][1] = 'A'; denseGrid[0][2] = 'T'
 denseGrid[1][0] = 'D'; denseGrid[1][1] = 'O'; denseGrid[1][2] = 'G'
@@ -40,33 +55,20 @@ const denseWordSearchDefinition: HuntDefinition = {
   ] } }],
 }
 
-type Rejection = { status: number; code: string; error: string }
-
 async function installMockGame(page: Page, definition: HuntDefinition, teamId: string, prepare?: (state: GameState) => GameState) {
   let state = prepare?.(createInitialState(definition, teamId, '2026-09-24T08:00:00.000Z')) ?? createInitialState(definition, teamId, '2026-09-24T08:00:00.000Z')
   let clock = 1
-  let sessionRequests = 0
-  let rejection: Rejection | null = null
-  let conflictValue: unknown
   let delay = 0
   const now = () => `2026-09-24T08:00:${String(clock++).padStart(2, '0')}.000Z`
   const view = () => ({ ...getPlayerView(definition, state, now()), teamName: 'Mock team', members: ['Mira'], isPreview: false, eventStatus: 'live' as const })
   const json = (route: Route, value: unknown, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(value) })
 
-  await page.route('**/api/v2/session', route => { sessionRequests += 1; return json(route, { view: view() }) })
+  await page.route('**/api/v2/session', route => json(route, { view: view() }))
   await page.route('**/api/v2/hunts', route => json(route, { hunts: [{ id: definition.id, title: definition.title }] }))
   await page.route('**/api/v2/help', route => json(route, { help: [], messages: [] }))
   await page.route('**/api/v2/command', async route => {
     const body = route.request().postDataJSON() as { command: GameCommand }
     if (delay) { const wait = delay; delay = 0; await new Promise(resolve => setTimeout(resolve, wait)) }
-    if (rejection) { const failure = rejection; rejection = null; await json(route, failure, failure.status); return }
-    if (conflictValue !== undefined && (body.command.type === 'submit_puzzle' || body.command.type === 'submit_hint_puzzle')) {
-      const teammate = { ...body.command, value: conflictValue } as GameCommand
-      conflictValue = undefined
-      state = executeCommand(definition, state, teammate, now()).state
-      await json(route, { error: 'A teammate updated this puzzle. Refresh to see their work before making another move.', code: 'puzzle_conflict' }, 409)
-      return
-    }
     try {
       const result = executeCommand(definition, state, body.command, now())
       state = result.state
@@ -77,16 +79,7 @@ async function installMockGame(page: Page, definition: HuntDefinition, teamId: s
     }
   })
 
-  return {
-    rejectNext(value: Rejection) { rejection = value },
-    conflictNext(value: unknown) { conflictValue = value },
-    delayNext(milliseconds: number) { delay = milliseconds },
-    sessionRequestCount() { return sessionRequests },
-    replaceTeam(nextTeamId: string, nextPrepare?: (value: GameState) => GameState) {
-      const fresh = createInitialState(definition, nextTeamId, now())
-      state = nextPrepare?.(fresh) ?? fresh
-    },
-  }
+  return { delayNext(milliseconds: number) { delay = milliseconds } }
 }
 
 function preparedCrossword(state: GameState, partial = false): GameState {
@@ -101,150 +94,105 @@ async function openGame(page: Page, definition: HuntDefinition) {
   await expect(page.getByRole('heading', { name: definition.checkpoints[0].title, exact: true })).toBeVisible()
 }
 
-async function paste(input: Locator, value: string) {
-  await input.focus()
-  await input.evaluate((element, text) => {
-    const event = new Event('paste', { bubbles: true, cancelable: true })
-    Object.defineProperty(event, 'clipboardData', { value: { getData: () => text } })
-    element.dispatchEvent(event)
-  }, value)
+async function fillCell(cell: Locator, value: string, grid: Locator) {
+  await cell.fill(value)
+  await expect(grid).toHaveAttribute('aria-busy', 'false')
+  await expect(cell).toHaveValue(value)
 }
 
-test('crossword drafts survive other moves, failures, conflicts and reload without losing positions or puzzle scope', async ({ page }, testInfo) => {
+test('main and hint crosswords use simple individual cells and preserve saved positions', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 320, height: 700 })
-  const game = await installMockGame(page, crosswordDefinition, 'draft-team', state => preparedCrossword(state, true))
+  await installMockGame(page, crosswordDefinition, 'cell-team', state => preparedCrossword(state, true))
   await openGame(page, crosswordDefinition)
 
   const main = page.locator('section[aria-labelledby="current-question"]')
   const hints = page.locator('section[aria-label="Hints"]')
-  const across = main.getByRole('textbox', { name: 'Answer for 1 across', exact: true })
-  const down = main.getByRole('textbox', { name: 'Answer for 1 down', exact: true })
-  const hint = hints.getByRole('textbox', { name: 'Answer for 1 across', exact: true })
-  await expect(main.getByLabel('Shared boxes: C, blank, R')).toBeVisible()
-  await expect(main.getByRole('button', { name: 'Place 1 down in grid', exact: true })).toBeDisabled()
-
-  await across.fill('CAT')
-  await down.fill('CAR')
-  await paste(hint, 'New York!')
-  await expect(hint).toHaveValue('NEWYORK')
-  await expect(page.getByText(/Draft saved on this device/)).toHaveCount(3)
-  const ids = await page.getByRole('textbox', { name: 'Answer for 1 across', exact: true }).evaluateAll(inputs => inputs.map(input => input.id))
-  expect(new Set(ids).size).toBe(ids.length)
-  await hints.locator('label').filter({ hasText: 'US city written without a space' }).click()
-  await expect(hint).toBeFocused()
-  await testInfo.attach('Crossword drafts and shared progress', { body: await page.screenshot({ fullPage: true, animations: 'disabled' }), contentType: 'image/png' })
-
-  await page.reload()
-  await expect(across).toHaveValue('CAT')
-  await expect(down).toHaveValue('CAR')
-  await expect(hint).toHaveValue('NEWYORK')
-
-  await main.getByRole('button', { name: 'Place 1 across in grid', exact: true }).click()
-  await expect(across).toHaveValue('')
-  await expect(down).toHaveValue('CAR')
-  await expect(hint).toHaveValue('NEWYORK')
-  await expect(main.getByLabel('Shared boxes: C, A, T')).toBeVisible()
-  await expect(main.getByLabel('Shared boxes: C, blank, R')).toBeVisible()
-
-  const middleAcrossCell = main.getByRole('textbox', { name: 'Row 1, column 2', exact: true })
-  await middleAcrossCell.fill('X')
-  await expect(down).toHaveValue('CAR')
-  await expect(hint).toHaveValue('NEWYORK')
-
-  game.rejectNext({ status: 422, code: 'invalid_submission', error: 'The move was not stored.' })
-  await main.getByRole('button', { name: 'Place 1 down in grid', exact: true }).click()
-  await expect(down).toHaveValue('CAR')
-  await expect(page.getByText('The move was not stored.', { exact: true })).toBeVisible()
-  await page.reload()
-  await expect(down).toHaveValue('CAR')
-  await expect(hint).toHaveValue('NEWYORK')
-
-  game.conflictNext({ grid: [['C', 'A', 'T'], ['', '', ''], ['R', '', '']] })
-  await main.getByRole('button', { name: 'Place 1 down in grid', exact: true }).click()
-  await expect(page.getByText(/Your teammate’s latest puzzle is shown below/)).toBeVisible()
-  await expect(down).toHaveValue('CAR')
-  await expect(hint).toHaveValue('NEWYORK')
-  await expect(main.getByLabel('Shared boxes: C, A, T')).toBeVisible()
-
-  await main.getByRole('button', { name: 'Place 1 down in grid', exact: true }).click()
-  await expect(page.getByRole('heading', { name: 'You found your finish.', exact: true })).toBeVisible()
-  await expect.poll(() => page.evaluate(() => sessionStorage.getItem('hunt-v2-draft:draft-team:crosswords:main:main-puzzle'))).toBeNull()
-  expect(JSON.parse(await page.evaluate(() => sessionStorage.getItem('hunt-v2-draft:draft-team:crosswords:city-hint:hint-puzzle')) || '{}')).toEqual({ shared: 'NEWYORK' })
+  const mainGrid = main.getByRole('group', { name: 'Crossword puzzle grid', exact: true })
+  const hintGrid = hints.getByRole('group', { name: 'Crossword puzzle grid', exact: true })
+  await expect(mainGrid).toBeVisible()
+  await expect(hintGrid).toBeVisible()
+  await expect(page.getByRole('textbox', { name: /Answer for/ })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /Place .* in grid/ })).toHaveCount(0)
+  await expect(main.getByText(/A pet that purrs \(3\)/)).toBeVisible()
+  await expect(hints.getByText(/US city written without a space \(7\)/)).toBeVisible()
+  await expect(mainGrid.getByRole('textbox', { name: 'Row 1, column 1, clue 1', exact: true })).toHaveValue('C')
+  await expect(mainGrid.getByRole('textbox', { name: 'Row 2, column 1', exact: true })).toHaveValue('')
+  await expect(mainGrid.getByRole('textbox', { name: 'Row 3, column 1', exact: true })).toHaveValue('R')
+  await expect(hintGrid.getByRole('textbox', { name: 'Row 1, column 1, clue 1', exact: true })).toHaveValue('')
+  const headingIds = await page.getByRole('heading', { name: 'across', exact: true }).evaluateAll(headings => headings.map(heading => heading.id))
+  expect(headingIds.every(Boolean)).toBe(true)
+  expect(new Set(headingIds).size).toBe(headingIds.length)
+  await testInfo.attach('Simple crossword cell entry', { body: await page.screenshot({ fullPage: true, animations: 'disabled' }), contentType: 'image/png' })
 })
 
-test('complete incorrect crossword answers save normally, keep focus, and can be corrected to finish', async ({ page }) => {
+test('incorrect crossword letters save cell by cell, retain focus, survive reload, and can be corrected', async ({ page }) => {
   const game = await installMockGame(page, crosswordDefinition, 'wrong-answer-team', state => preparedCrossword(state))
   await openGame(page, crosswordDefinition)
   const main = page.locator('section[aria-labelledby="current-question"]')
-  const across = main.getByRole('textbox', { name: 'Answer for 1 across', exact: true })
+  const grid = main.getByRole('group', { name: 'Crossword puzzle grid', exact: true })
+  const first = grid.getByRole('textbox', { name: 'Row 1, column 1, clue 1', exact: true })
+  const second = grid.getByRole('textbox', { name: 'Row 1, column 2', exact: true })
+  const third = grid.getByRole('textbox', { name: 'Row 1, column 3', exact: true })
 
-  await across.fill('DOG')
-  game.delayNext(400)
-  await across.press('Enter')
-  await expect(across).toBeFocused()
-  await expect(across).not.toBeDisabled()
-  await expect(across).toHaveAttribute('readonly', '')
-  await expect(main.getByLabel('Shared boxes: D, O, G')).toBeVisible()
-  await expect(across).toHaveValue('')
-  await expect(across).toBeFocused()
+  await fillCell(first, 'D', grid)
+  await fillCell(second, 'O', grid)
+  game.delayNext(300)
+  await third.focus()
+  await third.fill('G')
+  await expect(grid).toHaveAttribute('aria-busy', 'true')
+  await expect(third).toBeFocused()
+  await expect(third).not.toBeDisabled()
+  await expect(third).toHaveAttribute('readonly', '')
+  await expect(grid).toHaveAttribute('aria-busy', 'false')
+  await expect(third).toHaveValue('G')
   await expect(page.getByRole('heading', { name: 'Shared crosswords', exact: true })).toBeVisible()
 
-  await paste(across, 'C-A-T')
-  await expect(across).toHaveValue('CAT')
-  await main.getByRole('button', { name: 'Place 1 across in grid', exact: true }).click()
-  const down = main.getByRole('textbox', { name: 'Answer for 1 down', exact: true })
-  await down.fill('CAR')
-  await main.getByRole('button', { name: 'Place 1 down in grid', exact: true }).click()
+  await page.reload()
+  await expect(first).toHaveValue('D')
+  await expect(second).toHaveValue('O')
+  await expect(third).toHaveValue('G')
+
+  await fillCell(first, 'C', grid)
+  await fillCell(second, 'A', grid)
+  await fillCell(third, 'T', grid)
+  await fillCell(grid.getByRole('textbox', { name: 'Row 2, column 1', exact: true }), 'A', grid)
+  await grid.getByRole('textbox', { name: 'Row 3, column 1', exact: true }).fill('R')
   await expect(page.getByRole('heading', { name: 'You found your finish.', exact: true })).toBeVisible()
 })
 
-test('draft storage is isolated when the active team changes', async ({ page }) => {
-  const game = await installMockGame(page, crosswordDefinition, 'first-team', state => preparedCrossword(state))
-  await openGame(page, crosswordDefinition)
-  const answer = page.locator('section[aria-labelledby="current-question"]').getByRole('textbox', { name: 'Answer for 1 across', exact: true })
-  await answer.fill('CAT')
-  await expect(answer).toHaveValue('CAT')
+test('dense crosswords keep full-size pannable cells and can fit the viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 700 })
+  await installMockGame(page, denseCrosswordDefinition, 'dense-crossword-team')
+  await openGame(page, denseCrosswordDefinition)
 
-  game.replaceTeam('second-team', state => preparedCrossword(state))
-  await page.getByRole('button', { name: 'Refresh', exact: true }).click()
-  await expect(answer).toHaveValue('')
-  expect(JSON.parse(await page.evaluate(() => sessionStorage.getItem('hunt-v2-draft:first-team:crosswords:main:main-puzzle')) || '{}')).toEqual({ shared: 'CAT' })
-  expect(await page.evaluate(() => sessionStorage.getItem('hunt-v2-draft:second-team:crosswords:main:main-puzzle'))).toBeNull()
+  await expect(page.getByText(/Large crossword: swipe inside the grid/)).toBeVisible()
+  const viewport = page.getByRole('region', { name: 'Scrollable crossword grid', exact: true })
+  const grid = page.getByRole('group', { name: 'Crossword puzzle grid', exact: true })
+  expect(await viewport.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true)
+  const first = grid.getByRole('textbox', { name: 'Row 1, column 1, clue 1', exact: true })
+  const firstBox = await first.boundingBox()
+  expect(firstBox).not.toBeNull()
+  expect(firstBox!.width).toBeGreaterThanOrEqual(43)
+  expect(Math.abs(firstBox!.width - firstBox!.height)).toBeLessThanOrEqual(1)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+
+  await page.getByRole('button', { name: 'Fit whole grid', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Enlarge grid', exact: true })).toBeVisible()
+  const fittedBox = await grid.boundingBox()
+  expect(fittedBox).not.toBeNull()
+  expect(fittedBox!.x + fittedBox!.width).toBeLessThanOrEqual(320)
 })
 
-test('live crossword drafts survive polling and manual refresh when device storage is unavailable', async ({ page }) => {
-  await page.addInitScript(({ key, value }) => {
-    const nativeSetItem = Storage.prototype.setItem
-    nativeSetItem.call(sessionStorage, key, value)
-    Storage.prototype.setItem = function () { throw new DOMException('Storage quota exceeded', 'QuotaExceededError') }
-  }, {
-    key: 'hunt-v2-draft:storage-team:crosswords:main:main-puzzle',
-    value: JSON.stringify({ shared: 'DOG' }),
-  })
-  const game = await installMockGame(page, crosswordDefinition, 'storage-team', state => preparedCrossword(state))
-  await openGame(page, crosswordDefinition)
-  const answer = page.locator('section[aria-labelledby="current-question"]').getByRole('textbox', { name: 'Answer for 1 across', exact: true })
-  await expect(answer).toHaveValue('DOG')
-
-  await answer.fill('CAT')
-  await expect(page.getByText(/Draft kept in this open page/)).toBeVisible()
-  await expect(page.getByText(/Draft saved on this device/)).toHaveCount(0)
-
-  const beforePoll = game.sessionRequestCount()
-  await expect.poll(() => game.sessionRequestCount(), { timeout: 12_000 }).toBeGreaterThan(beforePoll)
-  await expect(answer).toHaveValue('CAT')
-
-  const beforeRefresh = game.sessionRequestCount()
-  await page.getByRole('button', { name: 'Refresh', exact: true }).click()
-  await expect.poll(() => game.sessionRequestCount()).toBeGreaterThan(beforeRefresh)
-  await expect(answer).toHaveValue('CAT')
-})
-
-test('dense word searches open enlarged for panning and replace checking text only after confirmation', async ({ page }, testInfo) => {
+test('word search highlights one instruction and replaces checking text only after confirmation', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 320, height: 700 })
   const game = await installMockGame(page, denseWordSearchDefinition, 'word-team')
   await openGame(page, denseWordSearchDefinition)
 
+  const instruction = page.getByRole('note')
+  await expect(instruction).toHaveText('How to play: Tap the first letter of a word, then tap its last letter to select it.')
+  await expect(instruction).toHaveCSS('background-color', 'rgb(255, 251, 235)')
+  await expect(instruction).toHaveCSS('border-top-width', '2px')
+  await expect(page.getByRole('heading', { name: 'How to select a word' })).toHaveCount(0)
   await expect(page.getByText(/Large grid mode: swipe inside the grid/)).toBeVisible()
   const viewport = page.getByRole('region', { name: 'Scrollable word search', exact: true })
   const grid = page.getByRole('group', { name: 'Word search puzzle grid', exact: true })
@@ -255,7 +203,7 @@ test('dense word searches open enlarged for panning and replace checking text on
   expect(firstBox!.width).toBeGreaterThanOrEqual(43)
   expect(Math.abs(firstBox!.width - firstBox!.height)).toBeLessThanOrEqual(1)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-  await testInfo.attach('Dense word-search enlarged view', { body: await page.screenshot({ fullPage: true, animations: 'disabled' }), contentType: 'image/png' })
+  await testInfo.attach('Highlighted word-search instruction', { body: await page.screenshot({ fullPage: true, animations: 'disabled' }), contentType: 'image/png' })
 
   game.delayNext(300)
   await first.click()

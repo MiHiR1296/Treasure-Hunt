@@ -90,13 +90,9 @@ export function savedDraft<T>(key: string): T | null {
   try { return JSON.parse(sessionStorage.getItem(storageKey(`draft:${key}`)) || 'null') as T | null; } catch { return null; }
 }
 
-export function storeDraft(key: string, value: unknown): boolean {
+export function storeDraft(key: string, value: unknown) {
   try {
     if (value === null) sessionStorage.removeItem(storageKey(`draft:${key}`));
     else sessionStorage.setItem(storageKey(`draft:${key}`), JSON.stringify(value));
-    return true;
-  } catch {
-    // Inputs remain usable when device storage is blocked.
-    return false;
-  }
+  } catch { /* Inputs remain usable when device storage is blocked. */ }
 }

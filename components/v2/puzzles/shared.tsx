@@ -9,8 +9,6 @@ export interface PuzzlePlayerProps {
   state: PuzzleState
   disabled: boolean
   draftKey?: string
-  /** Stable across puzzle saves; scoped to one team and main or hint puzzle. */
-  draftScope?: string
   feedback?: ActionNotice | null
   clearFeedback?: () => void
   onChange: (submission: unknown) => Promise<void>
