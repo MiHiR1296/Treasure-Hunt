@@ -74,6 +74,8 @@ export default function NodeEditor({ checkpoint, hunt, node, onChange, onConnect
       <TextField label="Accepted answers — one per line" value={node.answers.join('\n')} multiline onChange={text => onChange({ ...node, answers: text.split('\n') })} hint="Answers are checked on the server. Players do not receive this list." />
       <TextField label="Answer shown in completed-stage history (optional)" value={node.recapAnswer || ''} onChange={recapAnswer => { const result = { ...node }; if (recapAnswer) result.recapAnswer = recapAnswer; else delete result.recapAnswer; onChange(result); }} hint="Use a short public recap. Leave blank to show only ‘Answer accepted’." />
       <CheckField label="Answers must match letter case" checked={node.caseSensitive === true} onChange={caseSensitive => onChange({ ...node, caseSensitive })} />
+      <CheckField label="Keep the latest submitted answers for organizers" checked={node.recordAnswerAttempts === true} onChange={recordAnswerAttempts => onChange({ ...node, recordAnswerAttempts })} />
+      {node.recordAnswerAttempts && <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-950">Stores the latest 20 submissions for this step, including whether each was accepted and when it was sent. Entries are organizer-only; each answer is capped at 500 characters. Enable this only when your event’s privacy policy allows it.</p>}
     </>}
     {node.type === 'verify_code' && <>
       <TextField label="Correct code" value={node.code} onChange={code => onChange({ ...node, code })} />

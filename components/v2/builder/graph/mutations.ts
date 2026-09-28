@@ -73,6 +73,19 @@ function rewriteReference(node: FlowNode, removedId: string, targetId: string): 
   return outputPorts(node).reduce((current, port) => outputPortTarget(current, port) === removedId ? setOutputPortTarget(current, port, targetId) : current, node);
 }
 
+function removeHintNodeReference(checkpoint: CheckpointDefinition, nodeId: string): CheckpointDefinition['hints'] {
+  return checkpoint.hints.map(hint => {
+    if (hint.availability?.afterNodeId !== nodeId && hint.relevance?.nodeId !== nodeId) return hint;
+    const next = { ...hint };
+    if (hint.availability?.afterNodeId === nodeId) {
+      const availability = { ...hint.availability }; delete availability.afterNodeId;
+      if (Object.keys(availability).length) next.availability = availability; else delete next.availability;
+    }
+    if (hint.relevance?.nodeId === nodeId) delete next.relevance;
+    return next;
+  });
+}
+
 export function removeNodeAndReconnect(checkpoint: CheckpointDefinition, nodeId: string, reconnectTo: string): CheckpointDefinition {
   if (nodeId === reconnectTo || !checkpoint.flow.nodes.some(node => node.id === nodeId) || !checkpoint.flow.nodes.some(node => node.id === reconnectTo)) return checkpoint;
   const result: CheckpointDefinition = {
@@ -81,11 +94,7 @@ export function removeNodeAndReconnect(checkpoint: CheckpointDefinition, nodeId:
       startNodeId: checkpoint.flow.startNodeId === nodeId ? reconnectTo : checkpoint.flow.startNodeId,
       nodes: checkpoint.flow.nodes.filter(node => node.id !== nodeId).map(node => rewriteReference(node, nodeId, reconnectTo)),
     },
-    hints: checkpoint.hints.map(hint => {
-      if (hint.availability?.afterNodeId !== nodeId) return hint;
-      const availability = { ...hint.availability }; delete availability.afterNodeId;
-      return { ...hint, availability };
-    }),
+    hints: removeHintNodeReference(checkpoint, nodeId),
   };
   return hasCycle(result) ? checkpoint : result;
 }
@@ -98,11 +107,7 @@ export function removeNodeAndDisconnect(checkpoint: CheckpointDefinition, nodeId
       startNodeId: checkpoint.flow.startNodeId === nodeId ? '' : checkpoint.flow.startNodeId,
       nodes: checkpoint.flow.nodes.filter(node => node.id !== nodeId).map(node => rewriteReference(node, nodeId, '')),
     },
-    hints: checkpoint.hints.map(hint => {
-      if (hint.availability?.afterNodeId !== nodeId) return hint;
-      const availability = { ...hint.availability }; delete availability.afterNodeId;
-      return { ...hint, availability };
-    }),
+    hints: removeHintNodeReference(checkpoint, nodeId),
   };
 }
 

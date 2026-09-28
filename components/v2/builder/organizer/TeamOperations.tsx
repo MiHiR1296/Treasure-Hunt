@@ -4,6 +4,7 @@
 
 import { useEffect, useState } from 'react';
 import type { FlowNode, HuntDefinition, OrganizerControl } from '@/lib/engine/types';
+import { puzzleHintItems, puzzleHintItemSolved } from '@/lib/engine/puzzles';
 import { parseControl } from '@/lib/engine/validation';
 import { actionClass, buttonClass, Field, inputClass, NumberField, TextField } from '../Fields';
 import { nodeLabels } from '../model';
@@ -59,6 +60,16 @@ function stepCopy(node: FlowNode): string | null {
   return null;
 }
 
+function PuzzleAnswerProgress({ node, state, discoveries }: { node: Extract<FlowNode, { type: 'puzzle' }>; state: NonNullable<OrganizerTeam['checkpoints'][string]['nodes'][string]['puzzle']>['state']; discoveries?: OrganizerTeam['checkpoints'][string]['nodes'][string]['puzzleDiscoveries'] }) {
+  const items = puzzleHintItems(node.puzzle);
+  if (!items.length) return null;
+  return <div className="mt-2 rounded bg-slate-50 p-2 text-xs"><p className="font-semibold text-slate-700">Individual answers</p><ul className="mt-1 space-y-1">{items.map(item => {
+    const solved = puzzleHintItemSolved(node.puzzle, state, item.id);
+    const discovery = discoveries?.find(candidate => candidate.itemId === item.id);
+    return <li key={item.id} className={solved ? 'text-emerald-800' : 'text-slate-500'}><span aria-hidden="true">{solved ? '✓' : '○'}</span> <strong>{item.id}</strong>{node.puzzle.type === 'crossword' ? ` · ${item.label}` : ''} · {solved ? 'solved' : 'not solved'}{discovery ? ` · first solved ${new Date(discovery.solvedAt).toLocaleString()}` : ''}</li>;
+  })}</ul></div>;
+}
+
 function TeamRouteAndSolutions({ team, definition }: { team: OrganizerTeam; definition?: HuntDefinition }) {
   if (!definition) return null;
   return <details className="mt-4 rounded-lg border border-teal-200 bg-teal-50/40 p-3">
@@ -70,9 +81,10 @@ function TeamRouteAndSolutions({ team, definition }: { team: OrganizerTeam; defi
       return <li key={checkpoint.id}><details open={isCurrent} className="rounded-lg border border-slate-200 bg-white p-3"><summary className="cursor-pointer"><span className="font-semibold">{checkpointIndex + 1}. {checkpoint.title}</span><span className="ml-2 text-xs capitalize text-slate-600">· {progress?.status || 'not started'}</span></summary>
         <ol className="mt-3 space-y-3 border-l-2 border-slate-100 pl-3">{checkpoint.flow.nodes.map((node, index) => {
           const isActive = team.view.checkpoint?.id === checkpoint.id && team.view.node?.id === node.id;
+          const nodeProgress = progress?.nodes[node.id];
           const solution = privateSolution(node);
           const copy = stepCopy(node);
-          return <li key={node.id} className={isActive ? 'rounded bg-amber-50 p-2 ring-1 ring-amber-300' : 'py-1'}><p className="text-sm"><span className="mr-2 font-mono text-xs text-slate-500">{index + 1}</span><strong>{nodeLabels[node.type] || node.type}</strong>{isActive && <span className="ml-2 text-xs font-semibold text-amber-800">TEAM IS HERE</span>}</p>{copy && <p className="mt-1 whitespace-pre-line text-xs leading-5 text-slate-600">{copy}</p>}{solution && <p className="mt-1 break-words rounded bg-teal-50 px-2 py-1 text-xs font-semibold leading-5 text-teal-950">{solution}</p>}</li>;
+          return <li key={node.id} className={isActive ? 'rounded bg-amber-50 p-2 ring-1 ring-amber-300' : 'py-1'}><p className="text-sm"><span className="mr-2 font-mono text-xs text-slate-500">{index + 1}</span><strong>{nodeLabels[node.type] || node.type}</strong>{isActive && <span className="ml-2 text-xs font-semibold text-amber-800">TEAM IS HERE</span>}{nodeProgress && <span className="ml-2 text-xs capitalize text-slate-500">· {nodeProgress.status}{nodeProgress.attempts ? ` · ${nodeProgress.attempts} ${nodeProgress.attempts === 1 ? 'try' : 'tries'}` : ''}</span>}</p>{copy && <p className="mt-1 whitespace-pre-line text-xs leading-5 text-slate-600">{copy}</p>}{solution && <p className="mt-1 break-words rounded bg-teal-50 px-2 py-1 text-xs font-semibold leading-5 text-teal-950">{solution}</p>}{node.type === 'puzzle' && nodeProgress?.puzzle && <PuzzleAnswerProgress node={node} state={nodeProgress.puzzle.state} discoveries={nodeProgress.puzzleDiscoveries} />}{nodeProgress?.answerAttempts?.length ? <div className="mt-2 rounded border border-amber-200 bg-amber-50 p-2 text-xs"><p className="font-semibold text-amber-950">Submitted answers (latest {nodeProgress.answerAttempts.length})</p><ol className="mt-1 space-y-1">{nodeProgress.answerAttempts.map((attempt, attemptIndex) => <li key={`${attempt.submittedAt}-${attemptIndex}`} className="break-words"><time dateTime={attempt.submittedAt}>{new Date(attempt.submittedAt).toLocaleString()}</time> · <span className={attempt.accepted ? 'font-semibold text-emerald-800' : 'text-red-800'}>{attempt.accepted ? 'accepted' : 'rejected'}</span> · “{attempt.value}”{attempt.truncated ? ' (truncated)' : ''}</li>)}</ol></div> : null}</li>;
         })}</ol>
       </details></li>;
     })}</ol>

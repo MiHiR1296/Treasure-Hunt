@@ -1,4 +1,4 @@
-import { validatePuzzle } from './puzzles'
+import { puzzleHintItems, validatePuzzle } from './puzzles'
 import { EngineError, type FlowNode, type GameCommand, type HuntDefinition, type OrganizerControl, type ValidationIssue } from './types'
 
 type ObjectValue = Record<string, unknown>
@@ -104,7 +104,7 @@ export function validateHunt(value: unknown): ValidationIssue[] {
         const np = `${path}.flow.nodes[${ni}]`
         if (!isObject(node)) { issue(np, 'Must be a node object.'); return }
         const fields: Record<string, string[]> = {
-          show_text: ['text', 'next'], show_media: ['content', 'next'], verify_qr: ['prompt', 'token', 'backupCode', 'next'], verify_code: ['prompt', 'code', 'caseSensitive', 'recapAnswer', 'next'], verify_answer: ['prompt', 'answers', 'caseSensitive', 'recapAnswer', 'next'],
+          show_text: ['text', 'next'], show_media: ['content', 'next'], verify_qr: ['prompt', 'token', 'backupCode', 'next'], verify_code: ['prompt', 'code', 'caseSensitive', 'recapAnswer', 'next'], verify_answer: ['prompt', 'answers', 'caseSensitive', 'recapAnswer', 'recordAnswerAttempts', 'next'],
           verify_gps: ['prompt', 'latitude', 'longitude', 'radiusMeters', 'maxAccuracyMeters', 'next'], choose_path: ['prompt', 'choices'], puzzle: ['prompt', 'puzzle', 'next'], camera_guide: ['prompt', 'referenceImageUrl', 'latitude', 'longitude', 'next'], verify_organizer: ['prompt', 'next'], verify_image: ['prompt', 'referenceImages', 'location', 'next'],
           set_variable: ['key', 'value', 'next'], branch: ['condition', 'ifTrue', 'ifFalse'], random_branch: ['choices'], add_points: ['amount', 'label', 'next'], complete: [],
         }
@@ -119,6 +119,7 @@ export function validateHunt(value: unknown): ValidationIssue[] {
         if (node.type === 'verify_qr') { string(node.token, `${np}.token`, 2048); if (node.backupCode !== undefined) string(node.backupCode, `${np}.backupCode`, 200) }
         if (node.type === 'verify_code') string(node.code, `${np}.code`, 2048)
         if (node.type === 'verify_answer' && array(node.answers, `${np}.answers`, 1, 100)) node.answers.forEach((answer, i) => string(answer, `${np}.answers[${i}]`, 2048))
+        if (node.type === 'verify_answer' && node.recordAnswerAttempts !== undefined) boolean(node.recordAnswerAttempts, `${np}.recordAnswerAttempts`)
         if (node.caseSensitive !== undefined) boolean(node.caseSensitive, `${np}.caseSensitive`)
         if (node.recapAnswer !== undefined) string(node.recapAnswer, `${np}.recapAnswer`, 500)
         if (node.type === 'verify_gps') { coordinates(node, np); number(node.radiusMeters, `${np}.radiusMeters`, 1, 100000); number(node.maxAccuracyMeters, `${np}.maxAccuracyMeters`, 1, 100000) }
@@ -143,12 +144,19 @@ export function validateHunt(value: unknown): ValidationIssue[] {
     }
     if (array(checkpoint.hints, `${path}.hints`, 0, 100)) checkpoint.hints.forEach((hint, hi) => {
       const hp = `${path}.hints[${hi}]`
-      if (!object(hint, hp, ['id', 'title', 'cost', 'content', 'availability'])) return
+      if (!object(hint, hp, ['id', 'title', 'cost', 'content', 'availability', 'relevance'])) return
       id(hint.id, `${hp}.id`); string(hint.title, `${hp}.title`, 200); number(hint.cost, `${hp}.cost`, 0, 1000000, true); content(hint.content, `${hp}.content`, true)
       if (hint.availability !== undefined && object(hint.availability, `${hp}.availability`, ['afterHintIds', 'afterSeconds', 'afterNodeId'])) {
         if (hint.availability.afterSeconds !== undefined) number(hint.availability.afterSeconds, `${hp}.availability.afterSeconds`, 0, 31536000, true)
         if (hint.availability.afterNodeId !== undefined) id(hint.availability.afterNodeId, `${hp}.availability.afterNodeId`)
         if (hint.availability.afterHintIds !== undefined && array(hint.availability.afterHintIds, `${hp}.availability.afterHintIds`, 0, 100)) hint.availability.afterHintIds.forEach((ref, i) => id(ref, `${hp}.availability.afterHintIds[${i}]`))
+      }
+      if (hint.relevance !== undefined && object(hint.relevance, `${hp}.relevance`, ['nodeId', 'puzzleItemId', 'unlockAfterAttempts', 'unlockAfterSeconds', 'expireWhenSolved'])) {
+        id(hint.relevance.nodeId, `${hp}.relevance.nodeId`)
+        if (hint.relevance.puzzleItemId !== undefined) string(hint.relevance.puzzleItemId, `${hp}.relevance.puzzleItemId`, 2048)
+        if (hint.relevance.unlockAfterAttempts !== undefined) number(hint.relevance.unlockAfterAttempts, `${hp}.relevance.unlockAfterAttempts`, 0, 1000, true)
+        if (hint.relevance.unlockAfterSeconds !== undefined) number(hint.relevance.unlockAfterSeconds, `${hp}.relevance.unlockAfterSeconds`, 0, 31536000, true)
+        if (hint.relevance.expireWhenSolved !== undefined) boolean(hint.relevance.expireWhenSolved, `${hp}.relevance.expireWhenSolved`)
       }
     })
   })
@@ -190,6 +198,18 @@ export function validateHunt(value: unknown): ValidationIssue[] {
       if (hintIds.has(hint.id)) issue(`hint:${hint.id}`, 'Hint IDs must be unique across the hunt.')
       hintIds.add(hint.id)
       if (hint.availability?.afterNodeId && !nodes.has(hint.availability.afterNodeId)) issue(`hint:${hint.id}`, 'The availability action does not exist.')
+      if (hint.relevance) {
+        const target = nodes.get(hint.relevance.nodeId)
+        if (!target) issue(`hint:${hint.id}`, 'The related hint step does not exist.')
+        else {
+          if (['complete', 'set_variable', 'branch', 'random_branch', 'add_points'].includes(target.type)) issue(`hint:${hint.id}`, 'The related hint step must be an interactive player step.')
+          if (hint.relevance.unlockAfterAttempts !== undefined && !['verify_answer', 'verify_code', 'verify_qr', 'verify_gps'].includes(target.type)) issue(`hint:${hint.id}`, 'Attempt-based hint unlocking requires an answer, code, QR, or location verification step.')
+          if (hint.relevance.puzzleItemId) {
+            if (target.type !== 'puzzle') issue(`hint:${hint.id}`, 'A specific puzzle answer can target only a puzzle step.')
+            else if (!puzzleHintItems(target.puzzle).some(item => item.id === hint.relevance!.puzzleItemId)) issue(`hint:${hint.id}`, 'The related puzzle answer does not exist or cannot be targeted independently.')
+          }
+        }
+      }
     }
     acyclic([...hints.keys()], id => hints.get(id)!.availability?.afterHintIds ?? [], id => hints.has(id), `${path}.hints`)
   }

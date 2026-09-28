@@ -21,7 +21,7 @@ export default function HintPanel({ teamId, checkpointId, hints, disabled, send,
         return <div key={hint.id} className="space-y-3">
           <div className="flex items-center justify-between gap-4">
             <h2 className="font-semibold">{hint.title}</h2>
-            <span className="shrink-0 text-xs font-semibold text-stone-500">{hint.status === 'used' ? 'Hint used' : hint.cost === 0 ? 'Free' : `−${hint.cost} pts`}</span>
+            <span className="shrink-0 text-xs font-semibold text-stone-500">{hint.status === 'used' ? 'Hint used' : hint.status === 'expired' ? 'No longer needed' : hint.cost === 0 ? 'Free' : `−${hint.cost} pts`}</span>
           </div>
         {hint.status === 'used' && <div className="border-l-2 border-amber-400 pl-4">
           {hint.content && <div className="mt-3">{hint.content.type === 'puzzle' ? <div className="space-y-4">{hint.content.reveal ? <MediaContent content={hint.content.reveal} /> : <><p className="text-sm text-stone-600">Solve this to reveal the hint. Your team is charged only once.</p><PuzzlePlayer definition={hint.content.puzzle} state={hint.content.progress.state} feedback={notice?.hintId === hint.id ? notice : undefined} clearFeedback={clearNotice} draftKey={`${teamId}:${checkpointId}:${hint.id}:hint-puzzle:${hint.content.progress.revision}`} disabled={disabled} onChange={async value => {
@@ -31,6 +31,7 @@ export default function HintPanel({ teamId, checkpointId, hints, disabled, send,
         }} /></>}</div> : <MediaContent content={hint.content} />}</div>}
         </div>}
         {hint.status === 'locked' && <p className="text-sm text-stone-500">{hint.reason || 'This hint is not available yet.'}</p>}
+        {hint.status === 'expired' && <p className="text-sm text-emerald-800">{hint.reason || 'Your team has already solved what this hint helps with. No points were charged.'}</p>}
         {notice?.hintId === hint.id && <div className="mt-3"><ActionFeedback notice={notice} testId="hint-feedback" /></div>}
         {hint.status === 'available' && (confirmId === hint.id ? <div className="space-y-3">
           <p className="text-sm leading-relaxed">{hint.cost > 0 ? `Reveal “${hint.title}” for ${hint.cost} points? Your team is charged once.` : `Reveal “${hint.title}” for your team? This hint is free.`}</p>

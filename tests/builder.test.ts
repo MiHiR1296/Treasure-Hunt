@@ -11,7 +11,7 @@ function fixture(): HuntDefinition {
   return { schemaVersion: 1, id: 'builder-test', version: 1, title: 'Builder test', checkpoints: [{
     id: 'checkpoint-1', title: 'Garden', basePoints: 20,
     flow: { startNodeId: 'clue', nodes: [{ id: 'clue', type: 'show_text', text: 'Find the gate', next: 'qr' }, { id: 'qr', type: 'verify_qr', prompt: 'Scan it', token: 'private-token', next: 'finish' }, { id: 'finish', type: 'complete' }] },
-    hints: [{ id: 'hint-1', title: 'Look north', cost: 2, content: { type: 'text', text: 'North gate' } }, { id: 'hint-2', title: 'Closer', cost: 3, content: { type: 'text', text: 'By the tree' }, availability: { afterHintIds: ['hint-1'], afterNodeId: 'clue' } }],
+    hints: [{ id: 'hint-1', title: 'Look north', cost: 2, content: { type: 'text', text: 'North gate' } }, { id: 'hint-2', title: 'Closer', cost: 3, content: { type: 'text', text: 'By the tree' }, availability: { afterHintIds: ['hint-1'], afterNodeId: 'clue' }, relevance: { nodeId: 'clue', unlockAfterSeconds: 30, expireWhenSolved: true } }],
   }] };
 }
 
@@ -22,6 +22,7 @@ test('duplicating a checkpoint isolates hint IDs and remaps dependencies without
   assert.equal(new Set([...hunt.checkpoints[0].hints, ...duplicate.hints].map(hint => hint.id)).size, 4);
   assert.deepEqual(duplicate.hints[1].availability?.afterHintIds, [duplicate.hints[0].id]);
   assert.equal(duplicate.hints[1].availability?.afterNodeId, 'clue');
+  assert.deepEqual(duplicate.hints[1].relevance, { nodeId: 'clue', unlockAfterSeconds: 30, expireWhenSolved: true });
   assert.equal(JSON.stringify(hunt), before);
 });
 
@@ -131,11 +132,13 @@ test('safe and advanced deletion both clean start and hint references determinis
   const reconnected = removeNodeAndReconnect(checkpoint, 'clue', 'qr');
   assert.equal(reconnected.flow.startNodeId, 'qr');
   assert.equal(reconnected.hints[1].availability?.afterNodeId, undefined);
+  assert.equal(reconnected.hints[1].relevance, undefined);
   assert.equal(reconnected.flow.nodes.some(node => node.id === 'clue'), false);
 
   const disconnected = removeNodeAndDisconnect(checkpoint, 'clue');
   assert.equal(disconnected.flow.startNodeId, '');
   assert.equal(disconnected.hints[1].availability?.afterNodeId, undefined);
+  assert.equal(disconnected.hints[1].relevance, undefined);
   assert.equal(disconnected.flow.nodes.some(node => node.id === 'clue'), false);
 });
 
@@ -178,11 +181,13 @@ test('deletion history restores only its hint reference and does not erase newer
   const undone = applyFlowHistoryEntry(editedAfterDeletion, entry, 'undo');
   const restoredHint = undone.hints.find(hint => hint.id === 'hint-2');
   assert.equal(restoredHint?.availability?.afterNodeId, 'clue');
+  assert.deepEqual(restoredHint?.relevance, { nodeId: 'clue', unlockAfterSeconds: 30, expireWhenSolved: true });
   assert.equal(restoredHint?.title, 'Edited while clue was removed');
   assert.deepEqual(restoredHint?.content, { type: 'text', text: 'Keep this newer content' });
 
   const redone = applyFlowHistoryEntry(undone, entry, 'redo');
   assert.equal(redone.hints.find(hint => hint.id === 'hint-2')?.availability?.afterNodeId, undefined);
+  assert.equal(redone.hints.find(hint => hint.id === 'hint-2')?.relevance, undefined);
 
   const availabilityEditedAfterUndo: CheckpointDefinition = {
     ...undone,
@@ -190,6 +195,13 @@ test('deletion history restores only its hint reference and does not erase newer
   };
   const redoneAfterNewerEdit = applyFlowHistoryEntry(availabilityEditedAfterUndo, entry, 'redo');
   assert.equal(redoneAfterNewerEdit.hints.find(hint => hint.id === 'hint-2')?.availability?.afterNodeId, 'qr');
+
+  const relevanceEditedAfterUndo: CheckpointDefinition = {
+    ...undone,
+    hints: undone.hints.map(hint => hint.id === 'hint-2' ? { ...hint, relevance: { nodeId: 'qr', expireWhenSolved: false } } : hint),
+  };
+  const redoneAfterNewerRelevance = applyFlowHistoryEntry(relevanceEditedAfterUndo, entry, 'redo');
+  assert.deepEqual(redoneAfterNewerRelevance.hints.find(hint => hint.id === 'hint-2')?.relevance, { nodeId: 'qr', expireWhenSolved: false });
 });
 
 test('START changes only startNodeId and multiple Finish nodes remain independent', () => {

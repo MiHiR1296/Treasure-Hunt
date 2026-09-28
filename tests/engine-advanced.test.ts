@@ -185,6 +185,100 @@ test('word-search bonus slots stay capped across changed order, duplicate submis
   assert.equal(state.ledger.filter(entry => entry.kind === 'action_points').length, 4, 'the replay appends a new compensated ledger generation')
 })
 
+test('targeted hints unlock from step attempts, expire after the answer is solved, and never charge a stale purchase', () => {
+  const h = hunt([cp('first', [
+    { id: 'answer', type: 'verify_answer', prompt: 'Name it', answers: ['gate'], recordAnswerAttempts: true, next: 'second' },
+    { id: 'second', type: 'verify_answer', prompt: 'Continue', answers: ['north'], next: 'done' },
+    { id: 'done', type: 'complete' },
+  ])])
+  h.checkpoints[0].hints = [{
+    id: 'answer-help', title: 'Help with the landmark', cost: 4, content: { type: 'text', text: 'It has hinges.' },
+    relevance: { nodeId: 'answer', unlockAfterAttempts: 2, expireWhenSolved: true },
+  }]
+  let state = createInitialState(h, 'team', now)
+  assert.equal(getPlayerView(h, state, now).hints[0].status, 'locked')
+  assert.match(getPlayerView(h, state, now).hints[0].reason ?? '', /2 more tries/)
+
+  state = executeCommand(h, state, { type: 'verify', checkpointId: 'first', nodeId: 'answer', value: 'tower' }, now).state
+  assert.match(getPlayerView(h, state, now).hints[0].reason ?? '', /1 more try/)
+  state = executeCommand(h, state, { type: 'verify', checkpointId: 'first', nodeId: 'answer', value: 'bridge' }, later).state
+  assert.equal(getPlayerView(h, state, later).hints[0].status, 'available')
+
+  state = executeCommand(h, state, { type: 'verify', checkpointId: 'first', nodeId: 'answer', value: 'gate' }, later).state
+  const view = getPlayerView(h, state, later)
+  assert.equal(view.node?.id, 'second')
+  assert.equal(view.hints[0].status, 'expired')
+  assert.match(view.hints[0].reason ?? '', /No points were charged/)
+  assert.equal(JSON.stringify(view).includes('tower'), false)
+  assert.equal(JSON.stringify(view).includes('bridge'), false)
+  assert.deepEqual(state.checkpoints.first.nodes.answer.answerAttempts?.map(attempt => ({ value: attempt.value, accepted: attempt.accepted })), [
+    { value: 'tower', accepted: false }, { value: 'bridge', accepted: false }, { value: 'gate', accepted: true },
+  ])
+  const before = copy(state)
+  assert.throws(() => executeCommand(h, state, { type: 'use_hint', checkpointId: 'first', hintId: 'answer-help' }, later), code('hint_locked'))
+  assert.deepEqual(state, before)
+  assert.equal(state.score, 0)
+})
+
+test('word-search hints expire per found word while unsolved word hints remain available', () => {
+  const h = bonusWordSearchHunt()
+  h.checkpoints[0].hints = [
+    { id: 'cat-help', title: 'CAT help', cost: 2, content: { type: 'text', text: 'Top row.' }, relevance: { nodeId: 'puzzle', puzzleItemId: 'CAT' } },
+    { id: 'dog-help', title: 'DOG help', cost: 2, content: { type: 'text', text: 'Middle row.' }, relevance: { nodeId: 'puzzle', puzzleItemId: 'DOG' } },
+  ]
+  let state = createInitialState(h, 'team', now)
+  assert.deepEqual(getPlayerView(h, state, now).hints.map(hint => hint.status), ['available', 'available'])
+  state = executeCommand(h, state, { type: 'submit_puzzle', checkpointId: 'first', nodeId: 'puzzle', expectedRevision: 0, value: wordPath(0) }, now).state
+  assert.deepEqual(state.checkpoints.first.nodes.puzzle.puzzleDiscoveries, [{ itemId: 'CAT', solvedAt: now }])
+  const view = getPlayerView(h, state, now)
+  assert.deepEqual(view.hints.map(hint => hint.status), ['expired', 'available'])
+  assert.equal(JSON.stringify(view).includes('puzzleDiscoveries'), false)
+  assert.throws(() => executeCommand(h, state, { type: 'use_hint', checkpointId: 'first', hintId: 'cat-help' }, now), code('hint_locked'))
+  const purchased = executeCommand(h, state, { type: 'use_hint', checkpointId: 'first', hintId: 'dog-help' }, now)
+  assert.equal(purchased.feedback.status, 'accepted')
+  assert.equal(purchased.state.score, -2)
+  const reset = executeControl(h, purchased.state, { type: 'reset_action', checkpointId: 'first', nodeId: 'puzzle', expectedRevision: purchased.state.revision, reason: 'Restart the puzzle' }, later).state
+  assert.deepEqual(reset.checkpoints.first.nodes.puzzle.puzzleDiscoveries, [{ itemId: 'CAT', solvedAt: now }])
+})
+
+test('answer-attempt history is opt-in, organizer-only, bounded, and retained through a reset', () => {
+  const h = hunt()
+  const answer = h.checkpoints[0].flow.nodes[0]
+  assert.equal(answer.type, 'verify_answer')
+  if (answer.type !== 'verify_answer') return
+  let state = createInitialState(h, 'team', now)
+  state = executeCommand(h, state, { type: 'verify', checkpointId: 'first', nodeId: 'answer', value: 'not recorded' }, now).state
+  assert.equal(state.checkpoints.first.nodes.answer.answerAttempts, undefined)
+
+  answer.recordAnswerAttempts = true
+  state = createInitialState(h, 'team-with-audit', now)
+  for (let index = 0; index < 21; index++) state = executeCommand(h, state, { type: 'verify', checkpointId: 'first', nodeId: 'answer', value: `guess ${index}` }, now).state
+  assert.equal(state.checkpoints.first.nodes.answer.answerAttempts?.length, 20)
+  assert.equal(state.checkpoints.first.nodes.answer.answerAttempts?.[0].value, 'guess 1')
+  assert.equal(JSON.stringify(getPlayerView(h, state, now)).includes('guess 20'), false)
+  state = executeControl(h, state, { type: 'reset_action', checkpointId: 'first', nodeId: 'answer', expectedRevision: state.revision, reason: 'Try again cleanly' }, later).state
+  assert.equal(state.checkpoints.first.nodes.answer.answerAttempts?.length, 20)
+  assert.equal(state.checkpoints.first.nodes.answer.attempts, 0)
+  state = executeCommand(h, state, { type: 'verify', checkpointId: 'first', nodeId: 'answer', value: 'gate' }, later).state
+  const completedHistory = copy(state.checkpoints.first.nodes.answer.answerAttempts)
+  state = executeControl(h, state, { type: 'move_checkpoint', checkpointId: 'first', expectedRevision: state.revision, reason: 'Replay the checkpoint' }, later).state
+  assert.deepEqual(state.checkpoints.first.nodes.answer.answerAttempts, completedHistory)
+})
+
+test('hint relevance validation rejects missing steps and unsupported puzzle items', () => {
+  const missing = hunt()
+  missing.checkpoints[0].hints = [{ id: 'bad', title: 'Bad', cost: 1, content: { type: 'text', text: 'Bad' }, relevance: { nodeId: 'missing' } }]
+  assert.ok(validateHunt(missing).some(issue => issue.message.includes('related hint step')))
+
+  const invalidItem = bonusWordSearchHunt()
+  invalidItem.checkpoints[0].hints = [{ id: 'bad-item', title: 'Bad item', cost: 1, content: { type: 'text', text: 'Bad' }, relevance: { nodeId: 'puzzle', puzzleItemId: 'FOX' } }]
+  assert.ok(validateHunt(invalidItem).some(issue => issue.message.includes('puzzle answer')))
+
+  const ineffectiveAttempts = bonusWordSearchHunt()
+  ineffectiveAttempts.checkpoints[0].hints = [{ id: 'bad-attempts', title: 'Bad attempts', cost: 1, content: { type: 'text', text: 'Bad' }, relevance: { nodeId: 'puzzle', unlockAfterAttempts: 1 } }]
+  assert.ok(validateHunt(ineffectiveAttempts).some(issue => issue.message.includes('Attempt-based hint unlocking')))
+})
+
 test('word-search hint rewards compensate on hint reset, remain capped on replay, and follow checkpoint compensation', () => {
   const h = hunt()
   h.checkpoints[0].hints = [{ id: 'hint', title: 'Animal search', cost: 3, content: { type: 'puzzle', puzzle: { type: 'word_search', grid: [['C', 'A', 'T'], ['D', 'O', 'G'], ['O', 'W', 'L']], words: ['CAT', 'DOG', 'OWL'], minimumWords: 1, bonusPerExtraWord: 2 }, reveal: { type: 'text', text: 'Look toward the gate.' } } }]

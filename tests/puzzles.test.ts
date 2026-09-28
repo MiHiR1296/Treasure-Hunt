@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { initialPuzzleState, publicPuzzle, PuzzleError, updatePuzzle, validatePuzzle, type PuzzleDefinition, type PuzzleState } from '../lib/engine/puzzles'
+import { initialPuzzleState, publicPuzzle, puzzleHintItems, puzzleHintItemSolved, PuzzleError, updatePuzzle, validatePuzzle, type PuzzleDefinition, type PuzzleState } from '../lib/engine/puzzles'
 
 const fixtures: Record<PuzzleDefinition['type'], PuzzleDefinition> = {
   jigsaw: { type: 'jigsaw', rows: 2, columns: 2, pieces: ['sky', 'river', 'stone', 'leaf'].map(id => ({ id, imageUrl: `/tiles/${id}.png` })), solution: ['river', 'stone', 'leaf', 'sky'] },
@@ -112,6 +112,16 @@ test('crossword keeps answers private and checks letters and black squares', () 
   assert.ok(!JSON.stringify(projection).includes('CAT'))
   assert.ok(!JSON.stringify(projection).includes('CAR'))
   if (projection.type === 'crossword') assert.equal(projection.entries[0].length, 3)
+})
+
+test('crossword hint targets recognize one solved entry before the whole grid is complete', () => {
+  const definition = fixtures.crossword
+  assert.deepEqual(puzzleHintItems(definition), [
+    { id: 'across', label: 'A pet that purrs' }, { id: 'down', label: 'A vehicle' },
+  ])
+  const partial: PuzzleState = { type: 'crossword', grid: [['C', 'A', 'T'], ['', '', ''], ['', '', '']] }
+  assert.equal(puzzleHintItemSolved(definition, partial, 'across'), true)
+  assert.equal(puzzleHintItemSolved(definition, partial, 'down'), false)
 })
 
 test('word search can distinguish two target words that reverse each other', () => {

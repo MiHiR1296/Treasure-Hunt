@@ -78,6 +78,8 @@ For a new display hint, extend `DisplayContent`, the content validator, the allo
 
 For a puzzle hint, configure `{type:'puzzle', puzzle, reveal}` using any registered puzzle. The existing engine keeps the reveal absent until the purchased puzzle is solved. Do not duplicate puzzle state inside a modal or mark a hint solved from React alone.
 
+Hint relevance is independent of hint content. Set `relevance.nodeId` to associate a hint with an interactive step; word-search and crossword steps may also use one of the stable IDs returned by `puzzleHintItems()` as `puzzleItemId`. The engine derives solved state from authoritative node/puzzle progress, returns only `locked`, `available`, `expired` or `used` to players, and rechecks it inside the normal purchase transaction. Add new independently solvable puzzle targets through the puzzle helper rather than special-casing a renderer or trusting a client flag.
+
 Availability supports independent purchase order, prerequisite hint IDs, elapsed seconds and a completed action such as GPS. New availability rules need server-side checks plus a public locked reason; hiding a button alone is not enforcement.
 
 ## Scoring and recovery invariants
