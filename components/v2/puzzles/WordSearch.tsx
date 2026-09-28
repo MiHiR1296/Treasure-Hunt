@@ -58,7 +58,6 @@ export default function WordSearch({ definition, state, disabled, onChange }: Pu
     event.preventDefault()
     event.currentTarget.closest<HTMLElement>('[data-word-search-grid]')?.setPointerCapture(event.pointerId)
     drag.current = { origin: cell, path: [cell], moved: false }
-    setStart(cell)
     setPreview([cell])
   }
   const moveDrag = (event: ReactPointerEvent<HTMLElement>) => {

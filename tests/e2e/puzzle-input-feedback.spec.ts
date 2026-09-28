@@ -229,4 +229,9 @@ test('word search supports drag selection, highlights found letters, and replace
   const fittedCell = await grid.getByRole('button', { name: 'C, row 1, column 1, found word', exact: true }).boundingBox()
   expect(fittedCell).not.toBeNull()
   expect(Math.abs(fittedCell!.width - fittedCell!.height)).toBeLessThanOrEqual(1)
+
+  await grid.getByRole('button', { name: 'D, row 2, column 1', exact: true }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'Start selected. Tap the last letter, or drag across the word.' })).toBeVisible()
+  await grid.getByRole('button', { name: 'G, row 2, column 3', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'You found your finish.', exact: true })).toBeVisible()
 })

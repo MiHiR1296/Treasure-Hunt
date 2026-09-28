@@ -90,7 +90,7 @@ test('serial grid saves retain keyboard focus, skip printed cells and fit portra
   }
   await page.setViewportSize({ width: 320, height: 568 });
   await wordSearch.getByRole('button', { name: 'C, row 1, column 1', exact: true }).click();
-  await expect(page.getByRole('status').filter({ hasText: 'Now select the last letter' })).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: 'Start selected. Tap the last letter, or drag across the word.' })).toBeVisible();
   await wordSearch.getByRole('button', { name: 'T, row 1, column 3', exact: true }).click();
 
   const crossword = page.getByRole('group', { name: 'Crossword puzzle grid' });
