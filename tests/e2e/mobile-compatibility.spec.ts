@@ -79,7 +79,7 @@ test('serial grid saves retain keyboard focus, skip printed cells and fit portra
 
   const wordSearch = page.getByRole('group', { name: 'Word search puzzle grid' });
   await expect(wordSearch).toBeVisible();
-  await expect(page.getByRole('note')).toHaveText('How to play: Tap the first letter of a word, then tap its last letter to select it.');
+  await expect(page.getByRole('note')).toContainText('Press the first letter, drag a straight line across the word, then release.');
   for (const viewport of [{ width: 320, height: 568 }, { width: 390, height: 844 }, { width: 844, height: 390 }]) {
     await page.setViewportSize(viewport);
     const wordSearchBox = await wordSearch.boundingBox();
