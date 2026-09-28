@@ -27,41 +27,52 @@ test('organizer builds branching checkpoints without JSON, recovers drafts, prev
   await page.getByRole('button', { name: 'Design', exact: true }).click();
   await expect(page.getByRole('button', { name: /Frankie challenge/ })).toBeVisible();
   await page.getByRole('button', { name: 'New hunt', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Previous step', exact: true })).toBeDisabled();
-  await page.getByRole('button', { name: 'Next step', exact: true }).click();
+  await expect(page.getByLabel('Clue or instructions', { exact: true })).toBeVisible();
+  await page.getByLabel('Selected step', { exact: true }).selectOption('answer');
   await expect(page.getByLabel('Accepted answers — one per line', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Previous step', exact: true }).click();
+  await page.getByLabel('Selected step', { exact: true }).selectOption('clue');
   await expect(page.getByLabel('Clue or instructions', { exact: true })).toBeVisible();
   await page.getByLabel('Hunt title', { exact: true }).fill(title);
   await page.getByLabel('Unique hunt ID', { exact: true }).fill(id);
   await page.getByLabel('Checkpoint title', { exact: true }).fill('The first clue');
   await page.getByLabel('Clue or instructions', { exact: true }).fill('Find the tool that points north.');
-  await page.getByRole('button', { name: 'Connect next step on canvas', exact: true }).click();
-  await page.getByRole('button', { name: /Finish checkpoint/ }).click();
+  await page.locator('.react-flow__node[data-id="clue"] .react-flow__handle.source').dragTo(page.locator('.react-flow__node[data-id="finish"] .react-flow__handle.target'));
+  await expect(page.getByLabel('After success, continue to', { exact: true })).toHaveValue('finish');
+  await page.locator('.react-flow__edge[data-id="clue::next"] .react-flow__edge-interaction').click({ force: true });
+  await page.keyboard.press('Delete');
+  await expect(page.getByLabel('After success, continue to', { exact: true })).toHaveValue('');
   await expect(page.getByText(/configuration issues? to resolve before publishing/)).toBeVisible();
   await page.getByLabel('After success, continue to', { exact: true }).selectOption('answer');
-  await page.getByRole('button', { name: /Step 2 Answer a question/ }).click();
+  await page.getByLabel('Selected step', { exact: true }).selectOption('answer');
   await page.getByLabel('What should the player do?', { exact: true }).fill('What points north?');
   await page.getByLabel('Accepted answers — one per line', { exact: true }).fill('compass');
   await page.getByRole('button', { name: 'Add hint', exact: true }).click();
   await page.getByLabel('Hint title', { exact: true }).fill('A small pointer');
   await page.getByLabel('Text to reveal', { exact: true }).fill('It has a magnetic needle.');
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect(page.getByLabel('Hint title', { exact: true })).toHaveValue('A small pointer');
+  await expect(page.getByLabel('Text to reveal', { exact: true })).toHaveValue('It has a magnetic needle.');
+  await page.getByRole('button', { name: 'Redo', exact: true }).click();
+  await expect(page.getByLabel('Hint title', { exact: true })).toHaveValue('A small pointer');
 
   await page.getByRole('button', { name: 'Add checkpoint', exact: true }).click();
   await page.getByLabel('Checkpoint title', { exact: true }).fill('The river gate');
   await page.getByLabel('Clue or instructions', { exact: true }).fill('Follow the water to the old gate.');
-  await page.getByRole('button', { name: /Step 2 Answer a question/ }).click();
-  await page.getByRole('button', { name: 'Remove step', exact: true }).click();
-  await page.getByRole('button', { name: 'Remove and reconnect', exact: true }).click();
-  await page.getByLabel('Add an action', { exact: true }).selectOption('verify_qr');
-  await page.getByRole('button', { name: 'Add step', exact: true }).click();
+  await page.getByLabel('Selected step', { exact: true }).selectOption('answer');
+  await page.getByRole('button', { name: 'Remove', exact: true }).click();
+  await page.getByRole('button', { name: 'Remove & reconnect', exact: true }).click();
+  await page.getByRole('button', { name: '+ QR', exact: true }).click();
+  await page.getByLabel('After success, continue to', { exact: true }).selectOption('finish');
+  await page.getByLabel('Selected step', { exact: true }).selectOption('clue');
+  await page.getByLabel('After success, continue to', { exact: true }).selectOption('verify-qr-1');
+  await page.getByLabel('Selected step', { exact: true }).selectOption('verify-qr-1');
   await page.getByRole('button', { name: 'Generate a random token', exact: true }).click();
   await page.getByLabel('Backup code (optional)', { exact: true }).fill('RIVER7');
   await page.getByRole('button', { name: 'Add GPS + code alternative route', exact: true }).click();
-  await page.getByRole('button', { name: /Reach a GPS region/ }).click();
+  await page.getByLabel('Selected step', { exact: true }).selectOption('fallback-gps-1');
   await page.getByLabel('Latitude', { exact: true }).fill('19.24');
   await page.getByLabel('Longitude', { exact: true }).fill('73.13');
-  await page.getByRole('button', { name: /Enter a code/ }).click();
+  await page.getByLabel('Selected step', { exact: true }).selectOption('fallback-code-1');
   await page.getByLabel('Correct code', { exact: true }).fill('LANDMARK');
   await page.getByRole('button', { name: 'Duplicate', exact: true }).click();
   await page.getByLabel('Checkpoint title', { exact: true }).fill('Temporary copy');
@@ -122,7 +133,69 @@ test('organizer builds branching checkpoints without JSON, recovers drafts, prev
   expect(copies.hunts.find((item: { id: string }) => item.id === id).title).toBe(title + ' updated');
 });
 
+test('saving disables canvas route mutations until the response completes', async ({ page }) => {
+  const id = `saving-${randomUUID()}`; created.add(id);
+  await page.goto('/v2/admin');
+  await page.getByLabel('Password', { exact: true }).fill('browser-test-password-only');
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await page.getByRole('button', { name: 'Design', exact: true }).click();
+  await page.getByRole('button', { name: 'New hunt', exact: true }).click();
+  await page.getByLabel('Hunt title', { exact: true }).fill('Delayed save');
+  await page.getByLabel('Unique hunt ID', { exact: true }).fill(id);
+
+  const selectedEdge = page.locator('.react-flow__edge[data-id="clue::next"] .react-flow__edge-interaction');
+  await selectedEdge.click({ force: true });
+  let releaseSave!: () => void;
+  let markStarted!: () => void;
+  const saveStarted = new Promise<void>(resolve => { markStarted = resolve; });
+  const saveGate = new Promise<void>(resolve => { releaseSave = resolve; });
+  await page.route('**/api/v2/admin/drafts', async route => {
+    markStarted();
+    await saveGate;
+    await route.continue();
+  });
+
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  await saveStarted;
+  await expect(page.getByRole('button', { name: 'Saving…', exact: true })).toBeDisabled();
+  await page.keyboard.press('Delete');
+  await page.locator('.react-flow__node[data-id="clue"] .react-flow__handle.source').dragTo(page.locator('.react-flow__node[data-id="finish"] .react-flow__handle.target'));
+  await expect(page.getByLabel('After success, continue to', { exact: true })).toHaveValue('answer');
+
+  releaseSave();
+  await expect(page.getByText('Draft saved to the event server.', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('After success, continue to', { exact: true })).toHaveValue('answer');
+  await page.unroute('**/api/v2/admin/drafts');
+});
+
+test('unsupported imported steps open safely in Advanced JSON and survive local recovery', async ({ page }) => {
+  await page.goto('/v2/admin');
+  await page.getByLabel('Password', { exact: true }).fill('browser-test-password-only');
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await page.getByRole('button', { name: 'Design', exact: true }).click();
+  await page.getByText('Import a hunt export', { exact: true }).click();
+  const definition = {
+    schemaVersion: 1, id: 'unsupported-import', version: 1, title: 'Unsupported import', checkpoints: [{
+      id: 'checkpoint', title: 'Unknown step', basePoints: 10, hints: [],
+      flow: { startNodeId: 'mystery', nodes: [{ id: 'mystery', type: 'unsupported_step', next: 'finish' }, { id: 'finish', type: 'complete' }] },
+    }],
+  };
+  await page.getByLabel('Import V2 configuration', { exact: true }).setInputFiles({
+    name: 'unsupported-hunt.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(definition)),
+  });
+
+  const warning = page.getByRole('alert').filter({ hasText: 'unsupported_step' });
+  await expect(warning).toContainText('The draft is still available below in Advanced JSON');
+  await expect(page.getByLabel('Advanced configuration', { exact: true })).toContainText('unsupported_step');
+
+  await page.reload();
+  await page.getByRole('button', { name: 'Design', exact: true }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'unsupported_step' })).toBeVisible();
+  await expect(page.getByLabel('Advanced configuration', { exact: true })).toContainText('Unsupported import');
+});
+
 test('mobile organizer preserves work when changing sections without page overflow', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/v2/admin');
   await page.getByLabel('Password', { exact: true }).fill('browser-test-password-only');
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();

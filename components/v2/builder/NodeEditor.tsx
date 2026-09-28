@@ -1,5 +1,6 @@
 'use client';
 
+import { useId } from 'react';
 import type { CheckpointDefinition, Condition, DisplayContent, FlowNode, HuntDefinition, VariableValue } from '@/lib/engine/types';
 import { actionClass, buttonClass, CheckField, Field, inputClass, LocationFields, NumberField, TextField } from './Fields';
 import { canConnect, isInteractiveNode, newId, nodeLabels } from './model';
@@ -13,6 +14,21 @@ function ValueEditor({ value, onChange }: { value: VariableValue; onChange: (val
   </div>;
 }
 
+function knownVariables(hunt: HuntDefinition): { key: string; types: Set<string> }[] {
+  const variables = new Map<string, Set<string>>();
+  for (const node of hunt.checkpoints.flatMap(checkpoint => checkpoint.flow.nodes)) if (node.type === 'set_variable') {
+    const types = variables.get(node.key) ?? new Set<string>();
+    types.add(typeof node.value); variables.set(node.key, types);
+  }
+  return [...variables].map(([key, types]) => ({ key, types })).sort((a, b) => a.key.localeCompare(b.key));
+}
+
+function VariableKeyField({ label, value, hunt, onChange }: { label: string; value: string; hunt: HuntDefinition; onChange: (value: string) => void }) {
+  const listId = `variables-${useId().replace(/:/g, '')}`;
+  const variables = knownVariables(hunt);
+  return <Field label={label}><input className={inputClass} list={listId} value={value} onChange={event => onChange(event.target.value)} /><datalist id={listId}>{variables.map(variable => <option key={variable.key} value={variable.key}>{[...variable.types].join(' / ')}</option>)}</datalist><p className="mt-1 text-xs leading-5 text-slate-500">Choose a value already used in this hunt or enter a deliberate new name.</p></Field>;
+}
+
 function ConditionEditor({ value, hunt, onChange }: { value: Condition; hunt: HuntDefinition; onChange: (value: Condition) => void }) {
   return <div className="space-y-4 rounded-lg bg-slate-50 p-3">
     <Field label="Check this condition"><select className={inputClass} value={value.type} onChange={event => {
@@ -23,7 +39,7 @@ function ConditionEditor({ value, hunt, onChange }: { value: Condition; hunt: Hu
         case 'time': onChange({ type: 'time', after: '06:00', before: '18:00' }); break;
       }
     }}><option value="variable">A remembered value matches</option><option value="checkpoint_completed">A checkpoint is complete</option><option value="hint_used">A hint has been used</option><option value="time">Current time is in a window</option></select></Field>
-    {value.type === 'variable' && <><TextField label="Remembered value name" value={value.key} onChange={key => onChange({ ...value, key })} /><ValueEditor value={value.equals} onChange={equals => onChange({ ...value, equals })} /></>}
+    {value.type === 'variable' && <><VariableKeyField label="Remembered value name" value={value.key} hunt={hunt} onChange={key => onChange({ ...value, key })} /><ValueEditor value={value.equals} onChange={equals => onChange({ ...value, equals })} />{(() => { const known = knownVariables(hunt).find(variable => variable.key === value.key); return known && !known.types.has(typeof value.equals) ? <p className="rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-900">This condition compares a {typeof value.equals}, but the existing assignments use {[...known.types].join(' / ')}. Confirm that the types should differ.</p> : null; })()}</>}
     {value.type === 'checkpoint_completed' && <Field label="Checkpoint"><select className={inputClass} value={value.checkpointId} onChange={event => onChange({ ...value, checkpointId: event.target.value })}>{hunt.checkpoints.map(checkpoint => <option key={checkpoint.id} value={checkpoint.id}>{checkpoint.title}</option>)}</select></Field>}
     {value.type === 'hint_used' && <Field label="Hint"><select className={inputClass} value={value.hintId} onChange={event => onChange({ ...value, hintId: event.target.value })}><option value="">Choose a hint</option>{hunt.checkpoints.flatMap(checkpoint => checkpoint.hints.map(hint => <option key={hint.id} value={hint.id}>{checkpoint.title} · {hint.title || hint.id}</option>))}</select></Field>}
     {value.type === 'time' && <><TextField label="Daily window begins (UTC)" type="time" value={value.after} onChange={after => onChange({ ...value, after })} /><TextField label="Daily window ends (UTC)" type="time" value={value.before} onChange={before => onChange({ ...value, before })} /><p className="text-xs text-slate-500">The server checks UTC time. A window can cross midnight, for example 18:00–06:00.</p></>}
@@ -97,7 +113,7 @@ export default function NodeEditor({ checkpoint, hunt, node, onChange, onConnect
       <p className="rounded-lg bg-amber-50 p-3 text-sm leading-6 text-amber-950">Photographs require organizer review. Include an alternative route if the player cannot upload a photo.</p>
     </>}
     {node.type === 'verify_organizer' && <p className="rounded-lg bg-teal-50 p-3 text-sm leading-6 text-teal-950">The team waits here until an organizer approves the step. The approval and its reason are recorded.</p>}
-    {node.type === 'set_variable' && <><TextField label="Remembered value name" value={node.key} onChange={key => onChange({ ...node, key })} hint="Use this same name in a conditional route later in the hunt." /><ValueEditor value={node.value} onChange={value => onChange({ ...node, value })} /></>}
+    {node.type === 'set_variable' && <><VariableKeyField label="Remembered value name" value={node.key} hunt={hunt} onChange={key => onChange({ ...node, key })} /><ValueEditor value={node.value} onChange={value => onChange({ ...node, value })} />{(() => { const known = knownVariables(hunt).find(variable => variable.key === node.key); return known && (known.types.size > 1 || !known.types.has(typeof node.value)) ? <p className="rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-900">This variable is assigned with more than one value type. Prefer one consistent type throughout the hunt.</p> : null; })()}</>}
     {node.type === 'add_points' && <><TextField label="Score entry label" value={node.label} onChange={label => onChange({ ...node, label })} /><NumberField label="Points to add or deduct" value={node.amount} min={-1000000} max={1000000} onChange={amount => onChange({ ...node, amount })} hint="Use a negative number for a deduction. This entry is recorded once when the team reaches this step." /></>}
     {node.type === 'branch' && <>
       <ConditionEditor value={node.condition} hunt={hunt} onChange={condition => onChange({ ...node, condition })} />

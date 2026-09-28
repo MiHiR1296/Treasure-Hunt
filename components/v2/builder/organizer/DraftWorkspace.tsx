@@ -7,13 +7,26 @@ import HuntBuilder from '../HuntBuilder';
 import { actionClass, buttonClass, Field, inputClass } from '../Fields';
 import { createCheckpoint } from '../model';
 import { BuilderMediaProvider } from '../AssetField';
+import { isSupportedNodeType } from '../catalog';
 import { adminRequest, AdminRequestError, type Asset, type Draft, type OperationProps, requestId } from './client';
 
 interface Workspace { definition: HuntDefinition; revision: number | null; publishedVersion?: number; dirty: boolean; localKey?: string }
 const storageKey = 'hunt-v2-organizer-drafts';
 
-function editable(value: HuntDefinition): boolean {
-  return Boolean(value && typeof value.title === 'string' && typeof value.id === 'string' && Array.isArray(value.checkpoints) && value.checkpoints.every(checkpoint => checkpoint && Array.isArray(checkpoint.hints) && checkpoint.flow && Array.isArray(checkpoint.flow.nodes)));
+function editable(value: unknown): value is HuntDefinition {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as HuntDefinition;
+  return typeof candidate.title === 'string' && typeof candidate.id === 'string' && Array.isArray(candidate.checkpoints)
+    && candidate.checkpoints.every(checkpoint => checkpoint && Array.isArray(checkpoint.hints) && checkpoint.flow && Array.isArray(checkpoint.flow.nodes));
+}
+
+function visualBuilderProblem(value: HuntDefinition): string {
+  if (!editable(value)) return 'This draft is missing structure required by the visual builder.';
+  const unsupported = [...new Set(value.checkpoints.flatMap(checkpoint => checkpoint.flow.nodes)
+    .map(node => node && typeof node === 'object' ? (node as { type?: unknown }).type : 'invalid node')
+    .filter(type => !isSupportedNodeType(type))
+    .map(type => typeof type === 'string' ? type : 'missing type'))];
+  return unsupported.length ? `The visual builder does not support these step types: ${unsupported.join(', ')}.` : '';
 }
 
 export default function DraftWorkspace({ dashboard, pending, run, refresh, notify, importedPuzzle, onPuzzleImported }: OperationProps & { importedPuzzle: PuzzleDefinition | null; onPuzzleImported: () => void }) {
@@ -29,6 +42,7 @@ export default function DraftWorkspace({ dashboard, pending, run, refresh, notif
   const [hydrated, setHydrated] = useState(false);
   const consumedPuzzle = useRef<PuzzleDefinition | null>(null);
   const issues = useMemo(() => workspace ? validateHunt(workspace.definition) : [], [workspace]);
+  const builderProblem = useMemo(() => workspace ? visualBuilderProblem(workspace.definition) : '', [workspace]);
   const mediaServices = useMemo(() => ({
     list: async () => (await adminRequest<{ media: Asset[] }>('/api/v2/admin/media')).media,
     upload: async (file: File) => { const form = new FormData(); form.set('file', file); form.set('requestId', requestId()); return (await adminRequest<{ media: Asset }>('/api/v2/admin/media', 'POST', form)).media; },
@@ -77,8 +91,8 @@ export default function DraftWorkspace({ dashboard, pending, run, refresh, notif
       const converted = await adminRequest<{ definition: HuntDefinition; issues: ValidationIssue[]; warnings: string[] }>('/api/v2/admin/import', 'POST', { source, huntId: `imported-${requestId().slice(0, 8)}` });
       load({ definition: converted.definition, revision: null, dirty: true }); setImportWarnings([...converted.warnings, ...converted.issues.map(issue => `${issue.path}: ${issue.message}`)]);
     } else {
-      if (!editable(source as HuntDefinition)) throw new AdminRequestError('This file does not have a V2 hunt structure. Use Import V1 export for a legacy hunt.', 400);
-      load({ definition: { ...(source as HuntDefinition), id: `imported-${requestId().slice(0, 8)}`, version: 1 }, revision: null, dirty: true }); setImportWarnings([]);
+      if (!editable(source)) throw new AdminRequestError('This file does not have a V2 hunt structure. Use Import V1 export for a legacy hunt.', 400);
+      load({ definition: { ...source, id: `imported-${requestId().slice(0, 8)}`, version: 1 }, revision: null, dirty: true }); setImportWarnings([]);
     }
     notify('Export loaded as a new draft. Review it before saving or publishing.');
   }
@@ -119,7 +133,8 @@ export default function DraftWorkspace({ dashboard, pending, run, refresh, notif
     }}>{hunt.title} · v{hunt.version}</button>)}</div></details>
     {workspace && <div className="space-y-5 rounded-2xl border border-slate-200 bg-white p-4 sm:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-wider text-teal-800">{workspace.dirty ? 'Unsaved changes' : `Saved draft · revision ${workspace.revision}`}</p><p className="mt-1 text-xs text-slate-500">Published versions remain fixed for teams already playing.</p></div><div className="flex flex-wrap gap-2"><button type="button" className={buttonClass} disabled={Boolean(pending) || jsonOpen} onClick={() => { load({ definition: { ...structuredClone(workspace.definition), id: `hunt-${requestId().slice(0, 8)}`, title: `${workspace.definition.title || 'Untitled hunt'} (copy)`.slice(0, 200), version: 1 }, revision: null, dirty: true }); notify('A separate hunt draft is ready. Your original hunt and its teams are unchanged.'); }}>Duplicate as new hunt</button><button type="button" className={buttonClass} disabled={Boolean(pending) || jsonOpen} onClick={() => exportDefinition(workspace.definition)}>Export hunt</button><button type="button" className={buttonClass} disabled={Boolean(pending)} onClick={() => { if (!jsonOpen) setJson(JSON.stringify(workspace.definition, null, 2)); setJsonOpen(!jsonOpen); setJsonError(''); }}>{jsonOpen ? 'Use visual builder' : 'Advanced JSON'}</button></div></div>
-      {jsonOpen || !editable(workspace.definition) ? <div className="space-y-3"><Field label="Advanced configuration"><textarea className={`${inputClass} font-mono`} rows={22} value={jsonOpen ? json : JSON.stringify(workspace.definition, null, 2)} disabled={Boolean(pending)} onChange={event => { setJsonOpen(true); setJson(event.target.value); }} /></Field>{jsonError && <p role="alert" className="text-sm text-red-700">{jsonError}</p>}<button type="button" className={buttonClass} disabled={Boolean(pending)} onClick={() => { try { const definition = JSON.parse(json); if (!editable(definition)) { setJsonError('Include a title, ID, checkpoints, flows, and hint arrays before using this configuration.'); return; } update(definition); setJsonError(''); setJsonOpen(false); } catch { setJsonError('This is not valid JSON. Your original draft is unchanged.'); } }}>Apply JSON to draft</button></div>
+      {builderProblem && <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-amber-950">{builderProblem} The draft is still available below in Advanced JSON so you can repair or export it.</p>}
+      {jsonOpen || Boolean(builderProblem) ? <div className="space-y-3"><Field label="Advanced configuration"><textarea className={`${inputClass} font-mono`} rows={22} value={jsonOpen ? json : JSON.stringify(workspace.definition, null, 2)} disabled={Boolean(pending)} onChange={event => { setJsonOpen(true); setJson(event.target.value); }} /></Field>{jsonError && <p role="alert" className="text-sm text-red-700">{jsonError}</p>}<button type="button" className={buttonClass} disabled={Boolean(pending)} onClick={() => { try { const definition = JSON.parse(jsonOpen ? json : JSON.stringify(workspace.definition)); if (!editable(definition)) { setJsonError('Include a title, ID, checkpoints, flows, and hint arrays before using this configuration.'); return; } update(definition); setJsonError(''); setJsonOpen(false); } catch { setJsonError('This is not valid JSON. Your original draft is unchanged.'); } }}>Apply JSON to draft</button></div>
         : <BuilderMediaProvider services={mediaServices}><HuntBuilder key={workspace.localKey || workspace.definition.id} value={workspace.definition} onChange={update} disabled={Boolean(pending)} /></BuilderMediaProvider>}
       <div className="space-y-4 border-t border-slate-200 pt-5">
         <div className="flex flex-wrap items-end gap-3"><button type="button" className={buttonClass} disabled={Boolean(pending) || jsonOpen} onClick={() => void run('save-draft', async () => { await save(workspace); notify('Draft saved to the event server.'); await refresh(); })}>{pending === 'save-draft' ? 'Saving…' : 'Save draft'}</button><button type="button" className={buttonClass} disabled={Boolean(pending) || issues.length > 0 || jsonOpen} onClick={() => void run('preview', async () => { const result = await adminRequest<{ url: string }>('/api/v2/admin/preview', 'POST', { definition: workspace.definition }); setPreviewUrl(result.url); notify('Test session ready. Its progress is separate from the live leaderboard.'); await refresh(); })}>Start player preview</button><Field label="Publish as"><select className={inputClass} disabled={Boolean(pending)} value={publicationStatus} onChange={event => setPublicationStatus(event.target.value as 'ready' | 'live')}><option value="ready">Ready — start later</option><option value="live">Live — open now</option></select></Field><button type="button" className={actionClass} disabled={Boolean(pending) || issues.length > 0 || jsonOpen} onClick={() => void run('publish', async () => {
