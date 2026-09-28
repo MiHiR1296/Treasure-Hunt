@@ -79,7 +79,7 @@ test('serial grid saves retain keyboard focus, skip printed cells and fit portra
 
   const wordSearch = page.getByRole('group', { name: 'Word search puzzle grid' });
   await expect(wordSearch).toBeVisible();
-  await expect(page.getByRole('note')).toHaveText('How to play: Tap the first letter of a word, then tap its last letter to select it.');
+  await expect(page.getByRole('note')).toContainText('Press the first letter, drag a straight line across the word, then release.');
   for (const viewport of [{ width: 320, height: 568 }, { width: 390, height: 844 }, { width: 844, height: 390 }]) {
     await page.setViewportSize(viewport);
     const wordSearchBox = await wordSearch.boundingBox();
@@ -90,7 +90,7 @@ test('serial grid saves retain keyboard focus, skip printed cells and fit portra
   }
   await page.setViewportSize({ width: 320, height: 568 });
   await wordSearch.getByRole('button', { name: 'C, row 1, column 1', exact: true }).click();
-  await expect(page.getByRole('status').filter({ hasText: 'Now select the last letter' })).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: 'Start selected. Tap the last letter, or drag across the word.' })).toBeVisible();
   await wordSearch.getByRole('button', { name: 'T, row 1, column 3', exact: true }).click();
 
   const crossword = page.getByRole('group', { name: 'Crossword puzzle grid' });
