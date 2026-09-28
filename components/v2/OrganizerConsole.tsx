@@ -64,7 +64,7 @@ export default function OrganizerConsole() {
   const openRequests = (dashboard?.help.filter(help => help.status === 'open').length || 0) + (dashboard?.photos.length || 0);
   const operations = dashboard ? { dashboard, pending, run, refresh, notify: setNotice } : null;
 
-  return <main className="min-h-screen bg-slate-50 px-4 py-8 text-slate-900 sm:px-8"><div className="mx-auto max-w-7xl space-y-6">
+  return <main className="min-h-screen bg-slate-50 px-4 py-8 text-slate-900 sm:px-8"><div className="mx-auto max-w-[96rem] space-y-6">
     <header className="flex flex-wrap items-start justify-between gap-4"><div><Link href="/v2" className="text-sm font-semibold text-teal-800 hover:underline">← Player home</Link><p className="mt-6 text-xs font-bold uppercase tracking-widest text-teal-800">Treasure Hunt V2</p><h1 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">Organizer console</h1><p className="mt-3 text-slate-600">Build an adventure. Follow your teams. Keep the event moving.</p></div>
       {authenticated && <div className="flex gap-2"><button type="button" className={buttonClass} disabled={Boolean(pending)} onClick={() => void run('refresh', () => refresh())}>{pending === 'refresh' ? 'Refreshing…' : 'Refresh'}</button><button type="button" className={buttonClass} disabled={Boolean(pending)} onClick={() => void run('logout', async () => { await adminRequest('/api/v2/admin/session', 'DELETE', {}); refreshSequence.current += 1; setDashboard(null); setAuthenticated(false); setImportedPuzzle(null); })}>Sign out</button></div>}
     </header>

@@ -1,13 +1,7 @@
 import type { CheckpointDefinition, FlowNode, HuntDefinition, InteractiveNode } from '@/lib/engine/types';
-import { defaultPuzzle } from './puzzleDefaults';
-
-export const nodeLabels: Record<string, string> = {
-  show_text: 'Clue or text', show_media: 'Image, audio, or video', verify_answer: 'Answer a question',
-  verify_code: 'Enter a code', verify_qr: 'Scan a QR', verify_gps: 'Reach a GPS region',
-  choose_path: 'Choose a path', complete: 'Finish checkpoint', puzzle: 'Solve a puzzle',
-  camera_guide: 'Camera guidance', verify_organizer: 'Organizer approval', verify_image: 'Photograph review',
-  set_variable: 'Remember a value', branch: 'Conditional route', random_branch: 'Random route', add_points: 'Award or deduct points',
-};
+import { nodeTargets } from './graph/mutations';
+export { createNode, nodeLabels } from './catalog';
+export { nodeTargets };
 
 export function newId(prefix: string, used: Iterable<string> = []): string {
   const existing = new Set(used);
@@ -20,13 +14,6 @@ export function copy<T>(value: T): T { return JSON.parse(JSON.stringify(value)) 
 
 export function isInteractiveNode(node: FlowNode): node is InteractiveNode {
   return !['set_variable', 'branch', 'random_branch', 'add_points', 'complete'].includes(node.type);
-}
-
-export function nodeTargets(node: FlowNode): string[] {
-  const targets = node.type === 'choose_path' || node.type === 'random_branch' ? node.choices.map(choice => choice.next) : node.type === 'branch' ? [node.ifTrue, node.ifFalse] : 'next' in node ? [node.next] : [];
-  const fallback = 'fallback' in node ? node.fallback as { nodeId?: string; enabled?: boolean } | undefined : undefined;
-  if (fallback?.nodeId) targets.push(fallback.nodeId);
-  return targets;
 }
 
 export function rewriteTargets(node: FlowNode, from: string, to: string): FlowNode {
@@ -87,28 +74,6 @@ export function duplicateCheckpoint(hunt: HuntDefinition, checkpoint: Checkpoint
   result.flow.nodes = result.flow.nodes.map(node => node.type === 'branch' && node.condition.type === 'hint_used' && mapping.has(node.condition.hintId)
     ? { ...node, condition: { ...node.condition, hintId: mapping.get(node.condition.hintId)! } } : node);
   return result;
-}
-
-export function createNode(type: FlowNode['type'], id: string, next: string): FlowNode {
-  switch (type) {
-    case 'show_text': return { id, type, text: '', next };
-    case 'verify_answer': return { id, type, prompt: '', answers: [''], next };
-    case 'verify_code': return { id, type, prompt: 'Enter the code you found.', code: '', next };
-    case 'verify_qr': return { id, type, prompt: 'Find and scan the checkpoint QR.', token: '', next };
-    case 'verify_gps': return { id, type, prompt: 'Check your location when you have arrived.', latitude: 0, longitude: 0, radiusMeters: 75, maxAccuracyMeters: 100, next };
-    case 'choose_path': return { id, type, prompt: 'How would you like to continue?', choices: [{ id: 'primary', label: 'Main route', next }, { id: 'alternative', label: 'Alternative route', next }] };
-    case 'complete': return { id, type };
-    case 'show_media': return { id, type, content: { type: 'image', url: '', alt: '' }, next };
-    case 'puzzle': return { id, type, prompt: 'Solve the puzzle to continue.', puzzle: defaultPuzzle('text'), next };
-    case 'camera_guide': return { id, type, prompt: 'Match the reference with the landmark in front of you.', next };
-    case 'verify_organizer': return { id, type, prompt: 'Show the organizer what you found. They will approve this step.', next };
-    case 'verify_image': return { id, type, prompt: 'Photograph the landmark for organizer review.', referenceImages: [], next };
-    case 'set_variable': return { id, type, key: 'discovery', value: true, next };
-    case 'branch': return { id, type, condition: { type: 'variable', key: 'discovery', equals: true }, ifTrue: next, ifFalse: next };
-    case 'random_branch': return { id, type, choices: [{ next, weight: 1 }, { next, weight: 1 }] };
-    case 'add_points': return { id, type, amount: 5, label: 'Bonus', next };
-    default: throw new Error(`The builder cannot create ${type} yet.`);
-  }
 }
 
 /** Insert before a step, preserving all incoming routes, or leave disconnected for manual wiring. */
