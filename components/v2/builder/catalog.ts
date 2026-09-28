@@ -100,6 +100,20 @@ export const nodeCatalog: Record<FlowNode['type'], NodeDescriptor> = {
   },
 };
 
+const unsupportedNodeDescriptor: Omit<NodeDescriptor, 'create' | 'category'> = {
+  label: 'Unsupported step',
+  shortLabel: 'Unsupported',
+  description: 'This step type is not supported by the visual builder.',
+};
+
+export function isSupportedNodeType(type: unknown): type is FlowNode['type'] {
+  return typeof type === 'string' && Object.hasOwn(nodeCatalog, type);
+}
+
+export function nodeDescriptor(type: unknown): Pick<NodeDescriptor, 'label' | 'shortLabel' | 'description'> {
+  return isSupportedNodeType(type) ? nodeCatalog[type] : unsupportedNodeDescriptor;
+}
+
 export const nodeLabels: Record<FlowNode['type'], string> = Object.fromEntries(
   Object.entries(nodeCatalog).map(([type, descriptor]) => [type, descriptor.label]),
 ) as Record<FlowNode['type'], string>;
@@ -107,4 +121,3 @@ export const nodeLabels: Record<FlowNode['type'], string> = Object.fromEntries(
 export function createNode(type: FlowNode['type'], id: string, next = ''): FlowNode {
   return nodeCatalog[type].create(id, next);
 }
-

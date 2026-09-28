@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { Handle, Position, useUpdateNodeInternals, type Node, type NodeProps } from '@xyflow/react';
 import type { FlowNode } from '@/lib/engine/types';
-import { nodeCatalog } from './catalog';
+import { nodeDescriptor } from './catalog';
 import { outputPortId, type OutputPort } from './graph/ports';
 
 export interface FlowNodeCardData extends Record<string, unknown> {
@@ -16,7 +16,7 @@ export interface FlowNodeCardData extends Record<string, unknown> {
 export type FlowCanvasNode = Node<FlowNodeCardData, 'huntNode'>;
 
 export default function FlowNodeCard({ id, data, selected }: NodeProps<FlowCanvasNode>) {
-  const descriptor = nodeCatalog[data.node.type];
+  const descriptor = nodeDescriptor(data.node.type);
   const finish = data.node.type === 'complete';
   const updateNodeInternals = useUpdateNodeInternals();
   const portSignature = data.ports.map(({ port }) => outputPortId(port)).join('|');
