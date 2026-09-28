@@ -70,3 +70,14 @@ test('refreshing unchanged search areas preserves the player map zoom and pan', 
   await expect(first).toHaveAttribute('d', zoomed!);
   await expect(viewport).toHaveAttribute('style', panned!);
 });
+
+test('map container renders search areas with explanatory internet text', async ({ page }) => {
+  const teamName = `Map explorer test ${randomUUID().slice(0, 8)}`;
+  expect((await post(page.request, '/api/v2/session', { huntId, mode: 'create', teamName, playerName: 'Map tester', pin: '123456' })).ok()).toBeTruthy();
+  await page.goto(`/v2?hunt=${huntId}`);
+  await page.getByRole('button', { name: 'Show hunt map', exact: true }).click();
+  const mapRegion = page.getByRole('region', { name: 'Approximate search areas', exact: true });
+  await expect(mapRegion).toBeVisible();
+  await expect(page.getByText('Shaded areas are approximate. Map tiles need an internet connection.')).toBeVisible();
+});
+

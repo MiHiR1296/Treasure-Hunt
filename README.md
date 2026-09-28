@@ -7,7 +7,7 @@ A configurable, web-first engine for real-world treasure hunts. Organizers desig
 V2 supports:
 
 - Visual checkpoint/flow editing, reusable templates, drafts, validation, immutable published versions and isolated player previews.
-- QR and backup codes, answers, approximate GPS areas, maps, camera guidance, private photo uploads with organizer review, and live recovery paths.
+- QR and backup codes, answers, approximate GPS areas, provider-based maps (OpenStreetMap default, optional Google Maps), camera guidance, private photo uploads with organizer review, and live recovery paths.
 - Nine puzzle modules: jigsaw, Sudoku, word search, crossword, rotation, text, multiple choice, matching and sequence. The same modules can unlock hints.
 - Independent text/image/audio/video/map/camera/puzzle hints with costs and availability rules.
 - Sequential, open and prerequisite-based hunts; choices, conditions, variables, deterministic weighted routes, scoring rules and optional checkpoints.
