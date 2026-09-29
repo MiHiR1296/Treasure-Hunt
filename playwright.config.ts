@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import './tests/isolated-database';
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -12,7 +13,7 @@ export default defineConfig({
     { name: 'android-chrome', use: { ...devices['Pixel 7'], channel: 'chrome' } },
     // Canvas video capture is used only by the virtual-camera decoder fixture.
     { name: 'iphone-webkit', testIgnore: '**/qr-camera.spec.ts', use: { ...devices['iPhone 13'], browserName: 'webkit' } },
-    { name: 'desktop-chrome', testMatch: '**/organizer.spec.ts', use: { ...devices['Desktop Chrome'], channel: 'chrome' } },
+    { name: 'desktop-chrome', testMatch: ['**/organizer.spec.ts', '**/timed-teams.spec.ts'], use: { ...devices['Desktop Chrome'], channel: 'chrome' } },
   ],
   webServer: {
     command: 'npm run dev -- -p 3100 -H 127.0.0.1',

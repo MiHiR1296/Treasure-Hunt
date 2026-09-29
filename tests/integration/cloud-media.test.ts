@@ -1,3 +1,4 @@
+import '../isolated-database';
 import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
 import { randomUUID } from 'node:crypto';

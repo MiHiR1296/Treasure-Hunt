@@ -5,6 +5,7 @@ export type ClientPlayerView = PlayerView & {
   members?: Array<string | { name?: string; playerName?: string }>;
   isPreview?: boolean;
   eventStatus?: string;
+  roster?: { minimum: number; maximum: number; ready: boolean };
 };
 
 export function isPreviewSession(): boolean {
@@ -70,7 +71,7 @@ export function savedPlayerView(): ClientPlayerView | null {
         !Number.isFinite(value.score) || !Number.isFinite(value.progress?.completed) ||
         !Number.isFinite(value.progress?.total) || !Array.isArray(value.hints) ||
         !value.hints.every((hint: { id?: unknown; title?: unknown } | null) => hint && typeof hint.id === 'string' && typeof hint.title === 'string') ||
-        !['active', 'completed'].includes(value.status) ||
+        !['waiting', 'active', 'completed'].includes(value.status) ||
         (value.checkpoint !== null && (typeof value.checkpoint?.id !== 'string' || typeof value.checkpoint?.title !== 'string')) ||
         (value.node !== null && (typeof value.node?.id !== 'string' ||
           !['show_text', 'show_media', 'verify_qr', 'verify_code', 'verify_answer', 'verify_gps', 'choose_path', 'puzzle', 'camera_guide', 'verify_image', 'verify_organizer'].includes(value.node?.type) ||

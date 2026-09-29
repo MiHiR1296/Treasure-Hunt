@@ -11,12 +11,13 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   return handle(async () => {
     const body = await jsonBody(request);
+    if (Object.keys(body).some(key => !['huntId', 'teamName', 'playerName', 'pin', 'mode', 'memberNames'].includes(key))) throw new HttpError(400, 'Unsupported team registration fields.');
     if (request.headers.get('X-Hunt-Preview') === '1') throw new HttpError(400, 'Start a test session from the organizer preview. Your live team has not changed.');
     const pin = textField(body, 'pin', 12);
     if (!/^\d{4,12}$/.test(pin)) throw new HttpError(400, 'Use a PIN with 4 to 12 digits.');
     if (body.mode !== 'create' && body.mode !== 'join') throw new HttpError(400, 'Choose create or join team.');
     const result = await joinTeam({ huntId: textField(body, 'huntId'), teamName: textField(body, 'teamName', 60),
-      playerName: textField(body, 'playerName', 60), pin, mode: body.mode });
+      playerName: textField(body, 'playerName', 60), pin, mode: body.mode, memberNames: body.memberNames });
     return sessionResponse({ view: result.view }, result.token, 'team', request);
   });
 }

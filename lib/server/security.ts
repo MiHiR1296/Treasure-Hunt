@@ -36,11 +36,11 @@ export function createSessionToken() {
 export async function authenticate(token: string | undefined, role: 'team' | 'admin') {
   if (!token || token.length > 128) throw new HttpError(401, 'Please sign in to continue.');
   const { rows } = await getPool().query(
-    'select team_id, player_name from hunt_v2.sessions where token_hash=$1 and role=$2 and expires_at>now()',
+    'select team_id, player_name,member_id from hunt_v2.sessions where token_hash=$1 and role=$2 and expires_at>clock_timestamp()',
     [digest(token), role],
   );
   if (!rows[0]) throw new HttpError(401, 'Your session has expired. Please sign in again.');
-  return rows[0] as { team_id: string; player_name: string };
+  return { ...rows[0], sessionHash: digest(token) } as { team_id: string; player_name: string; member_id: string | null; sessionHash: string };
 }
 // Shared database rate limits continue to work across processes and restarts.
 export async function rateLimit(key: string, maximum = 15) {

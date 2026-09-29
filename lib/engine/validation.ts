@@ -68,12 +68,16 @@ export function validateHunt(value: unknown): ValidationIssue[] {
   if (value.schemaVersion !== 1) issue('hunt.schemaVersion', 'Only schema version 1 is supported.')
   id(value.id, 'hunt.id'); number(value.version, 'hunt.version', 1, Number.MAX_SAFE_INTEGER, true); string(value.title, 'hunt.title', 200)
   if (value.description !== undefined) string(value.description, 'hunt.description')
-  if (value.settings !== undefined && object(value.settings, 'hunt.settings', ['mode', 'leaderboard', 'ranking', 'map', 'rules', 'maxTeamSize', 'registrationOpen', 'startsAt', 'endsAt', 'completionMessage', 'photoRetention'])) {
+  if (value.settings !== undefined && object(value.settings, 'hunt.settings', ['mode', 'leaderboard', 'ranking', 'map', 'rules', 'maxTeamSize', 'minTeamSize', 'sessionDurationSeconds', 'assignmentVersion', 'registrationOpen', 'startsAt', 'endsAt', 'completionMessage', 'photoRetention'])) {
     const s = value.settings
     const enums = { mode: ['sequential', 'open', 'dependency'], leaderboard: ['live', 'hidden', 'finish'], ranking: ['points', 'progress', 'points_time'], map: ['none', 'all', 'visited'], photoRetention: ['after_verification', 'after_event', 'retain'] }
     for (const [key, values] of Object.entries(enums)) if (s[key] !== undefined) choice(s[key], `hunt.settings.${key}`, values)
     for (const key of ['rules', 'completionMessage']) if (s[key] !== undefined) string(s[key], `hunt.settings.${key}`)
     if (s.maxTeamSize !== undefined) number(s.maxTeamSize, 'hunt.settings.maxTeamSize', 1, 1000, true)
+    if (s.minTeamSize !== undefined) number(s.minTeamSize, 'hunt.settings.minTeamSize', 1, 1000, true)
+    if (typeof s.minTeamSize === 'number' && s.minTeamSize > (typeof s.maxTeamSize === 'number' ? s.maxTeamSize : 50)) issue('hunt.settings.minTeamSize', 'Minimum team size must not exceed the maximum.')
+    if (s.sessionDurationSeconds !== undefined) number(s.sessionDurationSeconds, 'hunt.settings.sessionDurationSeconds', 1, 31536000, true)
+    if (s.assignmentVersion !== undefined) choice(s.assignmentVersion, 'hunt.settings.assignmentVersion', [2])
     if (s.registrationOpen !== undefined) boolean(s.registrationOpen, 'hunt.settings.registrationOpen')
     for (const key of ['startsAt', 'endsAt']) if (s[key] !== undefined && (typeof s[key] !== 'string' || !/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(s[key]) || !Number.isFinite(Date.parse(s[key])))) issue(`hunt.settings.${key}`, 'Use a valid ISO timestamp with a timezone.')
     if (typeof s.startsAt === 'string' && typeof s.endsAt === 'string' && Date.parse(s.endsAt) <= Date.parse(s.startsAt)) issue('hunt.settings.endsAt', 'End time must be after start time.')
@@ -144,7 +148,8 @@ export function validateHunt(value: unknown): ValidationIssue[] {
     }
     if (array(checkpoint.hints, `${path}.hints`, 0, 100)) checkpoint.hints.forEach((hint, hi) => {
       const hp = `${path}.hints[${hi}]`
-      if (!object(hint, hp, ['id', 'title', 'cost', 'content', 'availability', 'relevance'])) return
+      if (!object(hint, hp, ['id', 'title', 'cost', 'content', 'availability', 'relevance', 'enabled', 'showWhenLocked'])) return
+      for (const key of ['enabled', 'showWhenLocked']) if (hint[key] !== undefined) boolean(hint[key], `${hp}.${key}`)
       id(hint.id, `${hp}.id`); string(hint.title, `${hp}.title`, 200); number(hint.cost, `${hp}.cost`, 0, 1000000, true); content(hint.content, `${hp}.content`, true)
       if (hint.availability !== undefined && object(hint.availability, `${hp}.availability`, ['afterHintIds', 'afterSeconds', 'afterNodeId'])) {
         if (hint.availability.afterSeconds !== undefined) number(hint.availability.afterSeconds, `${hp}.availability.afterSeconds`, 0, 31536000, true)
@@ -237,6 +242,11 @@ function jsonValue(value: unknown, depth = 0): boolean {
 }
 export function parseCommand(value: unknown): GameCommand {
   const invalid = (): never => { throw new EngineError('invalid_command', 'That action could not be understood. Refresh and try again.') }
+  if (isObject(value) && (value.type === 'start_session' || value.type === 'update_roster')) {
+    if (!isRevision(value.expectedRevision) || Object.keys(value).some(key => !['type', 'expectedRevision', ...(value.type === 'update_roster' ? ['names'] : [])].includes(key))) return invalid()
+    if (value.type === 'update_roster') validateRosterNames(value.names)
+    return JSON.parse(JSON.stringify(value)) as GameCommand
+  }
   if (!isObject(value) || !isId(value.checkpointId) || typeof value.type !== 'string') return invalid()
   const fields: Record<string, string[]> = {
     continue: ['nodeId'], verify: ['nodeId', 'value'], verify_gps: ['nodeId', 'location'], choose_path: ['nodeId', 'choiceId'], use_hint: ['hintId'], choose_checkpoint: [], use_fallback: ['nodeId'],
@@ -260,12 +270,22 @@ export function parseCommand(value: unknown): GameCommand {
 export function parseControl(value: unknown): OrganizerControl {
   const invalid = (): never => { throw new EngineError('invalid_override', 'Choose a current team action and give a brief reason for this intervention.') }
   if (!isObject(value) || typeof value.type !== 'string' || !isRevision(value.expectedRevision) || typeof value.reason !== 'string' || !value.reason.trim() || value.reason.length > 1000) return invalid()
-  const fields: Record<string, string[]> = { approve_action: ['checkpointId', 'nodeId'], skip_action: ['checkpointId', 'nodeId'], reset_action: ['checkpointId', 'nodeId'], reject_photo: ['checkpointId', 'nodeId'], skip_checkpoint: ['checkpointId'], move_checkpoint: ['checkpointId'], adjust_score: ['amount', 'checkpointId'], reset_hint: ['checkpointId', 'hintId'], enable_fallback: ['checkpointId', 'nodeId', 'enabled'] }
+  const fields: Record<string, string[]> = { extend_session: ['seconds'], correct_roster: ['names'], review_result: ['status', 'note'], approve_action: ['checkpointId', 'nodeId'], skip_action: ['checkpointId', 'nodeId'], reset_action: ['checkpointId', 'nodeId'], reject_photo: ['checkpointId', 'nodeId'], skip_checkpoint: ['checkpointId'], move_checkpoint: ['checkpointId'], adjust_score: ['amount', 'checkpointId'], reset_hint: ['checkpointId', 'hintId'], enable_fallback: ['checkpointId', 'nodeId', 'enabled'] }
   if (!Object.hasOwn(fields, value.type)) return invalid()
   const permittedFields = fields[value.type]
   if (Object.keys(value).some(key => !['type', 'expectedRevision', 'reason', ...permittedFields].includes(key))) return invalid()
   for (const key of ['checkpointId', 'nodeId', 'hintId']) if (fields[value.type].includes(key) && !(value.type === 'adjust_score' && key === 'checkpointId' && value[key] === undefined) && !isId(value[key])) return invalid()
   if (value.type === 'adjust_score' && (!inRange(value.amount, -1000000, 1000000) || !Number.isSafeInteger(value.amount) || value.amount === 0)) return invalid()
   if (value.type === 'enable_fallback' && typeof value.enabled !== 'boolean') return invalid()
+  if (value.type === 'extend_session' && (!Number.isSafeInteger(value.seconds) || !inRange(value.seconds, 1, 31536000))) return invalid()
+  if (value.type === 'correct_roster') validateRosterNames(value.names)
+  if (value.type === 'review_result' && (!['pending', 'approved', 'flagged', 'disqualified'].includes(String(value.status)) || typeof value.note !== 'string' || value.note.length > 2000)) return invalid()
   return { ...JSON.parse(JSON.stringify(value)), reason: value.reason.trim() } as OrganizerControl
+}
+
+export function validateRosterNames(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 1000 || value.some(name => typeof name !== 'string' || !name.normalize('NFKC').trim() || name.normalize('NFKC').trim().length > 60 || /[\u0000-\u001f\u007f]/.test(name))) throw new EngineError('invalid_roster', 'Enter 1 to 1,000 member names, each at most 60 characters, without control characters.')
+  const names = (value as string[]).map(name => name.normalize('NFKC').trim()), keys = names.map(name => name.toLocaleLowerCase('en'))
+  if (new Set(keys).size !== keys.length) throw new EngineError('invalid_roster', 'Each name in the roster must be different.')
+  return names
 }

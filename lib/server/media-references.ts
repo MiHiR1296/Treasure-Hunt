@@ -20,6 +20,7 @@ export function visibleMediaUrls(view: PlayerView): Set<string> {
   if (view.node?.type === 'camera_guide') add(view.node.referenceImageUrl);
   if (view.node?.type === 'puzzle') puzzle(view.node.puzzle);
   view.hints.forEach(hint => { if (hint.status === 'used' && hint.content) content(hint.content); });
+  view.stages?.forEach(stage => stage.hints?.forEach(hint => { if (hint.status === 'used' && hint.content) content(hint.content); }));
   return urls;
 }
 

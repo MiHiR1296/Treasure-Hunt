@@ -2,12 +2,12 @@ import type { GameEvent, GameState, HuntDefinition, PlayerView, ScoreEntry, Vali
 import { uploadMedia } from '../../mediaUpload';
 
 export type HuntStatus = 'ready' | 'live' | 'paused' | 'ended' | 'archived';
-export interface PublishedHunt { id: string; title: string; version: number; status: HuntStatus; definition: HuntDefinition }
-export interface Draft { id: string; definition: HuntDefinition; revision: number; updatedAt: string; issues: ValidationIssue[] }
-export interface OrganizerTeam { id: string; name: string; huntId: string; version: number; isPreview: boolean; view: PlayerView; lastActivity: string; ledger: ScoreEntry[]; events: GameEvent[]; checkpoints: GameState['checkpoints']; definition: HuntDefinition }
+export interface PublishedHunt { id: string; title: string; version: number; status: HuntStatus; lifecycleRevision: number; definition: HuntDefinition }
+export interface Draft { id: string; definition: HuntDefinition; revision: number; generation: string; updatedAt: string; issues: ValidationIssue[] }
+export interface OrganizerTeam { id: string; name: string; huntId: string; version: number; isPreview: boolean; view: PlayerView & { members?: string[] }; lastActivity: string; ledger: ScoreEntry[]; ledgerTotals?: Record<string, number>; historyCounts?: { events: number; ledger: number }; events: GameEvent[]; checkpoints: GameState['checkpoints']; definition?: HuntDefinition; detailed?: boolean }
 export interface HelpRequest { id: string; team_id: string; team_name: string; hunt_id: string; checkpoint_id: string; node_id: string; kind: string; message: string; status: 'open' | 'resolved'; response?: string; created_at: string }
 export interface PhotoRequest { id: string; team_id: string; checkpoint_id: string; node_id: string; created_at: string; team_name: string; hunt_id: string; referenceImages: string[] }
-export interface Dashboard { hunts: PublishedHunt[]; drafts: Draft[]; teams: OrganizerTeam[]; help: HelpRequest[]; photos: PhotoRequest[]; example: HuntDefinition; templates?: { id: string; title: string; description: string; definition: HuntDefinition }[] }
+export interface Dashboard { hunts: PublishedHunt[]; drafts: Draft[]; teams: OrganizerTeam[]; teamTotal?: number; help: HelpRequest[]; photos: PhotoRequest[]; example: HuntDefinition; templates?: { id: string; title: string; description: string; definition: HuntDefinition }[] }
 export interface Asset { id: string; url: string; contentType: string; bytes: number }
 export type RunOperation = (key: string, operation: () => Promise<void>) => Promise<void>;
 export interface OperationProps { dashboard: Dashboard; pending: string; run: RunOperation; refresh: () => Promise<void>; notify: (message: string) => void }
@@ -48,6 +48,7 @@ export function requestId(): string {
 }
 
 export const eventLabels: Record<GameEvent['type'], string> = {
+  session_started: 'Team started', session_paused: 'Timer paused', session_resumed: 'Timer resumed', session_extended: 'Time granted', roster_updated: 'Roster updated', result_reviewed: 'Result reviewed',
   checkpoint_started: 'Checkpoint started', action_completed: 'Step completed', verification_failed: 'Verification did not match',
   dud_qr_scanned: 'Decoy QR scanned', hint_used: 'Hint revealed', checkpoint_completed: 'Checkpoint completed',
   hunt_completed: 'Hunt finished', organizer_override: 'Organizer intervention', checkpoint_selected: 'Checkpoint selected',

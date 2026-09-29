@@ -49,7 +49,7 @@ export function createCheckpoint(hunt: HuntDefinition): CheckpointDefinition {
     basePoints: 20,
     flow: { startNodeId: 'clue', nodes: [
       { id: 'clue', type: 'show_text', text: '', next: 'answer' },
-      { id: 'answer', type: 'verify_answer', prompt: '', answers: [''], next: 'finish' },
+      { id: 'answer', type: 'verify_answer', prompt: '', answers: [''], recordAnswerAttempts: true, next: 'finish' },
       { id: 'finish', type: 'complete' },
     ] },
     hints: [],

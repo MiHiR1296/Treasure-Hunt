@@ -31,7 +31,7 @@ export const nodeCatalog: Record<FlowNode['type'], NodeDescriptor> = {
   verify_answer: {
     label: 'Answer a question', shortLabel: 'Question', category: 'verification',
     description: 'Accept one or more private answers.',
-    create: (id, next) => ({ id, type: 'verify_answer', prompt: '', answers: [''], next }),
+    create: (id, next) => ({ id, type: 'verify_answer', prompt: '', answers: [''], recordAnswerAttempts: true, next }),
   },
   verify_code: {
     label: 'Enter a code', shortLabel: 'Code', category: 'verification',

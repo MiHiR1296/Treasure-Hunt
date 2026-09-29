@@ -7,7 +7,7 @@ import { getPool, transaction } from './db';
 import { ADMIN_COOKIE, authenticate, HttpError, PREVIEW_COOKIE, TEAM_COOKIE } from './security';
 import { getTeamRecord, toTeamView } from './store';
 import { lockMediaReferences, visibleMediaUrls } from './media-references';
-import { assertPlayable } from './hunts';
+import { assertSessionPlayable } from '../engine/session';
 import { readMediaBytes, removeMediaBytes, writeMediaBytes } from './media-storage.mjs';
 import { cleanupExpiredMedia } from './maintenance.mjs';
 
@@ -69,7 +69,8 @@ export async function uploadAsset(id: string, file: File) {
 
 export async function validatePhotoTask(teamId: string, input: { checkpointId: string; nodeId: string; location?: unknown }) {
   const team = await getTeamRecord(teamId);
-  if (!team.is_preview) assertPlayable(team.status,team.definition);
+  const clock = await getPool().query('select clock_timestamp() as at');
+  assertSessionPlayable(team.definition, team.state, team.is_preview ? 'live' : team.status, new Date(clock.rows[0].at).toISOString(), team.is_preview);
   const checkpoint = team.definition.checkpoints.find(item => item.id === team.state.activeCheckpointId);
   const progress = checkpoint && team.state.checkpoints[checkpoint.id];
   const node = checkpoint?.flow.nodes.find(item => item.id === progress?.activeNodeId);
@@ -86,6 +87,7 @@ export async function uploadPhoto(teamId: string, input: { id: string; checkpoin
   if (!input.file.size || input.file.size > 10_000_000 || !input.file.type.startsWith('image/')) throw new HttpError(413, 'Choose a photo smaller than 10 MB.');
   const team = await validatePhotoTask(teamId, input);
   const bytes = await prepareImage(Buffer.from(await input.file.arrayBuffer()));
+  await validatePhotoTask(teamId, input);
   const retention = team.definition.settings?.photoRetention;
   return saveMedia({ id:input.id,bytes,contentType:'image/jpeg',kind:'photo',huntId:team.hunt_id,teamId,checkpointId:input.checkpointId,nodeId:input.nodeId,
     retention: retention === 'retain' ? 'keep' : retention === 'after_event' ? 'after_event' : 'after_review' });
@@ -99,7 +101,7 @@ async function readRecord(id: string): Promise<MediaRecord> {
     left join hunt_v2.hunt_versions v on v.hunt_id=t.hunt_id and v.version=(t.state->>'definitionVersion')::int
     where m.id=$1 and (m.expires_at is null or m.expires_at>now())
     and not (m.retention='after_event' and (coalesce(h.status in ('ended','archived'),false)
-      or coalesce((v.definition->'settings'->>'endsAt')::timestamptz<=now(),false)))`, [id]);
+      or (v.definition->'settings'->>'sessionDurationSeconds' is null and coalesce((v.definition->'settings'->>'endsAt')::timestamptz<=now(),false))))`, [id]);
   if (!rows[0]) throw new HttpError(404, 'This media is no longer available.');
   return rows[0];
 }

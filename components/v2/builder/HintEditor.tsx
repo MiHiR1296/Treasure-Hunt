@@ -79,6 +79,9 @@ export default function HintEditor({ value, usedIds, nodes, onChange }: { value:
       <div className="mt-4 space-y-4">
         <div className="grid gap-4 sm:grid-cols-[1fr_9rem]"><TextField label="Hint title" value={hint.title} onChange={title => update({ ...hint, title })} /><NumberField label="Point cost" value={hint.cost} min={0} max={1000000} onChange={cost => update({ ...hint, cost })} /></div>
         <ContentEditor value={hint.content} onChange={content => update({ ...hint, content })} />
+        <CheckField label="Enable this hint" checked={hint.enabled !== false} onChange={enabled => update({ ...hint, enabled })} />
+        <CheckField label="Show this hint while waiting for its unlock conditions" checked={hint.showWhenLocked !== false} onChange={showWhenLocked => update({ ...hint, showWhenLocked })} />
+        <p className="text-xs leading-5 text-slate-600">Unreached targets and solved answers are hidden regardless of this display setting. Previously purchased hints remain in the team’s stage history.</p>
         <fieldset className="space-y-4 rounded-lg border border-teal-200 bg-teal-50/50 p-3">
           <legend className="px-1 text-sm font-semibold text-teal-950">Smart relevance (optional)</legend>
           <p className="text-xs leading-5 text-slate-600">Link the hint to the answer it helps with. The server will stop offering an unused hint after that step or puzzle answer is solved.</p>
@@ -110,6 +113,7 @@ export default function HintEditor({ value, usedIds, nodes, onChange }: { value:
           const availability = { ...hint.availability }; if (event.target.value) availability.afterNodeId = event.target.value; else delete availability.afterNodeId; update({ ...hint, availability });
         }}><option value="">Any step in the checkpoint</option>{nodes.filter(node => node.type !== 'complete').map((node, index) => <option key={node.id} value={node.id}>{index + 1}. {nodeLabels[node.type] || node.type} ({node.id})</option>)}</select></Field>
         {value.length > 1 && <fieldset className="rounded-lg bg-slate-50 p-3"><legend className="px-1 text-sm font-semibold">Require these hints first (optional)</legend>
+          <p className="mb-2 text-xs text-slate-600">Buying a prerequisite or already solving its expiring target satisfies it. Disabled or unreachable prerequisites may block this hint.</p>
           {value.filter(candidate => candidate.id !== hint.id).map(candidate => <CheckField key={candidate.id} label={candidate.title || candidate.id} checked={hint.availability?.afterHintIds?.includes(candidate.id) || false} disabled={!canDepend(value, hint.id, candidate.id)} onChange={checked => {
             const previous = hint.availability?.afterHintIds || [];
             update({ ...hint, availability: { ...hint.availability, afterHintIds: checked ? [...previous, candidate.id] : previous.filter(id => id !== candidate.id) } });

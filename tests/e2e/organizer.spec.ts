@@ -112,13 +112,15 @@ test('organizer builds branching checkpoints without JSON, recovers drafts, prev
   await expect(page.getByRole('link', { name: /Open player preview/ })).toBeVisible();
   const previewPage = await page.context().newPage();
   await previewPage.goto(preview.url);
+  await expect(previewPage.getByRole('heading', { name: 'Get your team ready', exact: true })).toBeVisible();
+  await previewPage.getByRole('button', { name: 'Start team hunt', exact: true }).click();
   await expect(previewPage.getByRole('heading', { name: 'The first clue', exact: true })).toBeVisible();
   await previewPage.close();
   await page.getByLabel('Introduction (optional)', { exact: true }).fill('Follow the clues together.');
   await expect(page.getByRole('link', { name: /Open player preview/ })).not.toBeVisible();
   await page.getByLabel('Publish as', { exact: true }).selectOption('live');
   await page.getByRole('button', { name: 'Validate & publish hunt', exact: true }).click();
-  await expect(page.getByText(/Hunt published as live/)).toBeVisible();
+  await expect(page.getByText(/Hunt published\. Event status: live/)).toBeVisible();
   await page.getByRole('button', { name: 'Events', exact: true }).click();
   await expect(page.getByRole('heading', { name: title + ' updated', exact: true })).toBeVisible();
   const event = page.locator('article').filter({ has: page.getByRole('heading', { name: title + ' updated', exact: true }) });
@@ -247,6 +249,7 @@ test('organizer can inspect opted-in answer submissions without exposing them to
   await page.goto('/v2/admin');
   await page.getByRole('button', { name: /^Live control/ }).click();
   const team = page.locator('article').filter({ has: page.getByRole('heading', { name: teamName, exact: true }) });
+  await team.getByRole('button', { name: 'Inspect team, controls & private solutions', exact: true }).click();
   await team.getByText('Route & private solutions', { exact: true }).click();
   await expect(team.getByText('Submitted answers (latest 2)', { exact: true })).toBeVisible();
   await expect(team.getByText(/rejected · “needle”/)).toBeVisible();
@@ -319,6 +322,7 @@ test('organizer resolves help, enables recovery, and retries a score correction 
   await page.goto('/v2/admin');
   await page.getByRole('button', { name: /^Live control/ }).click();
   const team = page.locator('article').filter({ has: page.getByRole('heading', { name: teamName, exact: true }) });
+  await team.getByRole('button', { name: 'Inspect team, controls & private solutions', exact: true }).click();
   await team.getByText('Route & private solutions', { exact: true }).click();
   await expect(team.getByText('TEAM IS HERE', { exact: true })).toBeVisible();
   await expect(team.getByText('Correct code: BRIDGE', { exact: true })).toBeVisible();
@@ -342,6 +346,7 @@ test('organizer resolves help, enables recovery, and retries a score correction 
   await page.reload();
   await page.unroute('**/api/v2/admin/control');
   await page.getByRole('button', { name: /^Live control/ }).click();
+  await team.getByRole('button', { name: 'Inspect team, controls & private solutions', exact: true }).click();
   await expect(team.getByRole('button', { name: 'Retry pending organizer action', exact: true })).toBeEnabled();
   await expect(team.getByRole('button', { name: 'Discard pending action', exact: true })).toBeDisabled();
   const retryRequest = page.waitForRequest(request => request.url().endsWith('/api/v2/admin/control') && request.method() === 'POST');
@@ -353,6 +358,8 @@ test('organizer resolves help, enables recovery, and retries a score correction 
   const dashboard = await (await page.request.get('/api/v2/admin')).json();
   const result = dashboard.teams.find((candidate: { id: string }) => candidate.id === view.teamId);
   expect(result.view.score).toBe(7);
-  expect(result.ledger.filter((entry: { kind: string }) => entry.kind === 'organizer_adjustment')).toHaveLength(1);
+  expect(result.ledger).toEqual([]);
+  const details = await (await page.request.get(`/api/v2/admin/results?teamId=${view.teamId}`)).json();
+  expect(details.team.ledger.filter((entry: { kind: string }) => entry.kind === 'organizer_adjustment')).toHaveLength(1);
   expect(dashboard.help.find((help: { team_id: string }) => help.team_id === view.teamId).response).toBe('Use the bridge code BRIDGE.');
 });

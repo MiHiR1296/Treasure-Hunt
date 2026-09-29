@@ -78,7 +78,7 @@ For a new display hint, extend `DisplayContent`, the content validator, the allo
 
 For a puzzle hint, configure `{type:'puzzle', puzzle, reveal}` using any registered puzzle. The existing engine keeps the reveal absent until the purchased puzzle is solved. Do not duplicate puzzle state inside a modal or mark a hint solved from React alone.
 
-Hint relevance is independent of hint content. Set `relevance.nodeId` to associate a hint with an interactive step; word-search and crossword steps may also use one of the stable IDs returned by `puzzleHintItems()` as `puzzleItemId`. The engine derives solved state from authoritative node/puzzle progress, returns only `locked`, `available`, `expired` or `used` to players, and rechecks it inside the normal purchase transaction. Add new independently solvable puzzle targets through the puzzle helper rather than special-casing a renderer or trusting a client flag.
+Hint relevance is independent of hint content. Set `relevance.nodeId` to associate a hint with an interactive step; word-search and crossword steps may also use one of the stable IDs returned by `puzzleHintItems()` as `puzzleItemId`. The engine derives solved state from sticky server-confirmed discoveries/first-solve facts. Disabled, unreached and solve-expired unpurchased hints are omitted from the player response, not sent as locked title/cost cards. `showWhenLocked` affects only otherwise relevant locks. Purchase rechecks relevance under the team lock. Add new independently solvable targets through the puzzle helper, preserving first solves through erasure/reset and allowing undated historical facts rather than inventing timestamps.
 
 Availability supports independent purchase order, prerequisite hint IDs, elapsed seconds and a completed action such as GPS. New availability rules need server-side checks plus a public locked reason; hiding a button alone is not enforcement.
 
@@ -91,6 +91,11 @@ Availability supports independent purchase order, prerequisite hint IDs, elapsed
 - Never let generic Continue satisfy a verifier.
 - Keep private media, submitted secrets and expected answers out of public events/responses.
 - Test a lost response after commit; then replay the same request from a refreshed page.
+- Apply `assertSessionPlayable` to every new player mutation, including upload adapters. Check receipts before the deadline gate; use the single post-lock database timestamp.
+- Keep timer, assignments, roster snapshot and review authoritative in the existing team aggregate. Never accept client deadlines/assignments or turn a preview override into a live command.
+- Use `elapsedMilliseconds` for timed elapsed metrics/bonuses/delays; extensions are allowance, not negative elapsed time. Required completion does not exempt optional play from expiry.
+- Append detailed activity in the state/receipt transaction. Keep raw values private and respect `recordAnswerAttempts`; do not expand audit into QR-secret or keystroke recording.
+- New summary queries must not load full histories. Export every page with explicit cutoffs/counts or fail clearly; do not silently cap an export.
 
 ## Verify an extension
 

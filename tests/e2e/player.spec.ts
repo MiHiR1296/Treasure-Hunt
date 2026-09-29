@@ -64,7 +64,8 @@ test('two phones share hints and progression; retries, refresh, QR recovery and 
 
   await expect(page.getByRole('heading', { name: 'Clue 2', exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Clue 3', exact: true })).toBeVisible();
-  await expect(page.getByText('Available when your team reaches the related step.', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Clue 1', exact: true })).not.toBeVisible();
+  expect(JSON.stringify(await (await page.request.get('/api/v2/session')).json())).not.toContain('Clue 1');
   await expect(page.getByText('−6 pts', { exact: true })).toHaveCount(2);
   await page.getByRole('button', { name: 'Choose hint: Clue 3 (6 points)', exact: true }).click();
   await expect(page.getByText('Reveal “Clue 3” for 6 points? Your team is charged once.', { exact: true })).toBeVisible();
@@ -92,8 +93,8 @@ test('two phones share hints and progression; retries, refresh, QR recovery and 
   await page.getByLabel('Your answer').fill('compass');
   await page.getByRole('button', { name: 'Check answer' }).click();
   await expect(page.getByText('You found the direction tool.', { exact: true })).toBeVisible();
-  await expect(page.getByText('No longer needed', { exact: true })).toBeVisible();
-  await expect(page.getByText('Your team has already solved what this hint helps with. No points were charged.', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Choose hint: Clue 1 (2 points)', exact: true })).not.toBeVisible();
+  expect(JSON.stringify(await (await page.request.get('/api/v2/session')).json())).not.toContain('Clue 1');
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'The Hidden Code' })).toBeVisible();
   await expect(page.getByText('14', { exact: true })).toBeVisible();
