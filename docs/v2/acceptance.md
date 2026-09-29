@@ -276,6 +276,15 @@ Addressed the review of `adc8dac`: Results detail/JSON now allowlists definition
 - Stress rerun: **100 teams / 400 authenticated sessions / 60 rounds / 25,410 operations / zero errors**, 35 seconds; p50 452 ms, p95 571 ms, p99 673 ms; 10 pool connections; maximum synthetic dashboard 447,857 bytes; all 100 teams exported. These are local service/PostgreSQL measurements, not HTTP/production capacity or a long soak.
 - **Approval remains gated on the reviewer's acceptance of the automated evidence and outstanding physical Android/iPhone field checks**, as explicitly requested in this review. Earlier general field-check language does not waive this PR-specific gate. Nothing was merged, migrated in production or deployed by this follow-up. No additional schema/environment changes were introduced; the original PR migration remains required after approval.
 
+### PR #11 second review follow-up — 2026-09-30
+
+Addresses the review of `1b2e888`:
+
+- Results controls remount on team/checkpoint/action identity, matching Live operations. Browser regression switches between Alice and Bob before a roster correction, during a confirmation, and after a committed response is lost. Bob's stored roster/session remain intact; Alice's pending receipt is restored only for Alice and retries exactly once.
+- Checkpoint activation records selection before traversal when resuming existing work; new visits retain `checkpoint_started`. This covers organizer moves and automatic returns to unfinished checkpoints. Results also recognizes older engine-generated `move_checkpoint: ` audit records without changing persisted history. Same-checkpoint records coalesce. Fixed-clock tests assert A=20 seconds/two visits and B=10 seconds/one visit for the reported sequence, plus pause exclusion, automatic completion/reopening, and player selection ordering.
+- **132/132 unit tests**, **20/20 disposable PostgreSQL integration tests**, and **33/33 focused organizer/timed-team browser cases** passed across desktop Chrome, Android Chrome emulation and iPhone WebKit emulation. Typecheck, lint and production build also passed. The broader player/browser suite and 100-team stress were not rerun for this focused fix; their earlier evidence is recorded above, not claimed for this SHA.
+- No schema/environment changes, production data edits or deployment. Physical Android/iPhone field verification and exact-SHA external review remain outstanding. Selected time remains recorded UI selection time, not proof of physical location. Older histories with genuinely missing selections beyond the recognized move audit cannot be reconstructed with certainty.
+
 ## Remaining acceptance work
 
 1. Initial phone play and own-puzzle authoring are accepted by the user, and the requested feedback improvements are deployed and publicly verified. Specific camera/GPS/compass, denial/landscape/slow-network and older-device scenarios remain useful extended field checks; they are not an absent initial phone test or a new blocking approval request.

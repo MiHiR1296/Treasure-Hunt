@@ -49,7 +49,12 @@ export function checkpointTimings(state: GameState, now: string) {
   let current: string | undefined, since: string | undefined;
   const close = (at: string) => { if (current && since) selected.get(current)!.selectedMilliseconds += elapsedMilliseconds(state, since, at); current = undefined; since = undefined; };
   for (const entry of state.events) {
-    if (entry.checkpointId && ['checkpoint_started', 'checkpoint_selected'].includes(entry.type) && entry.checkpointId !== current) {
+    // Older organizer moves have only this engine-generated audit prefix.
+    // New moves also emit selection; adjacent records for the same checkpoint
+    // deliberately coalesce, so neither starts nor moves double-count visits.
+    const selection = ['checkpoint_started', 'checkpoint_selected'].includes(entry.type)
+      || (entry.type === 'organizer_override' && entry.reason?.startsWith('move_checkpoint: '));
+    if (entry.checkpointId && selection && entry.checkpointId !== current) {
       close(entry.at); current = entry.checkpointId; since = entry.at;
       const value = selected.get(current) ?? { selectedMilliseconds: 0, visits: 0 }; value.visits++; selected.set(current, value);
     }

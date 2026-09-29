@@ -59,6 +59,9 @@ function afterCheckpoint(definition: HuntDefinition, state: GameState, now: stri
 function activateCheckpoint(definition: HuntDefinition, state: GameState, checkpoint: CheckpointDefinition, now: string, budget: { remaining: number }): void {
   const progress = state.checkpoints[checkpoint.id]
   if (!['active', 'available'].includes(progress.status)) throw new EngineError('checkpoint_locked', 'That checkpoint is not available yet.')
+  // Selection precedes traversal, which can immediately complete this checkpoint
+  // and select another. Resuming unfinished work must be recorded too.
+  if (progress.status === 'active' && progress.activeNodeId) event(state, { type: 'checkpoint_selected', checkpointId: checkpoint.id, at: now })
   state.activeCheckpointId = checkpoint.id; state.status = 'active'
   if (progress.status === 'active' && progress.activeNodeId) return
   progress.status = 'active'; progress.startedAt ??= now
@@ -334,7 +337,6 @@ export function executeCommand(definition: HuntDefinition, original: GameState, 
     if (!checkpoint) throw new EngineError('checkpoint_locked', 'That checkpoint is unavailable.')
     if (state.activeCheckpointId === checkpoint.id) return { state: original, feedback: { status: 'already_applied', message: 'Your team is already here.', scannerShouldStop: false } }
     activateCheckpoint(definition, state, checkpoint, at, { remaining: 20001 }); state.revision++
-    event(state, { type: 'checkpoint_selected', checkpointId: checkpoint.id, at })
     return { state, feedback: feedback('Your selected checkpoint is ready.') }
   }
   if (command.type === 'save_hint_puzzle' || command.type === 'submit_hint_puzzle') {

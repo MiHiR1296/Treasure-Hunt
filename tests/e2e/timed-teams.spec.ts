@@ -85,6 +85,42 @@ test('timed roster, late teammate, pause, sticky word hints, expiry and organize
   } finally { await device.close(); }
 });
 
+test('Results switches isolate roster edits, confirmations and lost-response retries by team', async ({ page, request }) => {
+  const h = definition(); h.settings!.minTeamSize = 1;
+  expect((await post(request, '/api/v2/admin/hunts', { definition: h })).ok()).toBeTruthy();
+  const create = async (name: string) => (await (await post(request, '/api/v2/session', { huntId: h.id, teamName: name, playerName: name, memberNames: [name], pin: '123456', mode: 'create' })).json()).view;
+  const a = await create('Alice'), b = await create('Bob');
+  await page.goto('/v2/admin'); await page.getByLabel('Password', { exact: true }).fill('browser-test-password-only'); await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await page.getByRole('button', { name: 'Results', exact: true }).click(); await page.getByLabel('Results hunt').selectOption(h.id);
+  const inspect = async (name: string) => { await page.getByRole('button', { name: `Inspect result: ${name}`, exact: true }).click(); await expect(page.getByRole('heading', { name: new RegExp(`^${name} · revision`) })).toBeVisible(); };
+  const roster = page.getByLabel('Corrected roster — one member per line');
+  await inspect('Alice'); await page.getByLabel('Organizer action', { exact: true }).selectOption('correct_roster'); await expect(roster).toHaveValue('Alice');
+  await roster.fill('Alice\nUnsaved'); await page.getByLabel('Reason for organizer action').fill('Alice only');
+  await inspect('Bob'); await page.getByLabel('Organizer action', { exact: true }).selectOption('correct_roster');
+  await expect(roster).toHaveValue('Bob'); await expect(page.getByLabel('Reason for organizer action')).toHaveValue('');
+  await page.getByLabel('Reason for organizer action').fill('Keep Bob'); await page.getByRole('button', { name: 'Correct team roster', exact: true }).click();
+  await expect(page.getByText('Correct team roster saved for Bob. The reason was recorded.')).toBeVisible();
+  const report = async (id: string) => (await (await request.get(`/api/v2/admin/results?teamId=${id}`)).json());
+  expect((await report(b.teamId)).members.map((m: { name: string }) => m.name)).toEqual(['Bob']);
+  expect((await report(a.teamId)).members.map((m: { name: string }) => m.name)).toEqual(['Alice']);
+  expect((await request.get('/api/v2/session')).status()).toBe(200); // Bob's member-bound session survived.
+  await post(request, '/api/v2/session', { huntId: h.id, teamName: 'Alice', playerName: 'Alice', pin: '123456', mode: 'join' });
+  expect((await post(request, '/api/v2/command', { teamId: a.teamId, requestId: randomUUID(), command: { type: 'start_session', expectedRevision: a.revision } })).ok()).toBeTruthy();
+  await inspect('Alice'); await page.getByLabel('Organizer action', { exact: true }).selectOption('adjust_score');
+  await page.getByLabel('Points to add or deduct').fill('7'); await page.getByLabel('Reason for organizer action').fill('Alice score correction');
+  await page.getByRole('button', { name: 'Adjust team score', exact: true }).click(); await expect(page.getByRole('button', { name: 'Confirm change' })).toBeVisible();
+  await inspect('Bob'); await expect(page.getByRole('button', { name: 'Confirm change' })).not.toBeVisible();
+  await inspect('Alice'); await expect(page.getByRole('button', { name: 'Confirm change' })).not.toBeVisible();
+  await page.getByLabel('Organizer action', { exact: true }).selectOption('adjust_score'); await page.getByLabel('Points to add or deduct').fill('7'); await page.getByLabel('Reason for organizer action').fill('Alice score correction');
+  await page.getByRole('button', { name: 'Adjust team score', exact: true }).click();
+  await page.route('**/api/v2/admin/control', async route => { await route.fetch(); await route.abort(); }, { times: 1 });
+  await page.getByRole('button', { name: 'Confirm change' }).click(); await expect(page.getByRole('button', { name: 'Retry pending organizer action' })).toBeEnabled();
+  await inspect('Bob'); await expect(page.getByRole('button', { name: 'Retry pending organizer action' })).not.toBeVisible();
+  await inspect('Alice'); await page.getByRole('button', { name: 'Retry pending organizer action' }).click();
+  await expect(page.getByRole('button', { name: 'Retry pending organizer action' })).not.toBeVisible();
+  expect((await report(a.teamId)).summary.score).toBe(7); expect((await report(b.teamId)).summary.score).toBe(0);
+});
+
 test('draft deletion keeps unsaved device work; results review and exports stay private', async ({ page, request }, info) => {
   const h = definition(); expect((await post(request, '/api/v2/admin/hunts', { definition: h })).ok()).toBeTruthy();
   expect((await post(request, '/api/v2/admin/drafts', { definition: h, expectedRevision: null })).ok()).toBeTruthy();
