@@ -65,7 +65,7 @@ export type InteractiveNode = (
   | { id: string; type: 'show_media'; content: DisplayContent; next: string }
   | { id: string; type: 'verify_qr'; prompt: string; token: string; backupCode?: string; next: string }
   | { id: string; type: 'verify_code'; prompt: string; code: string; caseSensitive?: boolean; recapAnswer?: string; next: string }
-  | { id: string; type: 'verify_answer'; prompt: string; answers: string[]; caseSensitive?: boolean; recapAnswer?: string; next: string }
+  | { id: string; type: 'verify_answer'; prompt: string; answers: string[]; caseSensitive?: boolean; recapAnswer?: string; recordAnswerAttempts?: boolean; next: string }
   | ({ id: string; type: 'verify_gps'; prompt: string; next: string } & GPSRegion)
   | { id: string; type: 'choose_path'; prompt: string; choices: { id: string; label: string; next: string }[] }
   | { id: string; type: 'puzzle'; prompt: string; puzzle: PuzzleDefinition; next: string }
@@ -87,12 +87,22 @@ export type DisplayContent =
   | { type: 'audio' | 'video'; url: string; title: string; transcript?: string }
   | { type: 'camera'; referenceImageUrl?: string; description: string; latitude?: number; longitude?: number }
 export type HintContent = DisplayContent | { type: 'puzzle'; puzzle: PuzzleDefinition; reveal: DisplayContent }
+export interface HintRelevance {
+  /** The step, or one answer within a supported puzzle step, that this hint helps solve. */
+  nodeId: string
+  puzzleItemId?: string
+  unlockAfterAttempts?: number
+  unlockAfterSeconds?: number
+  /** Defaults to true for targeted hints. */
+  expireWhenSolved?: boolean
+}
 export interface HintDefinition {
   id: string
   title: string
   cost: number
   content: HintContent
   availability?: { afterHintIds?: string[]; afterSeconds?: number; afterNodeId?: string }
+  relevance?: HintRelevance
 }
 export interface PuzzleProgress { revision: number; state: PuzzleState; completed: boolean }
 export type PublicHintContent = DisplayContent | { type: 'puzzle'; puzzle: PuzzlePublicDefinition; progress: PuzzleProgress; reveal?: DisplayContent }
@@ -123,11 +133,15 @@ export interface NodeProgress {
   startedAt?: string
   completedAt?: string
   puzzle?: PuzzleProgress
+  /** First server-confirmed solve time for independently targetable puzzle answers. */
+  puzzleDiscoveries?: { itemId: string; solvedAt: string }[]
   pendingPhotoId?: string
   photoStatus?: 'pending' | 'rejected' | 'approved'
   reviewMessage?: string
   /** A safe player recap. Never store raw QR tokens or expected answers here. */
   publicResponse?: string
+  /** Organizer-only, opt-in and bounded. Never included in the player projection. */
+  answerAttempts?: { submittedAt: string; value: string; accepted: boolean; truncated?: boolean }[]
 }
 export interface CheckpointProgress {
   status: 'locked' | 'available' | 'active' | 'completed' | 'skipped'
@@ -199,7 +213,7 @@ export interface PlayerHint {
   title: string
   type: HintContent['type']
   cost: number
-  status: 'available' | 'locked' | 'used'
+  status: 'available' | 'locked' | 'used' | 'expired'
   reason?: string
   content?: PublicHintContent
 }

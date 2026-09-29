@@ -92,9 +92,14 @@ export function removeNode(checkpoint: CheckpointDefinition, nodeId: string, rec
     startNodeId: checkpoint.flow.startNodeId === nodeId ? reconnectTo : checkpoint.flow.startNodeId,
     nodes: checkpoint.flow.nodes.filter(node => node.id !== nodeId).map(node => rewriteTargets(node, nodeId, reconnectTo)),
   }, hints: checkpoint.hints.map(hint => {
-    if (hint.availability?.afterNodeId !== nodeId) return hint;
-    const availability = { ...hint.availability }; delete availability.afterNodeId;
-    return { ...hint, availability };
+    if (hint.availability?.afterNodeId !== nodeId && hint.relevance?.nodeId !== nodeId) return hint;
+    const next = { ...hint };
+    if (hint.availability?.afterNodeId === nodeId) {
+      const availability = { ...hint.availability }; delete availability.afterNodeId;
+      if (Object.keys(availability).length) next.availability = availability; else delete next.availability;
+    }
+    if (hint.relevance?.nodeId === nodeId) delete next.relevance;
+    return next;
   }) };
 }
 

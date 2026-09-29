@@ -46,14 +46,24 @@ test('organizer builds branching checkpoints without JSON, recovers drafts, prev
   await page.getByLabel('Selected step', { exact: true }).selectOption('answer');
   await page.getByLabel('What should the player do?', { exact: true }).fill('What points north?');
   await page.getByLabel('Accepted answers — one per line', { exact: true }).fill('compass');
+  await page.getByLabel('Keep the latest submitted answers for organizers', { exact: true }).check();
   await page.getByRole('button', { name: 'Add hint', exact: true }).click();
   await page.getByLabel('Hint title', { exact: true }).fill('A small pointer');
   await page.getByLabel('Text to reveal', { exact: true }).fill('It has a magnetic needle.');
+  await page.getByLabel('Selected step', { exact: true }).selectOption('clue');
+  await page.getByLabel('Clue or instructions', { exact: true }).fill('Look for the tool that points north.');
+  await page.getByLabel('This hint helps with', { exact: true }).selectOption('answer');
+  await page.getByLabel('Clue or instructions', { exact: true }).fill('Find the tool that always points north.');
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect(page.getByLabel('Clue or instructions', { exact: true })).toHaveValue('Look for the tool that points north.');
+  await expect(page.getByLabel('This hint helps with', { exact: true })).toHaveValue('answer');
   await expect(page.getByLabel('Hint title', { exact: true })).toHaveValue('A small pointer');
   await expect(page.getByLabel('Text to reveal', { exact: true })).toHaveValue('It has a magnetic needle.');
   await page.getByRole('button', { name: 'Redo', exact: true }).click();
+  await expect(page.getByLabel('Clue or instructions', { exact: true })).toHaveValue('Find the tool that always points north.');
+  await expect(page.getByLabel('This hint helps with', { exact: true })).toHaveValue('answer');
   await expect(page.getByLabel('Hint title', { exact: true })).toHaveValue('A small pointer');
+  await page.getByLabel('Unlock after this many tries on the related step', { exact: true }).fill('2');
 
   await page.getByRole('button', { name: 'Add checkpoint', exact: true }).click();
   await page.getByLabel('Checkpoint title', { exact: true }).fill('The river gate');
@@ -93,6 +103,8 @@ test('organizer builds branching checkpoints without JSON, recovers drafts, prev
   const draft = saved.drafts.find((item: { id: string }) => item.id === id);
   expect(draft.definition.checkpoints).toHaveLength(2);
   expect(draft.definition.checkpoints[1].flow.nodes.some((node: { type: string }) => node.type === 'choose_path')).toBeTruthy();
+  expect(draft.definition.checkpoints[0].flow.nodes.find((node: { id: string }) => node.id === 'answer').recordAnswerAttempts).toBe(true);
+  expect(draft.definition.checkpoints[0].hints[0].relevance).toEqual({ nodeId: 'answer', expireWhenSolved: true, unlockAfterAttempts: 2 });
   expect(draft.issues).toEqual([]);
   const previewResponse = page.waitForResponse(response => response.url().endsWith('/api/v2/admin/preview') && response.request().method() === 'POST');
   await page.getByRole('button', { name: 'Start player preview', exact: true }).click();
@@ -125,7 +137,7 @@ test('organizer builds branching checkpoints without JSON, recovers drafts, prev
   const copyId = await page.getByLabel('Unique hunt ID', { exact: true }).inputValue(); created.add(copyId);
   expect(copyId).not.toBe(id);
   await expect(page.getByLabel('Hunt title', { exact: true })).toHaveValue(title + ' updated (copy)');
-  await expect(page.getByLabel('Clue or instructions', { exact: true })).toHaveValue('Find the tool that points north.');
+  await expect(page.getByLabel('Clue or instructions', { exact: true })).toHaveValue('Find the tool that always points north.');
   await page.getByRole('button', { name: 'Save draft', exact: true }).click();
   await expect(page.getByText('Draft saved to the event server.', { exact: true })).toBeVisible();
   const copies = await (await page.request.get('/api/v2/admin')).json();
@@ -208,6 +220,37 @@ test('mobile organizer preserves work when changing sections without page overfl
   await page.getByRole('button', { name: 'Events', exact: true }).click();
   await page.getByRole('button', { name: 'Design', exact: true }).click();
   await expect(page.getByLabel('Hunt title', { exact: true })).toHaveValue('Unsaved mobile adventure');
+});
+
+test('organizer can inspect opted-in answer submissions without exposing them to the player view', async ({ page }) => {
+  const id = `answer-audit-${randomUUID()}`; created.add(id);
+  const teamName = `Answer audit team ${id.slice(-6)}`;
+  const definition: HuntDefinition = { schemaVersion: 1, id, version: 1, title: `Answer audit ${id.slice(-6)}`, checkpoints: [{
+    id: 'question', title: 'Question', basePoints: 10, hints: [], flow: { startNodeId: 'answer', nodes: [
+      { id: 'answer', type: 'verify_answer', prompt: 'Name the direction tool.', answers: ['compass'], recordAnswerAttempts: true, next: 'recap' },
+      { id: 'recap', type: 'show_text', text: 'Answer recorded.', next: 'done' }, { id: 'done', type: 'complete' },
+    ] },
+  }] };
+  const post = (path: string, data: unknown) => page.request.post(path, { data, headers: { Origin: 'http://127.0.0.1:3100' } });
+  expect((await post('/api/v2/admin/session', { password: 'browser-test-password-only' })).ok()).toBeTruthy();
+  expect((await post('/api/v2/admin/hunts', { definition })).ok()).toBeTruthy();
+  const joined = await post('/api/v2/session', { mode: 'create', huntId: id, teamName, playerName: 'Explorer', pin: '123456' });
+  expect(joined.ok(), await joined.text()).toBeTruthy();
+  const { view } = await joined.json();
+  for (const value of ['needle', 'compass']) {
+    const response = await post('/api/v2/command', { requestId: randomUUID(), teamId: view.teamId, command: { type: 'verify', checkpointId: 'question', nodeId: 'answer', value } });
+    expect(response.ok(), await response.text()).toBeTruthy();
+  }
+  const playerView = await (await page.request.get('/api/v2/session')).json();
+  expect(JSON.stringify(playerView)).not.toContain('needle');
+
+  await page.goto('/v2/admin');
+  await page.getByRole('button', { name: /^Live control/ }).click();
+  const team = page.locator('article').filter({ has: page.getByRole('heading', { name: teamName, exact: true }) });
+  await team.getByText('Route & private solutions', { exact: true }).click();
+  await expect(team.getByText('Submitted answers (latest 2)', { exact: true })).toBeVisible();
+  await expect(team.getByText(/rejected · “needle”/)).toBeVisible();
+  await expect(team.getByText(/accepted · “compass”/)).toBeVisible();
 });
 
 test('printing isolates the selected event and keeps each QR on a readable page', async ({ page, browserName }, testInfo) => {

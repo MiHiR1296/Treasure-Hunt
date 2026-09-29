@@ -2,8 +2,9 @@
 
 import { useState } from 'react';
 import type { DisplayContent, FlowNode, HintContent, HintDefinition } from '@/lib/engine/types';
+import { puzzleHintItems } from '@/lib/engine/puzzles';
 import { buttonClass, CheckField, Field, inputClass, LocationFields, NumberField, TextField } from './Fields';
-import { moveItem, newId, nodeLabels } from './model';
+import { isInteractiveNode, moveItem, newId, nodeLabels } from './model';
 import PuzzleEditor from './PuzzleEditor';
 import { defaultPuzzle } from './puzzleDefaults';
 import AssetField from './AssetField';
@@ -78,6 +79,32 @@ export default function HintEditor({ value, usedIds, nodes, onChange }: { value:
       <div className="mt-4 space-y-4">
         <div className="grid gap-4 sm:grid-cols-[1fr_9rem]"><TextField label="Hint title" value={hint.title} onChange={title => update({ ...hint, title })} /><NumberField label="Point cost" value={hint.cost} min={0} max={1000000} onChange={cost => update({ ...hint, cost })} /></div>
         <ContentEditor value={hint.content} onChange={content => update({ ...hint, content })} />
+        <fieldset className="space-y-4 rounded-lg border border-teal-200 bg-teal-50/50 p-3">
+          <legend className="px-1 text-sm font-semibold text-teal-950">Smart relevance (optional)</legend>
+          <p className="text-xs leading-5 text-slate-600">Link the hint to the answer it helps with. The server will stop offering an unused hint after that step or puzzle answer is solved.</p>
+          <Field label="This hint helps with"><select className={inputClass} value={hint.relevance?.nodeId || ''} onChange={event => {
+            const nodeId = event.target.value;
+            if (!nodeId) { const next = { ...hint }; delete next.relevance; update(next); return; }
+            update({ ...hint, relevance: { nodeId, expireWhenSolved: true } });
+          }}><option value="">The checkpoint generally (legacy behavior)</option>{nodes.filter(isInteractiveNode).map(node => <option key={node.id} value={node.id}>{nodes.indexOf(node) + 1}. {nodeLabels[node.type] || node.type} ({node.id})</option>)}</select></Field>
+          {hint.relevance && (() => {
+            const target = nodes.find(node => node.id === hint.relevance?.nodeId);
+            const items = target?.type === 'puzzle' ? puzzleHintItems(target.puzzle) : [];
+            const supportsAttempts = target && ['verify_answer', 'verify_code', 'verify_qr', 'verify_gps'].includes(target.type);
+            return <>
+              {items.length > 0 && <Field label="Specific puzzle answer (optional)"><select className={inputClass} value={hint.relevance.puzzleItemId || ''} onChange={event => {
+                const relevance = { ...hint.relevance! }; if (event.target.value) relevance.puzzleItemId = event.target.value; else delete relevance.puzzleItemId; update({ ...hint, relevance });
+              }}><option value="">The whole puzzle</option>{items.map(item => <option key={item.id} value={item.id}>{target?.type === 'puzzle' && target.puzzle.type === 'word_search' ? item.label : `${item.id} · ${item.label}`}</option>)}</select></Field>}
+              {supportsAttempts && <NumberField label="Unlock after this many tries on the related step" value={hint.relevance.unlockAfterAttempts || 0} min={0} max={1000} onChange={unlockAfterAttempts => {
+                const relevance = { ...hint.relevance! }; if (unlockAfterAttempts) relevance.unlockAfterAttempts = unlockAfterAttempts; else delete relevance.unlockAfterAttempts; update({ ...hint, relevance });
+              }} hint="Zero makes attempts irrelevant. Only actual verification tries count." />}
+              <NumberField label="Unlock after this many seconds on the related step" value={hint.relevance.unlockAfterSeconds || 0} min={0} max={31536000} onChange={unlockAfterSeconds => {
+                const relevance = { ...hint.relevance! }; if (unlockAfterSeconds) relevance.unlockAfterSeconds = unlockAfterSeconds; else delete relevance.unlockAfterSeconds; update({ ...hint, relevance });
+              }} hint="The timer starts when the team reaches this step." />
+              <CheckField label="Stop offering this hint after its answer is solved" checked={hint.relevance.expireWhenSolved !== false} onChange={expireWhenSolved => update({ ...hint, relevance: { ...hint.relevance!, expireWhenSolved } })} />
+            </>;
+          })()}
+        </fieldset>
         <NumberField label="Available after this many seconds" value={hint.availability?.afterSeconds || 0} min={0} max={31536000} onChange={afterSeconds => update({ ...hint, availability: { ...hint.availability, afterSeconds } })} hint="Time starts when the team reaches this checkpoint. Zero makes the hint available immediately." />
         <Field label="Available after completing a step (optional)"><select className={inputClass} value={hint.availability?.afterNodeId || ''} onChange={event => {
           const availability = { ...hint.availability }; if (event.target.value) availability.afterNodeId = event.target.value; else delete availability.afterNodeId; update({ ...hint, availability });

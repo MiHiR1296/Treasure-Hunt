@@ -4,7 +4,7 @@ import {
   type HintDefinition, type HuntDefinition, type InteractiveNode, type OrganizerControl, type OrganizerOverride,
   type PlayerHint, type PlayerNode, type PlayerStageReview, type PlayerView, type PublicHintContent, type PuzzleProgress, type ScoreEntry,
 } from './types'
-import { initialPuzzleState, publicPuzzle, updatePuzzle, PuzzleError, type PuzzleDefinition, type PuzzleReward, type PuzzleState } from './puzzles'
+import { initialPuzzleState, publicPuzzle, puzzleHintItems, puzzleHintItemSolved, updatePuzzle, PuzzleError, type PuzzleDefinition, type PuzzleReward, type PuzzleState } from './puzzles'
 import { parseCommand, parseControl, validateHunt } from './validation'
 
 const copy = <T>(value: T): T => JSON.parse(JSON.stringify(value))
@@ -212,8 +212,13 @@ export const actionRegistry: Readonly<Record<InteractiveNode['type'], ActionModu
     commands: ['save_puzzle', 'submit_puzzle'], execute(node, command, context) {
       if (command.type !== 'save_puzzle' && command.type !== 'submit_puzzle') return invalidAction()
       const saved = context.state.checkpoints[context.checkpoint.id].nodes[node.id]
-      const update = puzzleUpdate(node.puzzle, saved.puzzle ?? newPuzzle(node.puzzle), command, command.type === 'submit_puzzle')
+      const previous = saved.puzzle ?? newPuzzle(node.puzzle)
+      const solvedBefore = new Set(puzzleHintItems(node.puzzle).filter(item => puzzleHintItemSolved(node.puzzle, previous.state, item.id)).map(item => item.id))
+      const update = puzzleUpdate(node.puzzle, previous, command, command.type === 'submit_puzzle')
       saved.puzzle = update.progress
+      const recorded = new Set(saved.puzzleDiscoveries?.map(item => item.itemId) ?? [])
+      const discoveries = puzzleHintItems(node.puzzle).filter(item => !solvedBefore.has(item.id) && !recorded.has(item.id) && puzzleHintItemSolved(node.puzzle, saved.puzzle?.state, item.id))
+      if (discoveries.length) saved.puzzleDiscoveries = [...(saved.puzzleDiscoveries ?? []), ...discoveries.map(item => ({ itemId: item.id, solvedAt: context.now }))]
       applyPuzzleRewards(context.state, context.checkpoint.id, context.now, update.rewards, { nodeId: node.id })
       const bonus = update.rewards.reduce((sum, reward) => sum + reward.amount, 0)
       return { accepted: true, next: saved.puzzle.completed ? node.next : undefined, message: saved.puzzle.completed ? 'Puzzle solved!' : bonus ? `Ingredient found — +${bonus} bonus points!` : 'Your puzzle progress is saved. Keep going.', audit: saved.puzzle.completed ? 'puzzle_completed' : 'puzzle_saved', ...(saved.puzzle.completed ? { response: puzzleResponse(node.puzzle, saved.puzzle.state) } : {}) }
@@ -235,6 +240,20 @@ export const actionRegistry: Readonly<Record<InteractiveNode['type'], ActionModu
 function hintAvailability(hint: HintDefinition, state: GameState, checkpoint: CheckpointDefinition, now: string): { status: PlayerHint['status']; reason?: string } {
   if (state.hintUsage[hint.id]) return { status: 'used' }
   if (state.activeCheckpointId !== checkpoint.id || state.checkpoints[checkpoint.id].status !== 'active') return { status: 'locked', reason: 'This hint is available during its checkpoint.' }
+  if (hint.relevance) {
+    const node = checkpoint.flow.nodes.find(candidate => candidate.id === hint.relevance!.nodeId)
+    const progress = state.checkpoints[checkpoint.id].nodes[hint.relevance.nodeId]
+    if (!node || !progress) return { status: 'locked', reason: 'This hint needs organizer attention.' }
+    if (!progress.startedAt) return { status: 'locked', reason: 'Available when your team reaches the related step.' }
+    const solved = progress.status === 'completed' || progress.status === 'skipped' || (
+      node.type === 'puzzle' && !!hint.relevance.puzzleItemId && puzzleHintItemSolved(node.puzzle, progress.puzzle?.state, hint.relevance.puzzleItemId)
+    )
+    if (solved && hint.relevance.expireWhenSolved !== false) return { status: 'expired', reason: 'Your team has already solved what this hint helps with. No points were charged.' }
+    const attemptsRemaining = (hint.relevance.unlockAfterAttempts ?? 0) - progress.attempts
+    if (attemptsRemaining > 0) return { status: 'locked', reason: `Available after ${attemptsRemaining} more ${attemptsRemaining === 1 ? 'try' : 'tries'} on this step.` }
+    const targetSecondsRemaining = (hint.relevance.unlockAfterSeconds ?? 0) - (Date.parse(now) - Date.parse(progress.startedAt)) / 1000
+    if (targetSecondsRemaining > 0) return { status: 'locked', reason: `Available in ${Math.ceil(targetSecondsRemaining)} seconds on this step.` }
+  }
   if (hint.availability?.afterHintIds?.some(id => !state.hintUsage[id])) return { status: 'locked', reason: 'Use the required hints first.' }
   if (hint.availability?.afterNodeId && state.checkpoints[checkpoint.id].nodes[hint.availability.afterNodeId].status !== 'completed') return { status: 'locked', reason: 'Continue the current task to unlock this hint.' }
   const remaining = (hint.availability?.afterSeconds ?? 0) - (Date.parse(now) - Date.parse(state.checkpoints[checkpoint.id].startedAt!)) / 1000
@@ -301,6 +320,16 @@ export function executeCommand(definition: HuntDefinition, original: GameState, 
   const outcome = actionModule.execute(node, command, { definition, state, checkpoint, now: at })
   state.revision++
   if (outcome.attempt) state.checkpoints[checkpoint.id].nodes[node.id].attempts++
+  if (node.type === 'verify_answer' && node.recordAnswerAttempts === true && command.type === 'verify') {
+    const progress = state.checkpoints[checkpoint.id].nodes[node.id]
+    const limit = 500
+    progress.answerAttempts = [...(progress.answerAttempts ?? []), {
+      submittedAt: at,
+      value: command.value.slice(0, limit),
+      accepted: outcome.accepted,
+      ...(command.value.length > limit ? { truncated: true } : {}),
+    }].slice(-20)
+  }
   if (outcome.audit) event(state, { type: outcome.audit, checkpointId: checkpoint.id, nodeId: node.id, at })
   if (outcome.accepted && outcome.response) state.checkpoints[checkpoint.id].nodes[node.id].publicResponse = outcome.response
   if (outcome.accepted && outcome.next) advance(definition, state, checkpoint, node, outcome.next, at)
@@ -349,7 +378,15 @@ export function executeControl(definition: HuntDefinition, original: GameState, 
     // charges, wrong attempts and their complete audit history.
     if (isSettled(progress)) {
       for (const entry of [...state.ledger]) if (entry.checkpointId === checkpoint.id && ['checkpoint_completed', 'time_bonus', 'action_points', 'skip_penalty'].includes(entry.kind) && !state.ledger.some(refund => refund.reverses === entry.id)) score(state, { kind: 'refund', checkpointId: checkpoint.id, amount: -entry.amount, reverses: entry.id, reason, at })
+      const nodeHistory = Object.fromEntries(Object.entries(progress.nodes).flatMap(([nodeId, nodeProgress]) => {
+        const history = {
+          ...(nodeProgress.answerAttempts?.length ? { answerAttempts: copy(nodeProgress.answerAttempts) } : {}),
+          ...(nodeProgress.puzzleDiscoveries?.length ? { puzzleDiscoveries: copy(nodeProgress.puzzleDiscoveries) } : {}),
+        }
+        return Object.keys(history).length ? [[nodeId, history]] : []
+      }))
       state.checkpoints[checkpoint.id] = initialProgress(checkpoint)
+      for (const [nodeId, history] of Object.entries(nodeHistory)) Object.assign(state.checkpoints[checkpoint.id].nodes[nodeId], history)
       for (const node of checkpoint.flow.nodes) if (node.type === 'puzzle' && progress.nodes[node.id].puzzle) state.checkpoints[checkpoint.id].nodes[node.id].puzzle = newPuzzle(node.puzzle, progress.nodes[node.id].puzzle!.revision + 1)
       if (checkpoint.required !== false) delete state.completedAt
     }
@@ -370,7 +407,7 @@ export function executeControl(definition: HuntDefinition, original: GameState, 
   const nodeProgress = progress.nodes[node.id]
   if (control.type === 'reset_action') {
     const puzzleRevision = (nodeProgress.puzzle?.revision ?? -1) + 1
-    progress.nodes[node.id] = { status: 'active', attempts: 0, startedAt: at, ...(node.type === 'puzzle' ? { puzzle: newPuzzle(node.puzzle, puzzleRevision) } : {}) }
+    progress.nodes[node.id] = { status: 'active', attempts: 0, startedAt: at, ...(nodeProgress.answerAttempts?.length ? { answerAttempts: copy(nodeProgress.answerAttempts) } : {}), ...(nodeProgress.puzzleDiscoveries?.length ? { puzzleDiscoveries: copy(nodeProgress.puzzleDiscoveries) } : {}), ...(node.type === 'puzzle' ? { puzzle: newPuzzle(node.puzzle, puzzleRevision) } : {}) }
     return { state, feedback: feedback('The organizer reset this task. Try again.') }
   }
   if (control.type === 'reject_photo') {

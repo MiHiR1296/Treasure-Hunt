@@ -13,10 +13,11 @@ const definition: HuntDefinition = {
     { id: 'riddle', title: 'The First Clue', basePoints: 20,
       flow: { startNodeId: 'clue', nodes: [
         { id: 'clue', type: 'show_text', text: 'Find the explorer’s direction tool.', next: 'answer' },
-        { id: 'answer', type: 'verify_answer', prompt: 'What points north?', answers: ['compass'], next: 'done' },
+        { id: 'answer', type: 'verify_answer', prompt: 'What points north?', answers: ['compass'], recordAnswerAttempts: true, next: 'recap' },
+        { id: 'recap', type: 'show_text', text: 'You found the direction tool.', next: 'done' },
         { id: 'done', type: 'complete' },
       ] },
-      hints: [1, 2, 3].map(i => ({ id: `hint-${i}`, title: `Clue ${i}`, cost: i === 1 ? 2 : 6, content: { type: 'text' as const, text: `Helpful detail ${i}` } })),
+      hints: [1, 2, 3].map(i => ({ id: `hint-${i}`, title: `Clue ${i}`, cost: i === 1 ? 2 : 6, content: { type: 'text' as const, text: `Helpful detail ${i}` }, ...(i === 1 ? { relevance: { nodeId: 'answer', unlockAfterAttempts: 1 } } : {}) })),
     },
     { id: 'qr', title: 'The Hidden Code', basePoints: 20,
       flow: { startNodeId: 'scan', nodes: [
@@ -63,6 +64,7 @@ test('two phones share hints and progression; retries, refresh, QR recovery and 
 
   await expect(page.getByRole('heading', { name: 'Clue 2', exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Clue 3', exact: true })).toBeVisible();
+  await expect(page.getByText('Available when your team reaches the related step.', { exact: true })).toBeVisible();
   await expect(page.getByText('−6 pts', { exact: true })).toHaveCount(2);
   await page.getByRole('button', { name: 'Choose hint: Clue 3 (6 points)', exact: true }).click();
   await expect(page.getByText('Reveal “Clue 3” for 6 points? Your team is charged once.', { exact: true })).toBeVisible();
@@ -82,16 +84,23 @@ test('two phones share hints and progression; retries, refresh, QR recovery and 
   await expect(page.getByText('Helpful detail 3')).toBeVisible();
 
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(page.getByText('Available after 1 more try on this step.', { exact: true })).toBeVisible();
   await page.getByLabel('Your answer').fill('needle');
   await page.getByRole('button', { name: 'Check answer' }).click();
   await expect(page.getByText('Not quite. Give it another try.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Choose hint: Clue 1 (2 points)', exact: true })).toBeVisible();
   await page.getByLabel('Your answer').fill('compass');
   await page.getByRole('button', { name: 'Check answer' }).click();
+  await expect(page.getByText('You found the direction tool.', { exact: true })).toBeVisible();
+  await expect(page.getByText('No longer needed', { exact: true })).toBeVisible();
+  await expect(page.getByText('Your team has already solved what this hint helps with. No points were charged.', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'The Hidden Code' })).toBeVisible();
   await expect(page.getByText('14', { exact: true })).toBeVisible();
   const view = await (await page.request.get('/api/v2/session')).json();
   expect(JSON.stringify(view)).not.toContain('private-browser-qr');
   expect(JSON.stringify(view)).not.toContain('RESCUE');
+  expect(JSON.stringify(view)).not.toContain('needle');
   await page.evaluate(() => {
     Object.defineProperty(navigator.mediaDevices, 'getUserMedia', {
       value: () => Promise.reject(new DOMException('Permission denied', 'NotAllowedError')),

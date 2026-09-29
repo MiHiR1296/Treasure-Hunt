@@ -17,7 +17,7 @@ import {
   removeNodeAndReconnect, setStartNode, START_NODE_ID,
 } from './graph/mutations';
 import { outputPortFromId, outputPortId, outputPortLabel, outputPortTarget, outputPorts, type OutputPort } from './graph/ports';
-import { applyFlowHistoryEntry, createFlowHistoryEntry, type FlowHistoryEntry } from './graph/history';
+import { applyFlowHistoryEntry, coalesceFlowHistoryEntries, createFlowHistoryEntry, type FlowHistoryEntry } from './graph/history';
 
 interface StartData extends Record<string, unknown> { targetLabel: string; connected: boolean }
 type StartCanvasNode = Node<StartData, 'startNode'>;
@@ -109,7 +109,9 @@ export default function FlowEditor({ value, hunt, onChange, disabled = false }: 
     const now = Date.now();
     const coalesce = Boolean(group && editGroup.current?.key === group && now - editGroup.current.at < 800);
     const entry = createFlowHistoryEntry(value, next);
-    if (coalesce && undoStack.current.length > 0) undoStack.current[undoStack.current.length - 1].after = entry.after;
+    const previousIndex = undoStack.current.length - 1;
+    const merged = coalesce && previousIndex >= 0 ? coalesceFlowHistoryEntries(undoStack.current[previousIndex], entry) : null;
+    if (merged) undoStack.current[previousIndex] = merged;
     else undoStack.current.push(entry);
     if (undoStack.current.length > 100) undoStack.current.shift();
     redoStack.current = [];
