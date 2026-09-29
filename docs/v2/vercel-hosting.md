@@ -6,6 +6,12 @@ The existing Supabase database and private media bucket remain in place, preserv
 
 The [player demo](https://hunt.mrbtstudio.com/v2) and [organizer console](https://hunt.mrbtstudio.com/v2/admin) are live on the custom domain. On 2026-09-19 (IST), GoDaddy DNS, trusted HTTPS, organizer sign-in, the full game, mobile feedback and private uploads passed verification there. The organizer password is unchanged. The earlier Render service is suspended; the existing Supabase database and storage remain active.
 
+## Git deployment wiring
+
+The GitHub repository `MiHiR1296/Treasure-Hunt` is connected to the Vercel project `treasure-hunt-v2`, with `main` as its production branch. The older Vercel project named `treasure-hunt` is intentionally disconnected from Git and must not be reconnected. It is retained only as inactive historical configuration.
+
+Merging an approved pull request into `main` should create a production deployment whose GitHub `Vercel` status links to a dashboard path containing `/treasure-hunt-v2/`. A status linked to `/treasure-hunt/` is the wrong project and must not be treated as evidence that the public site was updated. After a successful deployment, verify both `https://hunt.mrbtstudio.com/api/v2/health` and the changed user flow on the custom domain.
+
 ## Project configuration
 
 Use Node 22, the Next.js framework preset and the repository root. [`vercel.json`](../../vercel.json) selects Singapore and a daily cleanup job. Keep the project on Hobby and Supabase on Free for the demo.
@@ -37,8 +43,9 @@ npm run typecheck
 npm run lint
 npm test
 npm run build
-vercel deploy --prod
 ```
+
+After these checks and the repository review gate pass, merge to `main` and let the `treasure-hunt-v2` Git integration deploy production. `vercel deploy --prod` from the linked repository remains the manual fallback when the Git deployment is unavailable; confirm that the CLI reports `Deploying mihirs-projects-067a6cd3/treasure-hunt-v2` before continuing.
 
 Run database integration tests against a dedicated test database, not the live Supabase database. Do not seed or restore over existing cloud data when moving between hosts.
 
