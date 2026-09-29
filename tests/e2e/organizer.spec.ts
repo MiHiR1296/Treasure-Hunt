@@ -50,13 +50,20 @@ test('organizer builds branching checkpoints without JSON, recovers drafts, prev
   await page.getByRole('button', { name: 'Add hint', exact: true }).click();
   await page.getByLabel('Hint title', { exact: true }).fill('A small pointer');
   await page.getByLabel('Text to reveal', { exact: true }).fill('It has a magnetic needle.');
+  await page.getByLabel('Selected step', { exact: true }).selectOption('clue');
+  await page.getByLabel('Clue or instructions', { exact: true }).fill('Look for the tool that points north.');
   await page.getByLabel('This hint helps with', { exact: true }).selectOption('answer');
-  await page.getByLabel('Unlock after this many tries on the related step', { exact: true }).fill('2');
+  await page.getByLabel('Clue or instructions', { exact: true }).fill('Find the tool that always points north.');
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect(page.getByLabel('Clue or instructions', { exact: true })).toHaveValue('Look for the tool that points north.');
+  await expect(page.getByLabel('This hint helps with', { exact: true })).toHaveValue('answer');
   await expect(page.getByLabel('Hint title', { exact: true })).toHaveValue('A small pointer');
   await expect(page.getByLabel('Text to reveal', { exact: true })).toHaveValue('It has a magnetic needle.');
   await page.getByRole('button', { name: 'Redo', exact: true }).click();
+  await expect(page.getByLabel('Clue or instructions', { exact: true })).toHaveValue('Find the tool that always points north.');
+  await expect(page.getByLabel('This hint helps with', { exact: true })).toHaveValue('answer');
   await expect(page.getByLabel('Hint title', { exact: true })).toHaveValue('A small pointer');
+  await page.getByLabel('Unlock after this many tries on the related step', { exact: true }).fill('2');
 
   await page.getByRole('button', { name: 'Add checkpoint', exact: true }).click();
   await page.getByLabel('Checkpoint title', { exact: true }).fill('The river gate');
@@ -130,7 +137,7 @@ test('organizer builds branching checkpoints without JSON, recovers drafts, prev
   const copyId = await page.getByLabel('Unique hunt ID', { exact: true }).inputValue(); created.add(copyId);
   expect(copyId).not.toBe(id);
   await expect(page.getByLabel('Hunt title', { exact: true })).toHaveValue(title + ' updated (copy)');
-  await expect(page.getByLabel('Clue or instructions', { exact: true })).toHaveValue('Find the tool that points north.');
+  await expect(page.getByLabel('Clue or instructions', { exact: true })).toHaveValue('Find the tool that always points north.');
   await page.getByRole('button', { name: 'Save draft', exact: true }).click();
   await expect(page.getByText('Draft saved to the event server.', { exact: true })).toBeVisible();
   const copies = await (await page.request.get('/api/v2/admin')).json();

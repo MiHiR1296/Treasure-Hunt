@@ -35,6 +35,21 @@ function sameRelevance(left: NonNullable<HintDefinition['relevance']> | null, ri
   return left.nodeId === right.nodeId && left.puzzleItemId === right.puzzleItemId && left.unlockAfterAttempts === right.unlockAfterAttempts && left.unlockAfterSeconds === right.unlockAfterSeconds && left.expireWhenSolved === right.expireWhenSolved;
 }
 
+function sameHintNodeReferences(left: HintNodeReferences, right: HintNodeReferences): boolean {
+  const leftIds = Object.keys(left);
+  const rightIds = Object.keys(right);
+  if (leftIds.length !== rightIds.length || leftIds.some(id => !Object.hasOwn(right, id))) return false;
+  return leftIds.every(id => left[id].availabilityNodeId === right[id].availabilityNodeId && sameRelevance(left[id].relevance, right[id].relevance));
+}
+
+export function coalesceFlowHistoryEntries(previous: FlowHistoryEntry, next: FlowHistoryEntry): FlowHistoryEntry | null {
+  // A hint editor change is not part of flow history. If one occurred between
+  // these flow edits, keeping separate entries prevents undo from treating the
+  // independent reference change as part of the coalesced flow operation.
+  if (!sameHintNodeReferences(previous.after.hintNodeReferences, next.before.hintNodeReferences)) return null;
+  return { before: previous.before, after: next.after };
+}
+
 function restoreNodeReferences(hints: HintDefinition[], from: HintNodeReferences, to: HintNodeReferences): HintDefinition[] {
   return hints.map(hint => {
     if (!Object.hasOwn(from, hint.id) || !Object.hasOwn(to, hint.id)) return hint;

@@ -3,7 +3,7 @@ import test from 'node:test';
 import type { CheckpointDefinition, HuntDefinition } from '../lib/engine/types';
 import { addQrFallback, canConnect, duplicateCheckpoint, insertNode, removeNode } from '../components/v2/builder/model';
 import { createNode, isSupportedNodeType, nodeCatalog, nodeDescriptor } from '../components/v2/builder/catalog';
-import { applyFlowHistoryEntry, createFlowHistoryEntry } from '../components/v2/builder/graph/history';
+import { applyFlowHistoryEntry, coalesceFlowHistoryEntries, createFlowHistoryEntry } from '../components/v2/builder/graph/history';
 import { canConnectPort, connectPort, disconnectPort, projectEdges, removeNodeAndDisconnect, removeNodeAndReconnect, setStartNode } from '../components/v2/builder/graph/mutations';
 import { outputPortFromId, outputPortId, outputPortTarget, outputPorts } from '../components/v2/builder/graph/ports';
 
@@ -165,6 +165,38 @@ test('flow undo and redo preserve hints authored after the recorded flow edit', 
   const redone = applyFlowHistoryEntry(undone, entry, 'redo');
   assert.deepEqual(redone.flow, after.flow);
   assert.deepEqual(redone.hints, undone.hints);
+});
+
+test('flow edit coalescing stops at an independent hint-target change', () => {
+  const before = fixture().checkpoints[0];
+  const firstFlowEdit: CheckpointDefinition = {
+    ...before,
+    flow: { ...before.flow, nodes: before.flow.nodes.map(node => node.id === 'clue' && node.type === 'show_text' ? { ...node, text: 'First quick edit' } : node) },
+  };
+  const firstEntry = createFlowHistoryEntry(before, firstFlowEdit);
+  const withNewHintTarget: CheckpointDefinition = {
+    ...firstFlowEdit,
+    hints: firstFlowEdit.hints.map(hint => hint.id === 'hint-1' ? { ...hint, relevance: { nodeId: 'qr', expireWhenSolved: true } } : hint),
+  };
+  const secondFlowEdit: CheckpointDefinition = {
+    ...withNewHintTarget,
+    flow: { ...withNewHintTarget.flow, nodes: withNewHintTarget.flow.nodes.map(node => node.id === 'clue' && node.type === 'show_text' ? { ...node, text: 'Second quick edit' } : node) },
+  };
+  const secondEntry = createFlowHistoryEntry(withNewHintTarget, secondFlowEdit);
+
+  assert.equal(coalesceFlowHistoryEntries(firstEntry, secondEntry), null);
+
+  const afterFirstUndo = applyFlowHistoryEntry(secondFlowEdit, secondEntry, 'undo');
+  assert.deepEqual(afterFirstUndo.hints.find(hint => hint.id === 'hint-1')?.relevance, { nodeId: 'qr', expireWhenSolved: true });
+  const firstUndoneClue = afterFirstUndo.flow.nodes.find(node => node.id === 'clue');
+  assert.ok(firstUndoneClue?.type === 'show_text');
+  assert.equal(firstUndoneClue.text, 'First quick edit');
+
+  const afterSecondUndo = applyFlowHistoryEntry(afterFirstUndo, firstEntry, 'undo');
+  assert.deepEqual(afterSecondUndo.hints.find(hint => hint.id === 'hint-1')?.relevance, { nodeId: 'qr', expireWhenSolved: true });
+  const secondUndoneClue = afterSecondUndo.flow.nodes.find(node => node.id === 'clue');
+  assert.ok(secondUndoneClue?.type === 'show_text');
+  assert.equal(secondUndoneClue.text, 'Find the gate');
 });
 
 test('deletion history restores only its hint reference and does not erase newer hint fields', () => {
