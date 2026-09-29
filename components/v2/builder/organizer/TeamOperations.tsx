@@ -92,7 +92,14 @@ function TeamRouteAndSolutions({ team, definition }: { team: OrganizerTeam; defi
   </details>;
 }
 
-export function TeamControls({ team, pending, run, refresh, notify }: Omit<OperationProps, 'dashboard'> & { team: OrganizerTeam }) {
+type ControlTeam = Pick<OrganizerTeam, 'id' | 'name' | 'ledger'> & {
+  view: Pick<OrganizerTeam['view'], 'revision' | 'status' | 'timer' | 'members' | 'checkpoints'> & {
+    checkpoint: { id: string } | null;
+    node: Pick<NonNullable<OrganizerTeam['view']['node']>, 'id' | 'type' | 'fallback'> | null;
+    hints: { id: string; title: string }[];
+  };
+};
+export function TeamControls({ team, pending, run, refresh, notify }: Omit<OperationProps, 'dashboard'> & { team: ControlTeam }) {
   const [type, setType] = useState<OrganizerControl['type']>('approve_action');
   const [reason, setReason] = useState('');
   const [targetCheckpoint, setTargetCheckpoint] = useState(team.view.checkpoint?.id || team.view.checkpoints?.[0]?.id || '');
@@ -194,7 +201,7 @@ export default function TeamOperations(props: OperationProps) {
   useEffect(() => {
     let current = true;
     for (const team of dashboard.teams) if (details[team.id] && details[team.id].view.revision !== team.view.revision) {
-      void adminRequest<{ team: OrganizerTeam }>(`/api/v2/admin/results?teamId=${team.id}`).then(result => { if (current) setDetails(previous => ({ ...previous, [team.id]: result.team })); }).catch(() => { /* Keep the inspected snapshot; revision checks protect controls. */ });
+      void adminRequest<{ team: OrganizerTeam }>(`/api/v2/admin/team-inspector?teamId=${team.id}`).then(result => { if (current) setDetails(previous => ({ ...previous, [team.id]: result.team })); }).catch(() => { /* Keep the inspected snapshot; revision checks protect controls. */ });
     }
     return () => { current = false; };
     // Re-fetch only inspected teams when a dashboard refresh reports a change.
@@ -221,7 +228,7 @@ export default function TeamOperations(props: OperationProps) {
       <details className="mt-4 rounded-lg border border-slate-200 p-3"><summary className="cursor-pointer py-2 text-sm font-semibold">Checkpoint progression</summary><ol className="mt-3 space-y-3 text-sm">{team.view.checkpoints?.map(checkpoint => { const progress = team.checkpoints[checkpoint.id]; const nodes = Object.values(progress?.nodes || {}); const attempts = nodes.reduce((sum, node) => sum + node.attempts, 0); return <li key={checkpoint.id}><div className="flex justify-between gap-3"><span>{checkpoint.title}{!checkpoint.required ? ' (optional)' : ''}</span><span className="capitalize text-slate-600">{checkpoint.status}</span></div>{nodes.length > 0 && <p className="mt-1 text-xs text-slate-500">{nodes.filter(node => node.status === 'completed' || node.status === 'skipped').length} steps passed · {attempts} verification attempts</p>}</li>; })}</ol></details>
       {team.detailed !== false && <TeamRouteAndSolutions team={team} definition={team.definition} />}
       {dashboard.photos.filter(photo => photo.team_id === team.id).map(photo => <div key={photo.id} className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3"><p className="mb-3 font-semibold">Photo awaiting review</p><img src={`/api/v2/media/${photo.id}`} alt={`Checkpoint photograph submitted by ${team.name}`} className="max-h-80 w-full rounded-lg object-contain" /><a className="mt-2 inline-flex min-h-11 items-center text-sm font-semibold text-teal-800 underline" href={`/api/v2/media/${photo.id}`} target="_blank" rel="noreferrer">Open full image</a>{photo.referenceImages?.length > 0 && <div className="mt-3 space-y-3 border-t border-amber-200 pt-3"><p className="text-sm font-semibold">Expected landmark references</p><p className="text-xs text-slate-600">Compare with the references from this team’s hunt version.</p><div className="grid gap-3 sm:grid-cols-2">{photo.referenceImages.map((url, index) => <a key={`${url}:${index}`} href={url} target="_blank" rel="noreferrer" className="rounded-lg border border-amber-200 bg-white p-2"><img src={url} alt={`Expected landmark reference ${index + 1} for ${team.name}`} className="max-h-56 w-full object-contain" /><span className="mt-2 block text-xs font-semibold text-teal-800 underline">Open reference {index + 1}</span></a>)}</div></div>}<p className="mt-3 text-xs text-slate-600">Use Approve current step or Ask for another photo below.</p></div>)}
-      {team.detailed === false ? <button className={`${buttonClass} mt-4`} disabled={Boolean(pending)} onClick={() => void run(`inspect:${team.id}`, async () => { const result = await adminRequest<{ team: OrganizerTeam }>(`/api/v2/admin/results?teamId=${team.id}`); setDetails(previous => ({ ...previous, [team.id]: result.team })); })}>Inspect team & controls</button> : <><TeamControls key={`${team.id}:${team.view.checkpoint?.id}:${team.view.node?.id}`} team={team} pending={pending} run={run} refresh={refresh} notify={notify} /><History team={team} /></>}
+      {team.detailed === false ? <button className={`${buttonClass} mt-4`} disabled={Boolean(pending)} onClick={() => void run(`inspect:${team.id}`, async () => { const result = await adminRequest<{ team: OrganizerTeam }>(`/api/v2/admin/team-inspector?teamId=${team.id}`); setDetails(previous => ({ ...previous, [team.id]: result.team })); })}>Inspect team, controls & private solutions</button> : <><TeamControls key={`${team.id}:${team.view.checkpoint?.id}:${team.view.node?.id}`} team={team} pending={pending} run={run} refresh={refresh} notify={notify} /><History team={team} /></>}
     </article>)}</div>
     {teams.length === 0 && <p className="rounded-xl border border-dashed border-slate-300 p-6 text-slate-500">No teams match this filter.</p>}
   </section>;

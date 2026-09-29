@@ -10,12 +10,13 @@ import { NextRequest } from 'next/server';
 import { getPool } from '../../lib/server/db';
 import { deleteDraft, publishDraft, publishHunt, saveDraft, setHuntStatus } from '../../lib/server/hunts';
 import { applyTeamCommand, getTeamRecord, joinTeam, organizerSnapshot, teamView } from '../../lib/server/store';
-import { listResults, resultActivity, resultBatch, resultHistory, resultManifest, teamResult } from '../../lib/server/results';
+import { inspectTeam, listResults, resultActivity, resultBatch, resultHistory, resultManifest, teamResult } from '../../lib/server/results';
 import { startPreview } from '../../lib/server/operations';
 import { authenticate, digest, HttpError, TEAM_COOKIE } from '../../lib/server/security';
 import { cleanupMedia, readMedia, uploadPhoto, validatePhotoTask } from '../../lib/server/media';
 import { EngineError, type HuntDefinition } from '../../lib/engine/types';
 import { jsonBody } from '../../lib/server/http';
+import { newHuntSettings } from '../../lib/engine/authoring';
 
 const enabled = !!process.env.DATABASE_URL, ids: string[] = [];
 let directory: string;
@@ -50,7 +51,7 @@ after(async () => {
 });
 
 test('PostgreSQL: atomic starts, roster races, session revocation and immutable starting roster', { skip: !enabled }, async () => {
-  const h = definition(); await publishHunt(h); const team = await join(h.id, ['Alice']); const id = team.view.teamId;
+  const h = definition(newHuntSettings); await publishHunt(h); const team = await join(h.id, ['Alice']); const id = team.view.teamId;
   assert.equal(team.view.status, 'waiting'); assert.equal(JSON.stringify(team.view).includes('Private first task'), false);
   await assert.rejects(start(id), fails('invalid_roster'));
   await assert.rejects(command(id, { type: 'update_roster', expectedRevision: 0, names: ['Alice', 'Ａlice'] }));
@@ -176,6 +177,39 @@ test('PostgreSQL: previews stay isolated and forced assignment maps are never li
   const second = await startPreview({ huntId: h.id, routeChoices: { 'one:router': 0 } });
   assert.notEqual(preview.view.teamId, second.view.teamId); assert.deepEqual((await getTeamRecord(preview.view.teamId)).state.routeAssignments, before);
   assert.deepEqual((await listResults(h.id)).teams, []);
+  const missing = (e: unknown) => e instanceof HttpError && e.status === 404;
+  for (const id of [preview.view.teamId, second.view.teamId]) {
+    await assert.rejects(teamResult(id), missing);
+    await assert.rejects(resultActivity(id, 0), missing);
+    for (const section of ['events', 'ledger', 'help'] as const) await assert.rejects(resultHistory(id, section, 0, 0, 0, new Date().toISOString()), missing);
+    assert.equal((await inspectTeam(id)).team.isPreview, true);
+  }
+});
+
+test('PostgreSQL: Results allowlists configuration while retaining recorded player answers', { skip: !enabled }, async () => {
+  const h = definition({ map: 'all' });
+  h.dudQrs = [{ token: 'private-decoy-token', message: 'Try again' }];
+  const cp = h.checkpoints[0]; cp.hints = [];
+  cp.location = { latitude: 18.1234567, longitude: 72.7654321, radiusMeters: 30 };
+  cp.flow = { startNodeId: 'words', nodes: [
+    { id: 'words', type: 'puzzle', prompt: 'Find the word', puzzle: { type: 'word_search', grid: [['C', 'A', 'T'], ['X', 'Y', 'Z'], ['D', 'O', 'G']], words: ['CAT'] }, next: 'answer' },
+    { id: 'answer', type: 'verify_answer', prompt: 'Answer', answers: ['private-answer-secret'], recordAnswerAttempts: true, next: 'qr' },
+    { id: 'qr', type: 'verify_qr', prompt: 'Scan', token: 'private-qr-token', backupCode: 'PRIVATEBACKUP', next: 'code' },
+    { id: 'code', type: 'verify_code', prompt: 'Code', code: 'PRIVATECODE', next: 'gps' },
+    { id: 'gps', type: 'verify_gps', prompt: 'Location', ...cp.location, maxAccuracyMeters: 50, next: 'done' },
+    { id: 'done', type: 'complete' },
+  ] };
+  await publishHunt(h); const team = await join(h.id), id = team.view.teamId; await start(id);
+  await command(id, { type: 'submit_puzzle', checkpointId: 'one', nodeId: 'words', expectedRevision: 0, value: { path: [0, 1, 2].map(column => ({ row: 0, column })) } });
+  await command(id, { type: 'verify', checkpointId: 'one', nodeId: 'answer', value: 'recorded-player-guess' });
+  const report = await teamResult(id), serialized = JSON.stringify(report);
+  assert.deepEqual(report.team.definition, { id: h.id, title: h.title, checkpoints: [{ id: cp.id, title: cp.title, basePoints: cp.basePoints, required: true }] });
+  for (const secret of ['private-answer-secret', 'private-qr-token', 'PRIVATEBACKUP', 'PRIVATECODE', 'private-decoy-token', '18.1234567', '72.7654321']) assert.equal(serialized.includes(secret), false, secret);
+  assert.ok(serialized.includes('recorded-player-guess'));
+  assert.equal(report.team.checkpoints.one.nodes.words.puzzleDiscoveries?.[0].itemId, 'CAT');
+  assert.deepEqual(report.team.checkpoints, (await getTeamRecord(id)).state.checkpoints);
+  assert.ok(JSON.stringify(await resultActivity(id, report.summary.revision)).includes('recorded-player-guess'));
+  assert.deepEqual((await inspectTeam(id)).team.definition, h);
 });
 
 test('PostgreSQL: paged legacy history exports retain an exact prefix during later corrections', { skip: !enabled }, async () => {

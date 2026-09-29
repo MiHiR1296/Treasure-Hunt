@@ -1,7 +1,7 @@
 import type { HuntDefinition, HuntSettings } from './types'
 import { nodeTargets } from './validation'
 
-export const newHuntSettings: HuntSettings = { minTeamSize: 1, maxTeamSize: 4, sessionDurationSeconds: 7200, assignmentVersion: 2 }
+export const newHuntSettings: HuntSettings = { minTeamSize: 2, maxTeamSize: 4, sessionDurationSeconds: 7200, assignmentVersion: 2 }
 
 /** Bounded reachability warnings, not an automatic difficulty/balance judgement. */
 export function authoringWarnings(hunt: HuntDefinition): string[] {

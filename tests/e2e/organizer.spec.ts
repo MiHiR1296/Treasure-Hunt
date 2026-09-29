@@ -249,7 +249,7 @@ test('organizer can inspect opted-in answer submissions without exposing them to
   await page.goto('/v2/admin');
   await page.getByRole('button', { name: /^Live control/ }).click();
   const team = page.locator('article').filter({ has: page.getByRole('heading', { name: teamName, exact: true }) });
-  await team.getByRole('button', { name: 'Inspect team & controls', exact: true }).click();
+  await team.getByRole('button', { name: 'Inspect team, controls & private solutions', exact: true }).click();
   await team.getByText('Route & private solutions', { exact: true }).click();
   await expect(team.getByText('Submitted answers (latest 2)', { exact: true })).toBeVisible();
   await expect(team.getByText(/rejected · “needle”/)).toBeVisible();
@@ -322,7 +322,7 @@ test('organizer resolves help, enables recovery, and retries a score correction 
   await page.goto('/v2/admin');
   await page.getByRole('button', { name: /^Live control/ }).click();
   const team = page.locator('article').filter({ has: page.getByRole('heading', { name: teamName, exact: true }) });
-  await team.getByRole('button', { name: 'Inspect team & controls', exact: true }).click();
+  await team.getByRole('button', { name: 'Inspect team, controls & private solutions', exact: true }).click();
   await team.getByText('Route & private solutions', { exact: true }).click();
   await expect(team.getByText('TEAM IS HERE', { exact: true })).toBeVisible();
   await expect(team.getByText('Correct code: BRIDGE', { exact: true })).toBeVisible();
@@ -346,7 +346,7 @@ test('organizer resolves help, enables recovery, and retries a score correction 
   await page.reload();
   await page.unroute('**/api/v2/admin/control');
   await page.getByRole('button', { name: /^Live control/ }).click();
-  await team.getByRole('button', { name: 'Inspect team & controls', exact: true }).click();
+  await team.getByRole('button', { name: 'Inspect team, controls & private solutions', exact: true }).click();
   await expect(team.getByRole('button', { name: 'Retry pending organizer action', exact: true })).toBeEnabled();
   await expect(team.getByRole('button', { name: 'Discard pending action', exact: true })).toBeDisabled();
   const retryRequest = page.waitForRequest(request => request.url().endsWith('/api/v2/admin/control') && request.method() === 'POST');

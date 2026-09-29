@@ -6,6 +6,13 @@ import { assertStartWindow, elapsedMilliseconds, pauseSession, playability, resu
 import { assignRoutes } from '../lib/server/routes';
 import { validateRosterNames, parseCommand } from '../lib/engine/validation';
 import { resultsCsv } from '../lib/engine/reporting';
+import { newHuntSettings } from '../lib/engine/authoring';
+
+test('new authoring defaults to two members without changing legacy definitions or explicit solo settings', () => {
+  assert.deepEqual(newHuntSettings, { minTeamSize: 2, maxTeamSize: 4, sessionDurationSeconds: 7200, assignmentVersion: 2 });
+  assert.equal(hunt(false).settings?.minTeamSize, undefined);
+  assert.deepEqual(validateHunt(hunt()), [], 'explicit solo configuration remains supported');
+});
 
 const at = (seconds = 0) => new Date(Date.UTC(2026, 0, 1) + seconds * 1000).toISOString();
 const error = (code: string) => (e: unknown) => e instanceof EngineError && e.code === code;

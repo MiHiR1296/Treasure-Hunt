@@ -65,7 +65,7 @@ export function checkpointTimings(state: GameState, now: string) {
     purchases: state.events.filter(event => event.checkpointId === id && event.type === 'hint_used').length }));
 }
 
-export async function teamResult(teamId: string) {
+async function loadTeamReport(teamId: string, allowPreview = false) {
   return transaction(async client => {
   const identity = (await client.query('select hunt_id from hunt_v2.teams where id=$1', [teamId])).rows[0];
   if (!identity) throw new HttpError(404, 'Team not found.');
@@ -73,7 +73,7 @@ export async function teamResult(teamId: string) {
   // hunt -> team order as accepted commands. New help requests also lock the team.
   await client.query('select id from hunt_v2.hunts where id=$1 for share', [identity.hunt_id]);
   const team = (await client.query(`${teamQuery} where t.id=$1 for share of t`, [teamId])).rows[0] as TeamRecord | undefined;
-  if (!team) throw new HttpError(404, 'Team not found.');
+  if (!team || (team.is_preview && !allowPreview)) throw new HttpError(404, 'Team not found.');
   const now = new Date((await client.query('select clock_timestamp() as at')).rows[0].at).toISOString();
   const members = (await client.query('select id,name,joined_at from hunt_v2.members where team_id=$1 order by joined_at,id', [teamId])).rows;
   const helpCount = (await client.query('select count(*)::int as count from hunt_v2.help_requests where team_id=$1', [teamId])).rows[0].count as number;
@@ -93,11 +93,32 @@ export async function teamResult(teamId: string) {
   });
 }
 
+/** Operational solutions inspection is explicit and separate from Results/export.
+ * The inspector supports preview recovery, but no Results path may opt into it. */
+export async function inspectTeam(teamId: string) {
+  return { team: (await loadTeamReport(teamId, true)).team };
+}
+
+/** Allowlist configuration metadata, including the nested view: don't export
+ * private definitions or incidentally include configured maps/hint content. */
+export async function teamResult(teamId: string) {
+  const report = await loadTeamReport(teamId), { definition, view } = report.team;
+  return { ...report, team: { ...report.team,
+    definition: { id: definition.id, title: definition.title, checkpoints: definition.checkpoints.map(cp => ({ id: cp.id, title: cp.title, basePoints: cp.basePoints, required: cp.required !== false })) },
+    view: { hunt: { id: definition.id, title: definition.title }, teamId: view.teamId, revision: view.revision, status: view.status, score: view.score,
+      serverNow: view.serverNow, playability: view.playability, timer: view.timer, progress: view.progress, members: view.members,
+      checkpoint: view.checkpoint, node: view.node ? { id: view.node.id, type: view.node.type, ...(view.node.fallback ? { fallback: view.node.fallback } : {}) } : null,
+      checkpoints: view.checkpoints?.map(cp => ({ id: cp.id, title: cp.title, status: cp.status, required: cp.required })),
+      hints: view.hints.map(hint => ({ id: hint.id, title: hint.title })),
+    },
+  } };
+}
+
 /** Engine events and ledger are append-only. Ordinal cutoffs preserve the inspected
  * revision across concurrent corrections; help replies are labelled as read-time data. */
 export async function resultHistory(teamId: string, section: 'events' | 'ledger' | 'help', throughRevision: number, count: number, offset: number, asOf: string) {
   if (![throughRevision, count, offset].every(Number.isSafeInteger) || throughRevision < 0 || count < 0 || offset < 0 || offset > count || !Number.isFinite(Date.parse(asOf))) throw new HttpError(400, 'Invalid history cursor.');
-  const team = (await getPool().query("select (state->>'revision')::int as revision from hunt_v2.teams where id=$1", [teamId])).rows[0];
+  const team = (await getPool().query("select (state->>'revision')::int as revision from hunt_v2.teams where id=$1 and not is_preview", [teamId])).rows[0];
   if (!team) throw new HttpError(404, 'Team not found.');
   if (team.revision < throughRevision) throw new HttpError(409, 'The team no longer matches this export. Reload the result.');
   const size = Math.min(100, count - offset);
@@ -110,6 +131,7 @@ export async function resultHistory(teamId: string, section: 'events' | 'ledger'
 
 export async function resultActivity(teamId: string, throughRevision: number, afterRevision = -1, afterOrdinal = -1) {
   if (![throughRevision, afterRevision, afterOrdinal].every(Number.isSafeInteger) || throughRevision < 0 || afterRevision < -1 || afterOrdinal < -1) throw new HttpError(400, 'Invalid activity cursor.');
+  if (!(await getPool().query('select 1 from hunt_v2.teams where id=$1 and not is_preview', [teamId])).rowCount) throw new HttpError(404, 'Team not found.');
   const { rows } = await getPool().query(`select revision,ordinal,at,actor,type,details from hunt_v2.team_activity where team_id=$1 and revision<=$2 and (revision,ordinal)>($3,$4) order by revision,ordinal limit 101`, [teamId, throughRevision, afterRevision, afterOrdinal]);
   const entries = rows.slice(0, 100), last = entries.at(-1);
   return { throughRevision, entries, next: rows.length > 100 ? { revision: last.revision, ordinal: last.ordinal } : null };

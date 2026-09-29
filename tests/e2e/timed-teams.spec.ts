@@ -16,6 +16,18 @@ const definition = (): HuntDefinition => {
 test.beforeEach(async ({ request }) => { expect((await post(request, '/api/v2/admin/session', { password: 'browser-test-password-only' })).ok()).toBeTruthy(); });
 test.afterAll(async () => { const pool = new Pool({ connectionString: process.env.DATABASE_URL }); try { await pool.query('delete from hunt_v2.hunts where id=any($1::text[])', [ids]); await pool.query('delete from hunt_v2.drafts where id=any($1::text[])', [ids]); } finally { await pool.end(); } });
 
+test('preview detail and every history endpoint are excluded from Results', async ({ request }) => {
+  const h = definition(); expect((await post(request, '/api/v2/admin/hunts', { definition: h })).ok()).toBeTruthy();
+  const response = await post(request, '/api/v2/admin/preview', { huntId: h.id }); expect(response.ok(), await response.text()).toBeTruthy();
+  const preview = await response.json(), id = preview.view.teamId;
+  for (const section of ['', 'activity', 'events', 'ledger', 'help']) {
+    const params = new URLSearchParams({ teamId: id, throughRevision: '0', count: '0', offset: '0', asOf: new Date().toISOString() });
+    if (section) params.set('section', section);
+    expect((await request.get(`/api/v2/admin/results?${params}`)).status()).toBe(404);
+  }
+  expect((await request.get(`/api/v2/admin/team-inspector?teamId=${id}`)).status()).toBe(200);
+});
+
 test('timed roster, late teammate, pause, sticky word hints, expiry and organizer reopen', async ({ page, browser, request }, info) => {
   test.setTimeout(90000);
   const h = definition(), teamName = `Timed-${randomUUID().slice(0, 8)}`;
@@ -47,6 +59,7 @@ test('timed roster, late teammate, pause, sticky word hints, expiry and organize
     const unauthorized = await post(device.request, '/api/v2/session', { huntId: h.id, teamName, playerName: 'Eve', pin: '123456', mode: 'join' }); expect(unauthorized.status()).toBe(409);
     expect((await post(device.request, '/api/v2/session', { huntId: h.id, teamName, playerName: 'Bob', pin: '123456', mode: 'join', routeChoices: {} })).status()).toBe(400);
     expect((await device.request.get(`/api/v2/admin/results?teamId=${initial.teamId}`)).status()).toBe(401);
+    expect((await device.request.get(`/api/v2/admin/team-inspector?teamId=${initial.teamId}`)).status()).toBe(401);
     const status = async (value: string) => {
       const dashboard = await (await request.get('/api/v2/admin')).json();
       const response = await request.patch('/api/v2/admin/hunts', { headers: { Origin: origin }, data: { huntId: h.id, status: value, expectedRevision: dashboard.hunts.find((item: { id: string }) => item.id === h.id).lifecycleRevision } }); expect(response.ok(), await response.text()).toBeTruthy();
@@ -89,7 +102,11 @@ test('draft deletion keeps unsaved device work; results review and exports stay 
   await page.getByLabel('Organizer action', { exact: true }).selectOption('review_result'); await page.getByLabel('Private review status', { exact: true }).selectOption('flagged');
   await page.getByLabel('Reason for organizer action', { exact: true }).fill('Check declared roster before final results'); await page.getByRole('button', { name: 'Record result review', exact: true }).click();
   await expect(page.getByText(/Review: flagged/).first()).toBeVisible();
-  const download = page.waitForEvent('download'); await page.getByRole('button', { name: 'Export complete team record (JSON)', exact: true }).click(); expect((await download).suggestedFilename()).toContain(team.view.teamId);
+  const download = page.waitForEvent('download'); await page.getByRole('button', { name: 'Export complete team record (JSON)', exact: true }).click();
+  const json = await download; expect(json.suggestedFilename()).toContain(team.view.teamId);
+  const exported = JSON.parse(await readFile((await json.path())!, 'utf8'));
+  expect(exported.team.definition).toEqual({ id: h.id, title: h.title, checkpoints: [{ id: 'one', title: 'Word task', basePoints: 10, required: true }] });
+  expect(JSON.stringify(exported)).not.toContain('"answers"');
   const csvDownload = page.waitForEvent('download'); await page.getByRole('button', { name: 'Export all team summaries (CSV)', exact: true }).click();
   const csv = await csvDownload; expect(csv.suggestedFilename()).toBe(`${h.id}-results.csv`);
   const contents = await readFile((await csv.path())!, 'utf8'); expect(contents).toContain(team.view.teamId); expect(contents).toContain('registrationCutoff'); expect(contents).toContain('"flagged"');

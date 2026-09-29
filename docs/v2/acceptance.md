@@ -266,6 +266,16 @@ Initial browser execution found stale assertions for removed roster text/previou
 - Run a representative production-sized HTTP/hosting workload and longer soak if event scale requires it. Local stress has a bounded synthetic catalog and histories; dashboard authoring definitions/pending-photo metadata still contribute to payload size. Browser CSV refuses more than 10,000 teams explicitly; paginated APIs remain available. No latency/SLA or unlimited-scale claim is made.
 - Winner verification, attendance/identity verification, cross-team duplicate-registration controls and route difficulty/scoring balance remain organizer responsibilities. Random routes reduce straightforward answer sharing; they do not prevent screenshots or cooperation.
 
+### PR #11 review follow-up — 2026-09-30
+
+Addressed the review of `adc8dac`: Results detail/JSON now allowlists definition and nested-view metadata, retains recorded answers/discoveries, and excludes configured solutions, QR/backup/dud secrets and GPS targets. The existing private operational inspector is a separate explicitly labelled organizer action, with no solutions download. Newly authored hunts default to two members; existing/explicit solo settings are unchanged. Preview teams return 404 from Results detail, activity and every history section.
+
+- Unit tests: **130/130 PASS**. Typecheck, lint and production build: **PASS**.
+- Disposable PostgreSQL 17: **20/20 PASS**, no skips, including metadata/secret redaction, retained submissions/discoveries, default two-person start enforcement and preview exclusion. A concurrent integration rerun initially deadlocked during schema setup against browser traffic; the final standalone rerun passed. Do not run independently migrating suites against the same database concurrently.
+- Browser suite: **75/75 PASS**, desktop Chrome, Android Chrome emulation and iPhone WebKit emulation. Downloaded JSON metadata is asserted; preview detail/history return 404; team sessions cannot access the private inspector. Existing private-solutions/recovery journeys still pass. Updated Results screenshots were visually inspected; no separate manual-device journey is claimed.
+- Stress rerun: **100 teams / 400 authenticated sessions / 60 rounds / 25,410 operations / zero errors**, 35 seconds; p50 452 ms, p95 571 ms, p99 673 ms; 10 pool connections; maximum synthetic dashboard 447,857 bytes; all 100 teams exported. These are local service/PostgreSQL measurements, not HTTP/production capacity or a long soak.
+- **Approval remains gated on the reviewer's acceptance of the automated evidence and outstanding physical Android/iPhone field checks**, as explicitly requested in this review. Earlier general field-check language does not waive this PR-specific gate. Nothing was merged, migrated in production or deployed by this follow-up. No additional schema/environment changes were introduced; the original PR migration remains required after approval.
+
 ## Remaining acceptance work
 
 1. Initial phone play and own-puzzle authoring are accepted by the user, and the requested feedback improvements are deployed and publicly verified. Specific camera/GPS/compass, denial/landscape/slow-network and older-device scenarios remain useful extended field checks; they are not an absent initial phone test or a new blocking approval request.
