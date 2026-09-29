@@ -18,10 +18,12 @@ import FeedbackToast, { type FeedbackCue } from '@/components/v2/player/Feedback
 import { useFeedbackCues } from '@/components/v2/player/useFeedbackCues';
 import { describeActionFeedback } from '@/components/v2/player/feedbackModel';
 import StageReview from '@/components/v2/player/StageReview';
+import SessionLobby from '@/components/v2/player/SessionLobby';
+import { useSessionClock } from '@/components/v2/player/useSessionClock';
 import '@/components/v2/player/theme.css';
 const RegionMap = dynamic(() => import('@/components/v2/player/RegionMap'), { ssr: false });
 
-type HuntSummary = { id: string; title: string };
+type HuntSummary = { id: string; title: string; minTeamSize?: number; maxTeamSize?: number; sessionDurationSeconds?: number };
 type ScopedNotice = ActionNotice & { checkpointId?: string; nodeId?: string; hintId?: string };
 
 function HuntProgress({ checkpoints, stages, activeId, selectedId, iconStyle, onSelect }: { checkpoints: NonNullable<ClientPlayerView['checkpoints']>; stages: NonNullable<ClientPlayerView['stages']>; activeId?: string; selectedId?: string; iconStyle?: HuntTheme['checkpointIconStyle']; onSelect: (id: string | null) => void }) {
@@ -42,6 +44,7 @@ function HuntProgress({ checkpoints, stages, activeId, selectedId, iconStyle, on
 
 export default function PlayerPage() {
   const [view, setView] = useState<ClientPlayerView | null>(null);
+  const remaining = useSessionClock(view);
   const [previewMode, setPreviewMode] = useState(false);
   const [showMap, setShowMap] = useState(false);
   const [reviewStageId, setReviewStageId] = useState<string | null>(null);
@@ -80,6 +83,7 @@ export default function PlayerPage() {
 
   const receive = useCallback((next: ClientPlayerView) => {
     if (viewRef.current?.teamId === next.teamId && viewRef.current.revision > next.revision) return;
+    if (viewRef.current?.teamId === next.teamId && viewRef.current.revision === next.revision && Date.parse(viewRef.current.serverNow ?? '') > Date.parse(next.serverNow ?? '')) return;
     viewRef.current = next;
     if (teamRef.current !== next.teamId) {
       setReviewStageId(null);
@@ -182,13 +186,14 @@ export default function PlayerPage() {
     setError('');
     epoch.current += 1;
     try {
-      const result = await playerRequest<{ view: ClientPlayerView }>('/api/v2/session', { method: 'POST', body: JSON.stringify({ huntId, mode, teamName: form.get('teamName'), pin: form.get('pin'), playerName: form.get('playerName') }) });
+      const otherNames = String(form.get('otherMembers') ?? '').split('\n').map(name => name.trim()).filter(Boolean);
+      const result = await playerRequest<{ view: ClientPlayerView }>('/api/v2/session', { method: 'POST', body: JSON.stringify({ huntId, mode, teamName: form.get('teamName'), pin: form.get('pin'), playerName: form.get('playerName'), ...(mode === 'create' && otherNames.length ? { memberNames: [String(form.get('playerName')).trim(), ...otherNames] } : {}) }) });
       receive(result.view);
       verifiedRef.current = true;
       setSessionVerified(true);
       setSyncMessage('');
       setNotice(null);
-      setCue({ id: newRequestId(), kind: 'success', title: 'Your adventure starts here', message: 'Your team is ready. Let the adventure begin.' });
+      setCue({ id: newRequestId(), kind: 'success', title: result.view.status === 'waiting' ? 'Your team lobby is ready' : 'Your adventure starts here', message: result.view.status === 'waiting' ? 'Check the roster, then start when you are ready.' : 'Your team is ready. Let the adventure begin.' });
     } catch (requestError) {
       setError(requestError instanceof PlayerRequestError ? requestError.message : 'Connection interrupted. Try joining with the same team name and PIN to recover your team.');
     } finally {
@@ -282,8 +287,9 @@ export default function PlayerPage() {
   const settings = view?.hunt.settings;
   const beforeStart = !!settings?.startsAt && Date.now() < Date.parse(settings.startsAt);
   const afterEnd = !!settings?.endsAt && Date.now() >= Date.parse(settings.endsAt);
-  const eventBlocked = !!view && !view.isPreview && ((!!view.eventStatus && view.eventStatus !== 'live') || beforeStart || afterEnd);
-  const disabled = busy || pending !== null || !sessionVerified || eventBlocked;
+  const eventBlocked = view?.playability ? !view.playability.allowed : !!view && !view.isPreview && ((!!view.eventStatus && view.eventStatus !== 'live') || beforeStart || afterEnd);
+  const clockExpired = remaining === 0 && !!view?.timer && !view.timer.paused;
+  const disabled = busy || pending !== null || !sessionVerified || eventBlocked || clockExpired;
   const theme = view?.hunt.theme;
   const color = theme?.primaryColor || '#065f46';
   const reviewStage = reviewStageId ? view?.stages?.find(stage => stage.id === reviewStageId) : undefined;
@@ -305,7 +311,7 @@ export default function PlayerPage() {
 
         {previewMode && !view && <p className="mb-4 rounded-xl bg-violet-100 p-4 text-sm text-violet-950">Organizer preview requires an active test session. <Link href="/v2/admin" className="font-semibold underline">Return to organizer space</Link> to start one.</p>}
         {previewMode && view?.isPreview && <PreviewControls view={view} refresh={refresh} />}
-        {eventBlocked && <p role="status" className="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm">{beforeStart ? `Your hunt starts ${new Date(settings!.startsAt!).toLocaleString()}. Your team is ready.` : afterEnd || ['ended', 'archived'].includes(view?.eventStatus || '') ? 'This hunt has ended. Your saved results are below.' : 'Your organizer has paused play. Your progress is saved, and help remains available.'}</p>}
+        {(eventBlocked || clockExpired) && view?.playability?.code !== 'waiting' && <p role="status" className="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm">{view?.playability?.message || (clockExpired ? 'Your time has ended. Your progress is saved; help remains available.' : beforeStart ? `Your hunt starts ${new Date(settings!.startsAt!).toLocaleString()}.` : afterEnd ? 'This hunt has ended. Your saved results are below.' : 'Your organizer has paused play.')}</p>}
 
         {!view && recovery}
         {view && !sessionVerified && <div role="status" className="mb-5 rounded-xl border border-stone-300 bg-white p-4 text-sm leading-relaxed text-stone-700"><p>This is your saved progress. Connect to the event server to confirm your team and continue.</p><button type="button" disabled={busy} onClick={() => void refresh()} className="min-h-12 font-semibold text-emerald-800 underline">Reconnect to continue</button></div>}
@@ -332,13 +338,16 @@ export default function PlayerPage() {
             <label htmlFor="team-pin" className="block text-sm font-semibold">Team PIN<input id="team-pin" name="pin" type="password" inputMode="numeric" pattern="[0-9]{4,12}" autoComplete={mode === 'create' ? 'new-password' : 'current-password'} required minLength={4} maxLength={12} disabled={busy} className={inputStyle} placeholder="4 to 12 digits" /></label>
             <p className="-mt-2 text-xs leading-relaxed text-stone-500">{mode === 'create' ? 'Share your team name and PIN with teammates so they can join on their phones.' : 'Use the name and PIN shared by your teammate. Progress and hints are shared.'}</p>
             <label htmlFor="player-name" className="block text-sm font-semibold">Your name<input id="player-name" name="playerName" autoComplete="given-name" required maxLength={60} disabled={busy} className={inputStyle} /></label>
-            <button type="submit" disabled={busy || !huntId || previewMode} className={primaryButton}>{busy ? 'Getting ready…' : mode === 'create' ? 'Start our adventure' : 'Join the adventure'}</button>
+            {mode === 'create' && <label className="block text-sm font-semibold">Other team members (optional)<textarea name="otherMembers" aria-label="Other team members" rows={3} disabled={busy} className={inputStyle} placeholder="One name per line, excluding your own" /><span className="mt-2 block text-xs font-normal text-stone-500">You can finish a timed hunt’s roster in the lobby. Each member can join later using the shared PIN and their listed name.</span></label>}
+            {mode === 'create' && !!hunts.find(hunt => hunt.id === huntId)?.sessionDurationSeconds && <p className="text-sm">Creating your team opens a lobby; it does not start the timer.</p>}
+            <button type="submit" disabled={busy || !huntId || previewMode} className={primaryButton}>{busy ? 'Getting ready…' : mode === 'create' ? (hunts.some(hunt => hunt.id === huntId && (hunt.sessionDurationSeconds || (hunt.minTeamSize ?? 1) > 1)) ? 'Create team lobby' : 'Start our adventure') : 'Join the adventure'}</button>
             {!hunts.length && <button type="button" onClick={() => void loadHunts()} className="min-h-12 w-full font-semibold text-emerald-800">Refresh available hunts</button>}
           </form>
           <p className="mt-6 text-center text-sm text-stone-600">Running an event? <Link href="/v2/admin" prefetch={false} className="font-semibold text-emerald-800 underline">Organizer space</Link></p>
         </> : <>
           {view.hunt.theme?.coverUrl && <>{/* eslint-disable-next-line @next/next/no-img-element */}<img src={view.hunt.theme.coverUrl} alt="" className="mb-5 max-h-56 w-full rounded-2xl object-cover" /></>}
           {view.hunt.theme?.logoUrl && <>{/* eslint-disable-next-line @next/next/no-img-element */}<img src={view.hunt.theme.logoUrl} alt={`${view.hunt.title} logo`} className="mb-4 max-h-16 max-w-48 object-contain" /></>}
+          {view.timer && <div aria-label="Team timer" className={`sticky top-2 z-20 mb-4 ml-auto w-fit rounded-full border px-4 py-2 text-sm font-bold tabular-nums shadow-sm ${clockExpired ? 'border-red-300 bg-red-50 text-red-900' : 'border-stone-300 bg-white text-stone-800'}`}>{view.timer.paused ? 'Paused · ' : clockExpired ? 'Time ended · ' : 'Time left · '}{Math.floor(Math.ceil(remaining ?? view.timer.remainingSeconds) / 60)}:{String(Math.ceil(remaining ?? view.timer.remainingSeconds) % 60).padStart(2, '0')}</div>}
           <section aria-label="Team progress" className="mb-8 border-b border-stone-300 pb-5">
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0"><h1 className="truncate text-lg font-bold tracking-tight">{view.hunt.title}</h1>{view.teamName && <p className="mt-1 truncate text-sm text-stone-500">{view.teamName}</p>}</div>
@@ -354,7 +363,7 @@ export default function PlayerPage() {
           </section>
           {view.checkpoints && settings?.mode && settings.mode !== 'sequential' && <section aria-label="Choose checkpoint" className="mb-5 space-y-2"><h2 className="font-bold">Choose your next destination</h2>{view.checkpoints.map((checkpoint, index) => <button key={checkpoint.id} type="button" disabled={disabled || checkpoint.status !== 'available'} onClick={() => void send({ type: 'choose_checkpoint', checkpointId: checkpoint.id })} className="hunt-action flex min-h-12 w-full items-center justify-between gap-3 rounded-xl border border-stone-300 bg-white px-4 py-3 text-left disabled:opacity-60"><span className="flex items-center gap-3 font-semibold"><CheckpointBadge style={theme?.checkpointIconStyle} index={index} status={checkpoint.status} /><span>{checkpoint.title}{checkpoint.required ? '' : ' · optional'}</span></span><span className="text-xs capitalize">{checkpoint.status}</span></button>)}</section>}
           {view.checkpoints?.some(checkpoint => checkpoint.location) && <section className="mb-5"><button type="button" onClick={() => setShowMap(!showMap)} className="min-h-12 font-semibold text-emerald-900 underline">{showMap ? 'Hide hunt map' : 'Show hunt map'}</button>{showMap && <RegionMap points={view.checkpoints.filter(checkpoint => checkpoint.location).map(checkpoint => ({ ...checkpoint.location!, title: checkpoint.title }))} />}</section>}
-          {reviewStage ? <StageReview stage={reviewStage} returnLabel={view.status === 'completed' ? 'Back to your finish' : 'Back to the current challenge'} onReturn={() => setReviewStageId(null)} /> : view.status === 'completed' ? <section className="hunt-task-arrive rounded-3xl border border-stone-200 bg-white p-7 text-center">
+          {view.status === 'waiting' ? <>{recovery}<SessionLobby view={view} disabled={busy || pending !== null || !sessionVerified} send={send} /></> : reviewStage ? <StageReview stage={reviewStage} returnLabel={view.status === 'completed' ? 'Back to your finish' : 'Back to the current challenge'} onReturn={() => setReviewStageId(null)} /> : view.status === 'completed' ? <section className="hunt-task-arrive rounded-3xl border border-stone-200 bg-white p-7 text-center">
             {recovery}
             <span aria-hidden="true" className="hunt-success-mark text-5xl">✦</span><p className="mt-4 text-xs font-bold uppercase tracking-widest text-emerald-800">Every clue led here</p><h2 className="mt-3 text-3xl font-bold">You found your finish.</h2><p className="mt-4 leading-relaxed text-stone-600">{settings?.completionMessage || `Your team completed the hunt and earned ${view.score} points. Well played.`}</p>{view.summary && <div className="mt-5 space-y-3 text-left text-sm"><p>{Math.floor(view.summary.elapsedSeconds / 60)} minutes · {view.summary.hintsUsed} hints used</p><ul className="space-y-2">{view.summary.checkpoints.map((checkpoint, index) => <li key={checkpoint.id} className="flex items-center justify-between gap-3 border-t border-stone-100 pt-2"><span className="flex items-center gap-3"><CheckpointBadge style={theme?.checkpointIconStyle} index={index} status={checkpoint.status} /><span>{checkpoint.title} · {checkpoint.status}</span></span><strong>{checkpoint.points} points</strong></li>)}</ul></div>}
           </section> : view.checkpoint && view.node ? <div className="space-y-7">

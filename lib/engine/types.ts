@@ -20,6 +20,10 @@ export interface HuntSettings {
   map?: 'none' | 'all' | 'visited'
   rules?: string
   maxTeamSize?: number
+  minTeamSize?: number
+  sessionDurationSeconds?: number
+  /** Missing means legacy FNV selection. Never upgrade a published version. */
+  assignmentVersion?: 2
   registrationOpen?: boolean
   startsAt?: string
   endsAt?: string
@@ -103,10 +107,14 @@ export interface HintDefinition {
   content: HintContent
   availability?: { afterHintIds?: string[]; afterSeconds?: number; afterNodeId?: string }
   relevance?: HintRelevance
+  enabled?: boolean
+  showWhenLocked?: boolean
 }
 export interface PuzzleProgress { revision: number; state: PuzzleState; completed: boolean }
 export type PublicHintContent = DisplayContent | { type: 'puzzle'; puzzle: PuzzlePublicDefinition; progress: PuzzleProgress; reveal?: DisplayContent }
 export type GameCommand =
+  | { type: 'start_session'; expectedRevision: number }
+  | { type: 'update_roster'; expectedRevision: number; names: string[] }
   | { type: 'continue'; checkpointId: string; nodeId: string }
   | { type: 'verify'; checkpointId: string; nodeId: string; value: string }
   | { type: 'verify_gps'; checkpointId: string; nodeId: string; location: { latitude: number; longitude: number; accuracyMeters: number } }
@@ -119,8 +127,11 @@ export type GameCommand =
   | { type: 'submit_photo'; checkpointId: string; nodeId: string; mediaId: string }
 
 export interface OrganizerOverride { checkpointId: string; nodeId: string; reason: string }
-interface ControlBase { expectedRevision: number; reason: string }
+interface ControlBase { expectedRevision: number; reason: string; checkpointId?: string }
 export type OrganizerControl = ControlBase & (
+  | { type: 'extend_session'; seconds: number }
+  | { type: 'correct_roster'; names: string[] }
+  | { type: 'review_result'; status: ResultReview['status']; note: string }
   | { type: 'approve_action' | 'skip_action' | 'reset_action' | 'reject_photo'; checkpointId: string; nodeId: string }
   | { type: 'skip_checkpoint' | 'move_checkpoint'; checkpointId: string }
   | { type: 'adjust_score'; amount: number; checkpointId?: string }
@@ -132,9 +143,10 @@ export interface NodeProgress {
   attempts: number
   startedAt?: string
   completedAt?: string
+  firstSolvedAt?: string
   puzzle?: PuzzleProgress
   /** First server-confirmed solve time for independently targetable puzzle answers. */
-  puzzleDiscoveries?: { itemId: string; solvedAt: string }[]
+  puzzleDiscoveries?: { itemId: string; solvedAt?: string }[]
   pendingPhotoId?: string
   photoStatus?: 'pending' | 'rejected' | 'approved'
   reviewMessage?: string
@@ -170,7 +182,7 @@ export interface ScoreEntry {
 }
 export interface GameEvent {
   id: string
-  type: 'checkpoint_started' | 'action_completed' | 'verification_failed' | 'dud_qr_scanned' | 'hint_used' | 'checkpoint_completed' | 'hunt_completed' | 'organizer_override' | 'checkpoint_selected' | 'checkpoint_skipped' | 'puzzle_saved' | 'puzzle_completed' | 'photo_submitted' | 'photo_rejected' | 'fallback_used' | 'points_changed'
+  type: 'checkpoint_started' | 'action_completed' | 'verification_failed' | 'dud_qr_scanned' | 'hint_used' | 'checkpoint_completed' | 'hunt_completed' | 'organizer_override' | 'checkpoint_selected' | 'checkpoint_skipped' | 'puzzle_saved' | 'puzzle_completed' | 'photo_submitted' | 'photo_rejected' | 'fallback_used' | 'points_changed' | 'session_started' | 'session_paused' | 'session_resumed' | 'session_extended' | 'roster_updated' | 'result_reviewed'
   at: string
   checkpointId?: string
   nodeId?: string
@@ -178,6 +190,15 @@ export interface GameEvent {
   reason?: string
   amount?: number
 }
+export interface RouteAssignment { checkpointId: string; nodeId: string; choiceIndex: number; nextNodeId: string; algorithmVersion: 1 | 2; assignedAt: string; source: 'automatic' | 'preview' }
+export interface SessionTimer {
+  durationSeconds: number
+  deadlineAt: string
+  pauses: { startedAt: string; endedAt?: string }[]
+  extensions: { at: string; seconds: number; previousDeadline: string; deadlineAt: string; reason: string }[]
+}
+export interface ResultReview { status: 'pending' | 'approved' | 'flagged' | 'disqualified'; note: string; at: string; reviewer: string; reviewedRevision: number }
+export interface Playability { allowed: boolean; code: 'running' | 'waiting' | 'not_open' | 'paused' | 'expired' | 'ended'; message?: string }
 /** Persist this aggregate atomically with command receipts. New optional fields allow old saves to load. */
 export interface GameState {
   schemaVersion: 1
@@ -185,7 +206,7 @@ export interface GameState {
   definitionVersion: number
   teamId: string
   revision: number
-  status: 'active' | 'completed'
+  status: 'waiting' | 'active' | 'completed'
   activeCheckpointId: string | null
   checkpoints: Record<string, CheckpointProgress>
   hintUsage: Record<string, HintUsage>
@@ -197,6 +218,10 @@ export interface GameState {
   hintPuzzleRevisions?: Record<string, number>
   startedAt?: string
   completedAt?: string
+  routeAssignments?: RouteAssignment[]
+  timer?: SessionTimer
+  startingRoster?: { id: string; name: string }[]
+  resultReview?: ResultReview
 }
 export type PlayerNode = (
   | { id: string; type: 'show_text'; text: string }
@@ -230,12 +255,16 @@ export interface PlayerStageReview {
   title: string
   status: 'active' | 'completed' | 'skipped'
   steps: { id: string; text: string; response?: string }[]
+  hints?: PlayerHint[]
 }
 export interface PlayerView {
   hunt: { id: string; title: string; description?: string; settings?: HuntSettings; theme?: HuntTheme }
   teamId: string
   revision: number
-  status: 'active' | 'completed'
+  status: 'waiting' | 'active' | 'completed'
+  serverNow?: string
+  playability?: Playability
+  timer?: { deadlineAt: string; remainingSeconds: number; paused: boolean; durationSeconds: number }
   score: number
   progress: { completed: number; total: number; requiredCompleted?: number; requiredTotal?: number }
   checkpoint: { id: string; title: string; basePoints: number; startedAt: string } | null

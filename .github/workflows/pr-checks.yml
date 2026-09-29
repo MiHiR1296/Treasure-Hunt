@@ -37,3 +37,26 @@ jobs:
 
       - name: Production build
         run: npm run build
+
+  database:
+    name: PostgreSQL compatibility and concurrency
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: disposable-ci-only
+          POSTGRES_DB: hunt_test
+        ports:
+          - 5432:5432
+        options: --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:disposable-ci-only@127.0.0.1:5432/hunt_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:integration

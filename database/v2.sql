@@ -178,4 +178,23 @@ alter table hunt_v2.media_uploads enable row level security;
 revoke all on function hunt_v2.queue_media_deletion() from public;
 revoke all on all tables in schema hunt_v2 from public;
 revoke all on all sequences in schema hunt_v2 from public;
+-- Additive timed-team upgrade. Existing aggregates and published definitions are untouched.
+alter table hunt_v2.drafts add column if not exists generation uuid not null default gen_random_uuid();
+alter table hunt_v2.hunts add column if not exists lifecycle_revision integer not null default 1;
+alter table hunt_v2.hunts add column if not exists paused_at timestamptz;
+alter table hunt_v2.sessions add column if not exists member_id uuid references hunt_v2.members(id) on delete cascade;
+create index if not exists sessions_member on hunt_v2.sessions(member_id);
+create index if not exists teams_hunt on hunt_v2.teams(hunt_id);
+create table if not exists hunt_v2.team_activity (
+  team_id uuid not null references hunt_v2.teams(id) on delete cascade,
+  revision integer not null,
+  ordinal integer not null,
+  at timestamptz not null,
+  actor jsonb not null,
+  type text not null,
+  details jsonb not null,
+  primary key(team_id,revision,ordinal)
+);
+alter table hunt_v2.team_activity enable row level security;
+revoke all on hunt_v2.team_activity from public;
 commit;

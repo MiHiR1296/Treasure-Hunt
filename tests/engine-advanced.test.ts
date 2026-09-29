@@ -207,8 +207,7 @@ test('targeted hints unlock from step attempts, expire after the answer is solve
   state = executeCommand(h, state, { type: 'verify', checkpointId: 'first', nodeId: 'answer', value: 'gate' }, later).state
   const view = getPlayerView(h, state, later)
   assert.equal(view.node?.id, 'second')
-  assert.equal(view.hints[0].status, 'expired')
-  assert.match(view.hints[0].reason ?? '', /No points were charged/)
+  assert.deepEqual(view.hints, [], 'obsolete, unpurchased hints and their titles are omitted')
   assert.equal(JSON.stringify(view).includes('tower'), false)
   assert.equal(JSON.stringify(view).includes('bridge'), false)
   assert.deepEqual(state.checkpoints.first.nodes.answer.answerAttempts?.map(attempt => ({ value: attempt.value, accepted: attempt.accepted })), [
@@ -231,7 +230,7 @@ test('word-search hints expire per found word while unsolved word hints remain a
   state = executeCommand(h, state, { type: 'submit_puzzle', checkpointId: 'first', nodeId: 'puzzle', expectedRevision: 0, value: wordPath(0) }, now).state
   assert.deepEqual(state.checkpoints.first.nodes.puzzle.puzzleDiscoveries, [{ itemId: 'CAT', solvedAt: now }])
   const view = getPlayerView(h, state, now)
-  assert.deepEqual(view.hints.map(hint => hint.status), ['expired', 'available'])
+  assert.deepEqual(view.hints.map(hint => [hint.id, hint.status]), [['dog-help', 'available']])
   assert.equal(JSON.stringify(view).includes('puzzleDiscoveries'), false)
   assert.throws(() => executeCommand(h, state, { type: 'use_hint', checkpointId: 'first', hintId: 'cat-help' }, now), code('hint_locked'))
   const purchased = executeCommand(h, state, { type: 'use_hint', checkpointId: 'first', hintId: 'dog-help' }, now)
@@ -239,6 +238,8 @@ test('word-search hints expire per found word while unsolved word hints remain a
   assert.equal(purchased.state.score, -2)
   const reset = executeControl(h, purchased.state, { type: 'reset_action', checkpointId: 'first', nodeId: 'puzzle', expectedRevision: purchased.state.revision, reason: 'Restart the puzzle' }, later).state
   assert.deepEqual(reset.checkpoints.first.nodes.puzzle.puzzleDiscoveries, [{ itemId: 'CAT', solvedAt: now }])
+  assert.equal(getPlayerView(h, reset, later).hints.some(hint => hint.id === 'cat-help'), false)
+  assert.throws(() => executeCommand(h, reset, { type: 'use_hint', checkpointId: 'first', hintId: 'cat-help' }, later), code('hint_locked'))
 })
 
 test('answer-attempt history is opt-in, organizer-only, bounded, and retained through a reset', () => {

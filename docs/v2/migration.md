@@ -1,4 +1,14 @@
-# Moving content from V1
+# Migration and compatibility
+
+## Timed-team additive upgrade
+
+The timed-team release extends `database/v2.sql` with draft generation, nullable session/member association, lifecycle revision/pause metadata and private append-only activity. It does not rewrite existing published definitions, team state, scores, hints or receipts. Timers and improved route distribution are opt-in for existing drafts/future publications; active teams stay on their pinned version. Legacy session associations remain nullable.
+
+Apply the additive schema before enabling new authoring, with a backup and no active event. Deploy the compatibility-capable application to **treasure-hunt-v2**, keep authoring stopped during mixed-version deployment, then reload older organizer tabs. Do not assume an old binary is rollback-safe after new fields have been authored: strict older validators may reject them. Prefer a reviewed forward fix or a coordinated backup/recovery procedure. See [release safeguards](timed-teams.md#migration-and-release-safeguards).
+
+The disposable existing-data fixture uses `tests/migration-fixture.ts`: install the pre-upgrade `database/v2.sql` in a separate local test database, run `node --import tsx tests/migration-fixture.ts seed`, apply the new schema, then run the same script with `verify`. It checks old definitions, draft revision/generation, state, hints, ledger, receipt and nullable legacy session, plus repeat migration and immediate-start behavior for another team on the old definition. Never seed this fixture into production.
+
+## Moving content from V1
 
 V2 owns the private `hunt_v2` schema. Its startup migration does not change existing public Supabase tables. Legacy pages are disabled unless an operator explicitly sets `ENABLE_LEGACY_V1=true` in an environment with the old Supabase configuration.
 

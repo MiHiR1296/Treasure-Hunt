@@ -9,9 +9,10 @@ import DraftWorkspace from './builder/organizer/DraftWorkspace';
 import TeamOperations from './builder/organizer/TeamOperations';
 import { AnalyticsPanel, EventList } from './builder/organizer/EventPanels';
 import MediaLibrary from './builder/organizer/MediaLibrary';
+import ResultsPanel from './builder/organizer/ResultsPanel';
 
-type Tab = 'design' | 'events' | 'live' | 'insights' | 'media';
-const tabs: { id: Tab; label: string }[] = [{ id: 'design', label: 'Design' }, { id: 'events', label: 'Events' }, { id: 'live', label: 'Live control' }, { id: 'insights', label: 'Insights' }, { id: 'media', label: 'Media' }];
+type Tab = 'design' | 'events' | 'live' | 'results' | 'insights' | 'media';
+const tabs: { id: Tab; label: string }[] = [{ id: 'design', label: 'Design' }, { id: 'events', label: 'Events' }, { id: 'live', label: 'Live control' }, { id: 'results', label: 'Results' }, { id: 'insights', label: 'Insights' }, { id: 'media', label: 'Media' }];
 
 export default function OrganizerConsole() {
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
@@ -77,6 +78,7 @@ export default function OrganizerConsole() {
       {tab === 'design' && <DraftWorkspace {...operations} importedPuzzle={importedPuzzle} onPuzzleImported={() => setImportedPuzzle(null)} />}
       {tab === 'events' && <EventList {...operations} />}
       {tab === 'live' && <TeamOperations {...operations} />}
+      {tab === 'results' && <ResultsPanel {...operations} />}
       {tab === 'insights' && <AnalyticsPanel dashboard={operations.dashboard} active />}
       {tab === 'media' && <MediaLibrary active pending={pending} run={run} notify={setNotice} onCreatePuzzle={puzzle => { setImportedPuzzle(puzzle); setTab('design'); }} />}
     </>}

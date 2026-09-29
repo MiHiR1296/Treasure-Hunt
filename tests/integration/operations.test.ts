@@ -1,3 +1,4 @@
+import '../isolated-database';
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -53,15 +54,15 @@ test('PostgreSQL: draft conflicts, version pinning, memberships and isolated pre
   const draft = await saveDraft(hunt, null);
   assert.equal(draft.revision, 1);
   await assert.rejects(saveDraft(hunt, null), status(409));
-  const publication = await publishDraft(hunt.id, 1);
+  const publication = await publishDraft(hunt.id, 1, { generation: draft.generation });
   const first = await join(hunt.id, 'Pinned team');
   const edited = structuredClone(hunt);
   edited.title = 'Changed title';
   const node = edited.checkpoints[0].flow.nodes[0];
   if (node.type === 'verify_qr') node.token = 'new-version-token';
-  const saved = await saveDraft(edited, 2);
-  await assert.rejects(saveDraft(hunt, 2), status(409));
-  await publishDraft(hunt.id, saved.revision, { expectedVersion: publication.version });
+  const saved = await saveDraft(edited, 2, draft.generation);
+  await assert.rejects(saveDraft(hunt, 2, draft.generation), status(409));
+  await publishDraft(hunt.id, saved.revision, { expectedVersion: publication.version, generation: saved.generation });
   const second = await join(hunt.id);
   assert.equal((await getTeamRecord(first.view.teamId)).state.definitionVersion, 1);
   assert.equal((await getTeamRecord(second.view.teamId)).state.definitionVersion, 2);

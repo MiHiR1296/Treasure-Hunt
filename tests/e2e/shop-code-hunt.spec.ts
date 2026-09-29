@@ -99,10 +99,11 @@ test('organizer can open the exact pinned route, see private solutions, and brow
 
   await page.getByRole('button', { name: 'Design', exact: true }).click();
   await page.getByRole('button', { name: /Frankie challenge/ }).click();
-  await expect(page.getByRole('button', { name: 'Previous step', exact: true })).toBeDisabled();
+  await expect(page.getByLabel('Selected step', { exact: true })).toHaveValue('answer');
   await expect(page.getByLabel('Accepted answers — one per line', { exact: true })).toHaveValue('frankie\na frankie\nfrankie roll\nroll\na roll\nwrap\na wrap\nkathi roll');
-  await page.getByRole('button', { name: 'Next step', exact: true }).click();
-  await page.getByRole('button', { name: 'Previous step', exact: true }).click();
+  await page.getByLabel('Selected step', { exact: true }).selectOption('word');
+  await expect(page.getByLabel('Clue or instructions', { exact: true })).toBeVisible();
+  await page.getByLabel('Selected step', { exact: true }).selectOption('answer');
   await expect(page.getByLabel('Accepted answers — one per line', { exact: true })).toHaveValue('frankie\na frankie\nfrankie roll\nroll\na roll\nwrap\na wrap\nkathi roll');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
 });

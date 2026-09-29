@@ -12,6 +12,8 @@ V2 supports:
 - Independent text/image/audio/video/map/camera/puzzle hints with costs, availability rules, and optional step/word/crossword-answer targeting that stops offering obsolete hints.
 - Sequential, open and prerequisite-based hunts; choices, conditions, variables, deterministic weighted routes, scoring rules and optional checkpoints.
 - Shared team progress, revisioned puzzle saves, optional organizer-only answer-attempt history, safe request retries, score ledger, authenticated organizer controls, help requests, activity, analytics and configurable leaderboard.
+- Optional roster lobbies and personal timers, pause-aware deadlines and reasoned extensions; legacy hunts retain their existing immediate-start behavior.
+- Preassigned independently distributed routes for new hunts, forced-route isolated previews, sticky answer-aware hint expiry, and private paginated Results/review/export tools.
 - Controlled branding: colors, logo, cover/background images, typography, button shapes, checkpoint badges and reduced-motion-aware success effects.
 - Feedback beside answers, floating progress/points confirmations and optional success sound, with quiet puzzle saves and reloads.
 - Standard Node/PostgreSQL hosting, Docker, persistent media, optional HTTPS reverse proxy, backup/restore tools and V1 content import.
@@ -55,15 +57,17 @@ npx playwright install chrome webkit
 DATABASE_URL=postgresql://user:password@127.0.0.1:5432/hunt_test npm run db:migrate
 DATABASE_URL=postgresql://user:password@127.0.0.1:5432/hunt_test npm run test:integration
 DATABASE_URL=postgresql://user:password@127.0.0.1:5432/hunt_test npm run test:e2e
+DATABASE_URL=postgresql://user:password@127.0.0.1:5432/hunt_test STRESS_ROUNDS=60 npm run test:stress
 ```
 
-Database tests explicitly skip without `DATABASE_URL`; a skipped suite does not verify persistence. Browser tests start their own server at `127.0.0.1:3100`; keep that port free. The default matrix runs Chrome with Android emulation, Playwright WebKit with iPhone emulation, and organizer tests in desktop Chrome. Select one with `npm run test:e2e -- --project=android-chrome`, `--project=iphone-webkit` or `--project=desktop-chrome`, using the same test database environment. On Linux, add `--with-deps` to browser installation when system libraries are missing.
+Database tests explicitly skip without `DATABASE_URL`; a skipped suite does not verify persistence. Test guards reject remote/non-test database targets. Browser tests start their own server at `127.0.0.1:3100`; keep that port free. The default matrix runs Chrome with Android emulation, Playwright WebKit with iPhone emulation, and organizer/timed-team tests in desktop Chrome. Select one with `npm run test:e2e -- --project=android-chrome`, `--project=iphone-webkit` or `--project=desktop-chrome`, using the same test database environment. On Linux, add `--with-deps` to browser installation when system libraries are missing. Stress results measure the local service/PostgreSQL workload, not physical phones or production HTTP latency.
 
 The browser suite covers shared progress, retries, keyboard puzzle entry, narrow/landscape layouts, custom theme contrast, reduced-motion preference, camera cleanup and isolated printable QR sheets. The virtual QR camera fixture runs only in Chrome. Emulated browsers and simulated camera frames do not prove physical phone sensors or public-network access; those results are recorded separately in the [acceptance register](docs/v2/acceptance.md).
 
 ## Project guide
 
 - [Architecture and data contracts](docs/v2/architecture.md)
+- [Timed teams, route preview, hints, draft cleanup and Results guide](docs/v2/timed-teams.md)
 - [Creating action, puzzle, verification and hint modules](docs/v2/extensions.md)
 - [Self-hosting and operations](docs/v2/self-hosting.md)
 - [Vercel demo and MRBT subdomain](docs/v2/vercel-hosting.md)

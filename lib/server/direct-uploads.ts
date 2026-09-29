@@ -30,7 +30,6 @@ async function completedMedia(row: Ticket, owner: Owner) {
 }
 
 export async function prepareDirectUpload(owner: Owner, body: Record<string, unknown>) {
-  if (mediaBackend() === 'filesystem') return { mode: 'multipart' as const };
   if (!uuid(body.requestId)) throw new HttpError(400, 'A valid upload request ID is required.');
   const size = Number(body.size);
   const contentType = String(body.contentType || '');
@@ -46,6 +45,7 @@ export async function prepareDirectUpload(owner: Owner, body: Record<string, unk
     if (body.location !== undefined) metadata.location = body.location;
     await validatePhotoTask(owner.teamId, { checkpointId: metadata.checkpointId, nodeId: metadata.nodeId, location: metadata.location });
   }
+  if (mediaBackend() === 'filesystem') return { mode: 'multipart' as const };
   await rateLimit(`direct-upload:${ownerKey(owner)}`, 80);
   const payloadHash = digest(canonicalJson(metadata));
   const pool = getPool();

@@ -5,8 +5,12 @@ import { getPool, transaction } from './db';
 import { publishInTransaction, validatedDefinition } from './hunts';
 import { canonicalJson, createSessionToken, digest, hashPin, HttpError, SESSION_SECONDS } from './security';
 import { applyTeamCommand, getTeamRecord, teamQuery, toTeamView, type TeamRecord } from './store';
+import { elapsedMilliseconds, hasLobby } from '../engine/session';
+import { assignRoutes } from './routes';
+import { appendActivity, databaseNow } from './activity';
+import { teamSummaryQuery } from './team-summaries';
 
-export async function startPreview(input: { huntId?: string; draftId?: string; definition?: unknown }) {
+export async function startPreview(input: { huntId?: string; draftId?: string; definition?: unknown; routeChoices?: unknown }) {
   const session = createSessionToken();
   const teamId = randomUUID();
   const pinHash = await hashPin(randomUUID());
@@ -26,13 +30,18 @@ export async function startPreview(input: { huntId?: string; draftId?: string; d
       if (!rows[0]) throw new HttpError(404, 'Hunt not found.');
       definition = rows[0].definition;
     }
-    const state = createInitialState(definition, teamId, new Date().toISOString());
+    const now = await databaseNow(client);
+    const state = createInitialState(definition, teamId, now, { waiting: hasLobby(definition), routeAssignments: assignRoutes(definition, teamId, now, input.routeChoices) });
     const name = `Preview ${new Date().toLocaleTimeString('en-GB')}`;
     const { rows } = await client.query(`insert into hunt_v2.teams(id,hunt_id,name,name_key,pin_hash,state,is_preview)
       values($1,$2,$3,$4,$5,$6,true) returning *`, [teamId, definition.id, name, teamId, pinHash, state]);
-    await client.query(`insert into hunt_v2.sessions(token_hash,role,team_id,player_name,expires_at)
-      values($1,'team',$2,'Organizer preview',now()+$3*interval '1 second')`, [session.hash, teamId, SESSION_SECONDS]);
-    return { token: session.token, view: toTeamView({ ...rows[0], definition, status: 'live' }), url: '/v2?preview=1' };
+    const names = Array.from({ length: definition.settings?.minTeamSize ?? 1 }, (_, i) => `Preview member ${i + 1}`);
+    const memberIds = names.map(() => randomUUID());
+    for (const [index, member] of names.entries()) await client.query('insert into hunt_v2.members(id,team_id,name,name_key) values($1,$2,$3,$4)', [memberIds[index], teamId, member, member.toLowerCase()]);
+    await appendActivity(client, definition, null, state, now, { role: 'admin', name: 'Organizer preview' });
+    await client.query(`insert into hunt_v2.sessions(token_hash,role,team_id,player_name,expires_at,member_id)
+      values($1,'team',$2,$4,now()+$3*interval '1 second',$5)`, [session.hash, teamId, SESSION_SECONDS, names[0], memberIds[0]]);
+    return { token: session.token, view: toTeamView({ ...rows[0], definition, status: 'live' }, names, now), url: '/v2?preview=1' };
   });
 }
 
@@ -79,6 +88,7 @@ export async function submitHelp(teamId: string, input: { requestId: string; kin
     const { rows } = await client.query('select state from hunt_v2.teams where id=$1 for update', [teamId]);
     if (!rows[0]) throw new HttpError(404, 'Team not found.');
     const state = rows[0].state as GameState;
+    const now = await databaseNow(client);
     const existing = await client.query('select * from hunt_v2.help_requests where id=$1 and team_id=$2', [input.requestId, teamId]);
     if (existing.rows[0]) {
       if (existing.rows[0].message !== input.message.trim() || existing.rows[0].kind !== input.kind) throw new HttpError(409, 'That request ID was already used for another help request.');
@@ -89,8 +99,8 @@ export async function submitHelp(teamId: string, input: { requestId: string; kin
     if (input.nodeId && input.nodeId !== active?.activeNodeId) throw new HttpError(409, 'Your team has moved on. Refresh before asking for help.');
     const recent = await client.query("select id from hunt_v2.help_requests where team_id=$1 and status='open' and kind=$2 and created_at>now()-interval '1 minute' limit 1", [teamId, input.kind]);
     if (recent.rows[0]) throw new HttpError(429, 'Your help request is already with the organizer. You can check its reply below.');
-    const result = await client.query(`insert into hunt_v2.help_requests(id,team_id,checkpoint_id,node_id,kind,message)
-      values($1,$2,$3,$4,$5,$6) returning *`, [input.requestId, teamId, state.activeCheckpointId, active?.activeNodeId, input.kind, input.message.trim()]);
+    const result = await client.query(`insert into hunt_v2.help_requests(id,team_id,checkpoint_id,node_id,kind,message,created_at)
+      values($1,$2,$3,$4,$5,$6,$7) returning *`, [input.requestId, teamId, state.activeCheckpointId, active?.activeNodeId, input.kind, input.message.trim(), now]);
     await client.query('update hunt_v2.teams set last_activity=now() where id=$1', [teamId]);
     return result.rows[0];
   });
@@ -130,7 +140,7 @@ function teamMetrics(team: TeamRecord) {
   const completedAt = team.state.completedAt ?? (team.state.status === 'completed' ? team.state.events.findLast(event => event.type === 'hunt_completed')?.at : undefined);
   return { teamId: team.id, name: team.name, score: team.state.score, completed: checkpoints.filter(progress => ['completed','skipped'].includes(progress.status)).length,
     total: team.definition.checkpoints.length, hints: Object.keys(team.state.hintUsage).length, finished: Boolean(completedAt),
-    seconds: completedAt && Number.isFinite(startedAt) ? Math.max(0, Math.floor((Date.parse(completedAt) - startedAt) / 1000)) : null };
+    seconds: completedAt && Number.isFinite(startedAt) ? Math.floor(elapsedMilliseconds(team.state, new Date(startedAt).toISOString(), completedAt) / 1000) : null };
 }
 
 /** Equal configured results share a rank; names only stabilize their display order. */
@@ -155,7 +165,7 @@ export async function leaderboard(teamId: string) {
   const mode = viewer.definition.settings?.leaderboard ?? 'live';
   const finished = Boolean(viewer.state.completedAt) || viewer.state.status === 'completed';
   if (mode === 'hidden' || (mode === 'finish' && !finished)) return { visible: false, reason: mode === 'hidden' ? 'The leaderboard is hidden for this hunt.' : 'The leaderboard will appear when your team finishes.', entries: [] };
-  const { rows } = await getPool().query(`${teamQuery} where t.hunt_id=$1 and not t.is_preview`, [viewer.hunt_id]);
+  const { rows } = await getPool().query(`${teamSummaryQuery} where t.hunt_id=$1 and not t.is_preview`, [viewer.hunt_id]);
   const ranking = viewer.definition.settings?.ranking ?? 'points';
   const entries = rows.map((team: TeamRecord) => teamMetrics(team));
   return { visible: true, ranking, entries: rankLeaderboard(entries, ranking) };
@@ -170,7 +180,7 @@ export async function eventAnalytics(huntId: string) {
   for (const team of teams) for (const checkpoint of team.definition.checkpoints) {
     const summary = checkpoints[checkpoint.id] ??= { id: checkpoint.id, title: checkpoint.title, completions: 0, failures: 0, hints: 0, totalSeconds: 0 };
     const progress = team.state.checkpoints[checkpoint.id];
-    if (progress.completedAt && progress.startedAt) { summary.completions++; summary.totalSeconds += Math.max(0, Date.parse(progress.completedAt) - Date.parse(progress.startedAt)) / 1000; }
+    if (progress.completedAt && progress.startedAt) { summary.completions++; summary.totalSeconds += elapsedMilliseconds(team.state, progress.startedAt, progress.completedAt) / 1000; }
     summary.failures += team.state.events.filter(event => event.checkpointId === checkpoint.id && event.type === 'verification_failed').length;
     summary.hints += Object.values(team.state.hintUsage).filter(usage => usage.checkpointId === checkpoint.id).length;
   }

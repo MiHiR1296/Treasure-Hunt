@@ -8,7 +8,7 @@ export async function POST(request: NextRequest) {
   return handle(async () => {
     await requireSession(request, 'admin');
     const body = await jsonBody(request);
-    const options = { expectedVersion: typeof body.expectedVersion === 'number' ? body.expectedVersion : undefined, status: body.status === 'ready' ? 'ready' as const : 'live' as const };
+    const options = { expectedVersion: typeof body.expectedVersion === 'number' ? body.expectedVersion : undefined, status: body.status === 'ready' ? 'ready' as const : body.status === 'live' ? 'live' as const : undefined, generation: typeof body.generation === 'string' ? body.generation : undefined };
     const definition = typeof body.draftId === 'string'
       ? await publishDraft(body.draftId, Number(body.revision), options)
       : await publishHunt(body.definition, options);
@@ -20,7 +20,8 @@ export async function PATCH(request: NextRequest) {
     await requireSession(request, 'admin');
     const body = await jsonBody(request);
     if (!['ready','live','paused','ended','archived'].includes(String(body.status))) throw new HttpError(400, 'Choose a supported status.');
-    await setHuntStatus(textField(body, 'huntId'), body.status as HuntStatus);
+    if (!Number.isSafeInteger(body.expectedRevision)) throw new HttpError(409, 'Refresh the event controls before changing status.');
+    await setHuntStatus(textField(body, 'huntId'), body.status as HuntStatus, Number(body.expectedRevision));
     if (body.status === 'ended' || body.status === 'archived') await cleanupMedia();
     return { ok: true };
   });

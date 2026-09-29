@@ -52,8 +52,10 @@ test('refreshing unchanged search areas preserves the player map zoom and pan', 
   // A new member gives an observable confirmation that the refreshed view was
   // rendered; its map coordinates are exactly the same as before.
   expect((await post(page.request, '/api/v2/session', { huntId, mode: 'join', teamName, playerName: 'Compass teammate', pin: '123456' })).ok()).toBeTruthy();
+  const refreshed = page.waitForResponse(response => response.url().endsWith('/api/v2/session') && response.request().method() === 'GET');
   await page.getByRole('button', { name: 'Refresh', exact: true }).click();
-  await expect(page.getByText('Map reader · Compass teammate', { exact: true })).toBeVisible();
+  expect((await (await refreshed).json()).view.members).toEqual(['Map reader', 'Compass teammate']);
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   await expect(first).toHaveAttribute('d', zoomed!);
 
   // Leaflet's keyboard pan is also deliberate player state. An identical
