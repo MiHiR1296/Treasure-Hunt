@@ -22,6 +22,8 @@ returns to the editor for review and is saved with the ordinary draft.
 This deliberately requires one confirmation before publication: generated
 metadata is useful authoring assistance, not a second source of truth.
 
+![Organizer target-profile and automatic-approval settings](local-vision-builder.png)
+
 Photo actions support three modes:
 
 - `shadow`: record the recommendation without changing the team.
@@ -35,6 +37,8 @@ profile agreement, a configured number of visible evidence items, two
 conservative verification passes, the configured confidence threshold, and
 GPS when that action's policy requires it. The server reloads the team and
 applies the ordinary revisioned engine control to the exact pending media.
+
+![Organizer photo recommendation with the original and pinned references](local-vision-live-review.png)
 
 ## Data and transaction boundary
 
