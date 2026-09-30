@@ -18,7 +18,7 @@ function moveFocus(event: KeyboardEvent<HTMLInputElement>, row: number, column: 
 
 type CrosswordDirection = 'across' | 'down'
 
-function focusCrosswordCell(row: number, column: number, direction: CrosswordDirection, offset: number, entries: { row: number; column: number; length: number; direction: CrosswordDirection }[]) {
+function focusCrosswordCell(root: Element | null, row: number, column: number, direction: CrosswordDirection, offset: number, entries: { row: number; column: number; length: number; direction: CrosswordDirection }[]) {
   const entry = entries.find(candidate => candidate.direction === direction && Array.from({ length: candidate.length }, (_, index) => `${candidate.row + (direction === 'down' ? index : 0)}:${candidate.column + (direction === 'across' ? index : 0)}`).includes(`${row}:${column}`))
   if (!entry) return
   const currentIndex = direction === 'across' ? column - entry.column : row - entry.row
@@ -27,7 +27,7 @@ function focusCrosswordCell(row: number, column: number, direction: CrosswordDir
   const nextRow = entry.row + (direction === 'down' ? nextIndex : 0)
   const nextColumn = entry.column + (direction === 'across' ? nextIndex : 0)
   window.setTimeout(() => {
-    const grid = document.querySelector('[data-puzzle-grid]')
+    const grid = root || document
     const cell = grid?.querySelector<HTMLInputElement>(`input[data-row="${nextRow}"][data-column="${nextColumn}"]`)
     if (cell) { cell.focus(); cell.select() }
   }, 0)
@@ -93,12 +93,12 @@ export default function GridPuzzles({ definition, state, disabled, onChange }: P
           if (!occupied.has(key)) return <div key={key} aria-hidden="true" className="aspect-square min-h-0 min-w-0 bg-stone-800" />
           return <label key={key} className="relative aspect-square min-h-0 min-w-0 bg-white">
             {starts.has(key) && <span aria-hidden="true" className="pointer-events-none absolute left-0.5 top-0 text-[clamp(0.35rem,1.7vw,0.625rem)] font-semibold leading-none">{starts.get(key)}</span>}
-            <input data-row={r} data-column={c} value={cell} maxLength={1} autoCapitalize="characters" autoComplete="off" readOnly={locked} onFocus={event => { event.currentTarget.select(); const directions = cellDirections.get(key) || []; if (!directions.includes(activeDirection)) setActiveDirection(directions[0] || 'across') }} onKeyDown={event => { if (event.key === 'Backspace' && !cell) focusCrosswordCell(r, c, activeDirection, -1, definition.entries); else moveFocus(event, r, c, definition.rows, definition.columns) }} onClick={() => { const directions = cellDirections.get(key) || []; if (directions.length > 1) setActiveDirection(direction => direction === 'across' ? 'down' : 'across') }} aria-label={`Row ${r + 1}, column ${c + 1}${starts.has(key) ? `, clue ${starts.get(key)}` : ''}`} className={`h-full w-full min-w-0 appearance-none bg-white pt-[12%] text-center text-[clamp(0.6rem,4vw,1.125rem)] uppercase leading-none text-emerald-950 focus:outline-emerald-600 ${locked ? 'opacity-60' : ''}`} onChange={event => {
+            <input data-row={r} data-column={c} value={cell} maxLength={1} autoCapitalize="characters" autoComplete="off" readOnly={locked} onFocus={event => { event.currentTarget.select(); const directions = cellDirections.get(key) || []; if (!directions.includes(activeDirection)) setActiveDirection(directions[0] || 'across') }} onKeyDown={event => { const root = event.currentTarget.closest('[data-puzzle-grid]'); if (event.key === 'Backspace' && !cell) focusCrosswordCell(root, r, c, activeDirection, -1, definition.entries); else moveFocus(event, r, c, definition.rows, definition.columns) }} onClick={() => { const directions = cellDirections.get(key) || []; if (directions.length > 1) setActiveDirection(direction => direction === 'across' ? 'down' : 'across') }} aria-label={`Row ${r + 1}, column ${c + 1}${starts.has(key) ? `, clue ${starts.get(key)}` : ''}`} className={`h-full w-full min-w-0 appearance-none bg-white pt-[12%] text-center text-[clamp(0.6rem,4vw,1.125rem)] uppercase leading-none text-emerald-950 focus:outline-emerald-600 ${locked ? 'opacity-60' : ''}`} onChange={event => {
               if (locked) return
               const value = event.target.value.toUpperCase()
               if (!/^[A-Z]?$/.test(value)) return
               const grid = state.grid.map(line => [...line]); grid[r][c] = value
-              if (value) focusCrosswordCell(r, c, activeDirection, 1, definition.entries)
+              if (value) focusCrosswordCell(event.currentTarget.closest('[data-puzzle-grid]'), r, c, activeDirection, 1, definition.entries)
               void submit({ grid })
             }} />
           </label>

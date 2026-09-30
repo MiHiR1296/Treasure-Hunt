@@ -116,6 +116,7 @@ export function validateHunt(value: unknown): ValidationIssue[] {
         const automatic = ['complete', 'set_variable', 'branch', 'random_branch', 'add_points'].includes(node.type)
         object(node, np, ['id', 'type', ...fields[node.type], ...(automatic ? [] : ['fallback'])]); id(node.id, `${np}.id`)
         if (fields[node.type].includes('prompt')) string(node.prompt, `${np}.prompt`)
+        if (node.clue !== undefined) string(node.clue, `${np}.clue`, 4000)
         if (fields[node.type].includes('next')) id(node.next, `${np}.next`)
         if (node.fallback !== undefined && !automatic && object(node.fallback, `${np}.fallback`, ['nodeId', 'label', 'enabled'])) { id(node.fallback.nodeId, `${np}.fallback.nodeId`); string(node.fallback.label, `${np}.fallback.label`, 200); boolean(node.fallback.enabled, `${np}.fallback.enabled`) }
         if (node.type === 'show_text') string(node.text, `${np}.text`)

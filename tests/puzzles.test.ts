@@ -144,8 +144,23 @@ test('quiz closes answered questions, applies skip penalties, and completes at i
   const skipped = updatePuzzle(definition, state, { questionId: 'two', optionId: null, skip: true })
   assert.deepEqual(skipped.rewards, [{ id: 'quiz:skip:two', amount: -2, kind: 'skip_penalty', label: 'Skipped quiz question: two' }])
   state = skipped.state
-  const completed = updatePuzzle(definition, state, { questionId: 'three', optionId: 'mars', skip: false })
+  const threshold = updatePuzzle(definition, state, { questionId: 'three', optionId: 'mars', skip: false })
+  assert.equal(threshold.completed, false)
+  const completed = updatePuzzle(definition, threshold.state, { finish: true })
   assert.equal(completed.completed, true)
+})
+
+test('quiz keeps the bonus path open after the threshold until the team explicitly finishes', () => {
+  const definition = fixtures.quiz
+  if (definition.type !== 'quiz') throw new Error('Fixture')
+  let state = initialPuzzleState(definition)
+  const threshold = updatePuzzle(definition, state, { questionId: 'one', optionId: 'sun', skip: false })
+  assert.equal(threshold.completed, false)
+  const extra = updatePuzzle(definition, threshold.state, { questionId: 'two', optionId: 'moon', skip: false })
+  assert.deepEqual(extra.rewards, [{ id: 'quiz:bonus:two', amount: 3, kind: 'action_points', label: 'Extra correct quiz answer: two' }])
+  assert.equal(extra.completed, false)
+  state = extra.state
+  assert.equal(updatePuzzle(definition, state, { finish: true }).completed, true)
 })
 
 test('crossword hint targets recognize one solved entry before the whole grid is complete', () => {

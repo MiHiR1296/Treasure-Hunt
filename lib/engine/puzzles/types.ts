@@ -37,7 +37,7 @@ export type PuzzleState =
   | { type: 'rotation'; rotations: Record<string, QuarterTurn> }
   | { type: 'text'; value: string }
   | { type: 'multiple_choice'; optionId: string | null }
-  | { type: 'quiz'; responses: { questionId: string; status: 'correct' | 'wrong' | 'skipped'; optionId?: string }[]; correctCount: number }
+  | { type: 'quiz'; responses: { questionId: string; status: 'correct' | 'wrong' | 'skipped'; optionId?: string }[]; correctCount: number; finished: boolean }
   | { type: 'matching'; pairs: MatchingPair[] }
   | { type: 'sequence'; order: string[] }
 
