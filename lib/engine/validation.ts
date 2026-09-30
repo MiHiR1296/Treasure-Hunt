@@ -108,14 +108,15 @@ export function validateHunt(value: unknown): ValidationIssue[] {
         const np = `${path}.flow.nodes[${ni}]`
         if (!isObject(node)) { issue(np, 'Must be a node object.'); return }
         const fields: Record<string, string[]> = {
-          show_text: ['text', 'next'], show_media: ['content', 'next'], verify_qr: ['prompt', 'token', 'backupCode', 'next'], verify_code: ['prompt', 'code', 'caseSensitive', 'recapAnswer', 'next'], verify_answer: ['prompt', 'answers', 'caseSensitive', 'recapAnswer', 'recordAnswerAttempts', 'next'],
-          verify_gps: ['prompt', 'latitude', 'longitude', 'radiusMeters', 'maxAccuracyMeters', 'next'], choose_path: ['prompt', 'choices'], puzzle: ['prompt', 'puzzle', 'next'], camera_guide: ['prompt', 'referenceImageUrl', 'latitude', 'longitude', 'next'], verify_organizer: ['prompt', 'next'], verify_image: ['prompt', 'referenceImages', 'location', 'next'],
+          show_text: ['text', 'next'], show_media: ['content', 'next'], verify_qr: ['prompt', 'clue', 'token', 'backupCode', 'next'], verify_code: ['prompt', 'clue', 'code', 'caseSensitive', 'recapAnswer', 'next'], verify_answer: ['prompt', 'clue', 'answers', 'caseSensitive', 'recapAnswer', 'recordAnswerAttempts', 'next'],
+          verify_gps: ['prompt', 'clue', 'latitude', 'longitude', 'radiusMeters', 'maxAccuracyMeters', 'next'], choose_path: ['prompt', 'clue', 'choices'], puzzle: ['prompt', 'clue', 'puzzle', 'next'], camera_guide: ['prompt', 'clue', 'referenceImageUrl', 'latitude', 'longitude', 'next'], verify_organizer: ['prompt', 'clue', 'next'], verify_image: ['prompt', 'clue', 'referenceImages', 'location', 'next'],
           set_variable: ['key', 'value', 'next'], branch: ['condition', 'ifTrue', 'ifFalse'], random_branch: ['choices'], add_points: ['amount', 'label', 'next'], complete: [],
         }
         if (typeof node.type !== 'string' || !Object.hasOwn(fields, node.type)) { issue(`${np}.type`, 'Unsupported action type.'); return }
         const automatic = ['complete', 'set_variable', 'branch', 'random_branch', 'add_points'].includes(node.type)
         object(node, np, ['id', 'type', ...fields[node.type], ...(automatic ? [] : ['fallback'])]); id(node.id, `${np}.id`)
         if (fields[node.type].includes('prompt')) string(node.prompt, `${np}.prompt`)
+        if (node.clue !== undefined) string(node.clue, `${np}.clue`, 4000)
         if (fields[node.type].includes('next')) id(node.next, `${np}.next`)
         if (node.fallback !== undefined && !automatic && object(node.fallback, `${np}.fallback`, ['nodeId', 'label', 'enabled'])) { id(node.fallback.nodeId, `${np}.fallback.nodeId`); string(node.fallback.label, `${np}.fallback.label`, 200); boolean(node.fallback.enabled, `${np}.fallback.enabled`) }
         if (node.type === 'show_text') string(node.text, `${np}.text`)

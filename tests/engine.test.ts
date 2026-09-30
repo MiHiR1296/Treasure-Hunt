@@ -280,6 +280,7 @@ test('publishing rejects missing targets, cycles, unreachable nodes, unsupported
     hunt => { hunt.checkpoints[0].hints[0].availability = { afterHintIds: ['missing'] } },
     hunt => { hunt.checkpoints[0].hints[0].availability = { afterHintIds: ['hint-delayed'] } },
     hunt => { hunt.dudQrs![0].token = 'a-SECRET-qr-token' },
+    hunt => { (hunt.checkpoints[0].flow.nodes[1] as { clue?: unknown }).clue = { invalid: true } },
     hunt => { hunt.checkpoints[0].basePoints = -1 },
   ]
   for (const mutate of cases) {

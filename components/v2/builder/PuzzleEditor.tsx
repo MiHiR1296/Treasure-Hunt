@@ -1,22 +1,42 @@
 'use client';
 
+import { useState } from 'react';
 import type { PuzzleDefinition, QuarterTurn } from '@/lib/engine/puzzles/types';
 import { buttonClass, CheckField, Field, inputClass, NumberField, TextField } from './Fields';
 import { moveItem, newId } from './model';
 import { defaultPuzzle } from './puzzleDefaults';
-import AssetField from './AssetField';
+import AssetField, { useBuilderMedia } from './AssetField';
 export { defaultPuzzle } from './puzzleDefaults';
 
 export const puzzleLabels: Record<PuzzleDefinition['type'], string> = {
   jigsaw: 'Jigsaw tiles', sudoku: 'Sudoku', word_search: 'Word search', crossword: 'Crossword',
-  rotation: 'Rotate image tiles', text: 'Text answer', multiple_choice: 'Multiple choice',
+  rotation: 'Rotate image tiles', text: 'Text answer', multiple_choice: 'Multiple choice', quiz: 'Multi-question quiz',
   matching: 'Match pairs', sequence: 'Put items in order',
 };
 
 export default function PuzzleEditor({ value, onChange }: { value: PuzzleDefinition; onChange: (value: PuzzleDefinition) => void }) {
+  const media = useBuilderMedia();
+  const [segmenting, setSegmenting] = useState(false);
+  const [segmentError, setSegmentError] = useState('');
+  async function uploadAndSegment(file: File) {
+    if (!media?.makeJigsaw || value.type !== 'jigsaw') return;
+    setSegmenting(true); setSegmentError('');
+    try {
+      const asset = await media.upload(file);
+      const puzzle = await media.makeJigsaw(asset.id, value.rows, value.columns);
+      if (puzzle.type === 'jigsaw') onChange(puzzle);
+    } catch (error) { setSegmentError(error instanceof Error ? error.message : 'The image could not be split into tiles.'); }
+    finally { setSegmenting(false); }
+  }
   return <div className="space-y-4 rounded-lg border border-indigo-200 bg-indigo-50/30 p-4">
     <Field label="Puzzle type" hint="Changing the type starts a new puzzle configuration."><select className={inputClass} value={value.type} onChange={event => onChange(defaultPuzzle(event.target.value as PuzzleDefinition['type']))}>{Object.entries(puzzleLabels).map(([type, label]) => <option key={type} value={type}>{label}</option>)}</select></Field>
     {(value.type === 'text' || value.type === 'multiple_choice') && <TextField label="Puzzle question" value={value.prompt} multiline onChange={prompt => onChange({ ...value, prompt })} />}
+    {value.type === 'quiz' && <>
+      <div className="grid grid-cols-2 gap-3"><NumberField label="Correct answers required" value={value.minimumCorrect} min={1} max={value.questions.length} onChange={minimumCorrect => onChange({ ...value, minimumCorrect })} /><NumberField label="Bonus per extra correct answer" value={value.bonusPerAdditionalCorrect ?? 0} min={0} max={100} onChange={bonusPerAdditionalCorrect => onChange({ ...value, bonusPerAdditionalCorrect })} /></div>
+      <p className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm leading-6 text-emerald-950">Players can answer any {value.minimumCorrect} questions correctly and continue immediately. Skipping is penalty-free unless a question below has an explicit skip penalty.</p>
+      {value.questions.map((question, index) => <div key={question.id} className="space-y-3 rounded-lg border border-slate-200 bg-white p-3"><TextField label={`Question ${index + 1}`} value={question.prompt} multiline onChange={prompt => onChange({ ...value, questions: value.questions.map(candidate => candidate.id === question.id ? { ...candidate, prompt } : candidate) })} />{question.options.map((option, optionIndex) => <div key={option.id} className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end"><TextField label={`Option ${optionIndex + 1}`} value={option.label} onChange={label => onChange({ ...value, questions: value.questions.map(candidate => candidate.id === question.id ? { ...candidate, options: candidate.options.map(item => item.id === option.id ? { ...item, label } : item) } : candidate) })} /><CheckField label="Correct" checked={question.correctOptionId === option.id} onChange={checked => checked && onChange({ ...value, questions: value.questions.map(candidate => candidate.id === question.id ? { ...candidate, correctOptionId: option.id } : candidate) })} /></div>)}<NumberField label="Skip penalty (0 = free skip)" value={question.skipPenalty ?? 0} min={0} max={100} onChange={skipPenalty => onChange({ ...value, questions: value.questions.map(candidate => candidate.id === question.id ? { ...candidate, skipPenalty } : candidate) })} /><button type="button" className={buttonClass} disabled={value.questions.length <= 1} onClick={() => onChange({ ...value, questions: value.questions.filter(candidate => candidate.id !== question.id), minimumCorrect: Math.min(value.minimumCorrect, Math.max(1, value.questions.length - 1)) })}>Remove question</button></div>)}
+      <button type="button" className={buttonClass} onClick={() => { const id = newId('question', value.questions.map(question => question.id)); onChange({ ...value, questions: [...value.questions, { id, prompt: '', options: [{ id: `${id}-option-1`, label: '' }, { id: `${id}-option-2`, label: '' }], correctOptionId: `${id}-option-1` }] }); }}>Add question</button>
+    </>}
     {value.type === 'text' && <>
       <TextField label="Accepted answers — one per line" value={value.answers.join('\n')} multiline onChange={text => onChange({ ...value, answers: text.split('\n') })} />
       <CheckField label="Match letter case" checked={value.caseSensitive === true} onChange={caseSensitive => onChange({ ...value, caseSensitive })} />
@@ -43,7 +63,8 @@ export default function PuzzleEditor({ value, onChange }: { value: PuzzleDefinit
       <p className="text-sm leading-6 text-slate-600">Players may continue after the required number. Every additional hidden word can award the configured bonus.</p>
     </>}
     {value.type === 'crossword' && <>
-      <div className="grid grid-cols-2 gap-3"><NumberField label="Grid rows" value={value.rows} min={1} max={25} onChange={rows => onChange({ ...value, rows })} /><NumberField label="Grid columns" value={value.columns} min={1} max={25} onChange={columns => onChange({ ...value, columns })} /></div>
+      <div className="grid grid-cols-2 gap-3"><NumberField label="Grid rows" value={value.rows} min={2} max={25} onChange={rows => onChange({ ...value, rows })} /><NumberField label="Grid columns" value={value.columns} min={2} max={25} onChange={columns => onChange({ ...value, columns })} /></div>
+      <p className="text-sm leading-6 text-slate-600">Enter each clue, answer, starting position, and direction. The player layout stays exactly as authored.</p>
       {value.entries.map((entry, index) => <div key={entry.id} className="space-y-3 rounded-lg border border-slate-200 bg-white p-3">
         <TextField label={`Clue ${index + 1}`} value={entry.clue} onChange={clue => onChange({ ...value, entries: value.entries.map(candidate => candidate.id === entry.id ? { ...candidate, clue } : candidate) })} />
         <TextField label="Answer" value={entry.answer} onChange={answer => onChange({ ...value, entries: value.entries.map(candidate => candidate.id === entry.id ? { ...candidate, answer: answer.toUpperCase() } : candidate) })} />
@@ -74,7 +95,8 @@ export default function PuzzleEditor({ value, onChange }: { value: PuzzleDefinit
         while (pieces.length < size) pieces.push({ id: newId('piece', pieces.map(piece => piece.id)), imageUrl: '', alt: `Tile ${pieces.length + 1}` });
         onChange({ ...value, [dimension]: number, pieces, solution: pieces.map(piece => piece.id) });
       }} />)}</div>
-      <p className="text-sm leading-6 text-slate-600">Choose image tiles in their correct positions, reading left to right then top to bottom. To cut one photo automatically, open Media, upload the photo, and choose Use for jigsaw. Changing dimensions keeps existing tiles where possible.</p>
+      {media?.makeJigsaw && <div className="space-y-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3"><div><p className="font-semibold text-emerald-950">Start with one image</p><p className="text-sm leading-6 text-emerald-900">Upload one source image and the engine will automatically cut it into the {value.rows} × {value.columns} tiles below. You do not need to upload each tile separately.</p></div><label className={`${buttonClass} relative inline-flex cursor-pointer overflow-hidden`}>{segmenting ? 'Cutting image…' : 'Upload source image and cut tiles'}<input type="file" aria-label="Upload one source image and cut tiles" accept="image/*" disabled={segmenting} className="absolute inset-0 h-full w-full cursor-pointer opacity-0" onChange={event => { const file = event.target.files?.[0]; if (file) void uploadAndSegment(file); event.target.value = ''; }} /></label>{segmentError && <p role="alert" className="text-sm text-red-800">{segmentError}</p>}</div>}
+      <p className="text-sm leading-6 text-slate-600">Choose image tiles in their correct positions, reading left to right then top to bottom. Changing dimensions keeps existing tiles where possible. The completed picture is shown in the player preview through the generated tile assets.</p>
       {value.solution.map((id, index) => {
         const piece = value.pieces.find(candidate => candidate.id === id);
         return piece ? <div key={id} className="space-y-3 rounded-lg border border-slate-200 bg-white p-3"><AssetField label={`Image at row ${Math.floor(index / value.columns) + 1}, column ${index % value.columns + 1}`} value={piece.imageUrl} onChange={imageUrl => onChange({ ...value, pieces: value.pieces.map(candidate => candidate.id === id ? { ...candidate, imageUrl } : candidate) })} /><TextField label="Image description" value={piece.alt || ''} onChange={alt => onChange({ ...value, pieces: value.pieces.map(candidate => candidate.id === id ? { ...candidate, alt } : candidate) })} /></div> : null;

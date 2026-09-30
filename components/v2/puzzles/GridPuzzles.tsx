@@ -16,6 +16,15 @@ function moveFocus(event: KeyboardEvent<HTMLInputElement>, row: number, column: 
   }
 }
 
+function focusAdjacentCrosswordCell(root: Element | null, current: HTMLInputElement, offset: number) {
+  window.setTimeout(() => {
+    const cells = Array.from((root || document).querySelectorAll<HTMLInputElement>('input[data-row][data-column]'))
+    const nextIndex = cells.indexOf(current) + offset
+    const cell = cells[nextIndex]
+    if (cell) { cell.focus(); cell.select() }
+  }, 0)
+}
+
 export default function GridPuzzles({ definition, state, disabled, onChange }: PuzzlePlayerProps) {
   const instanceId = useId().replace(/:/g, '')
   const crosswordColumns = definition.type === 'crossword' ? definition.columns : 0
@@ -50,13 +59,16 @@ export default function GridPuzzles({ definition, state, disabled, onChange }: P
   definition.entries.forEach((entry, index) => {
     const key = `${entry.row}:${entry.column}`
     if (!starts.has(key)) starts.set(key, index + 1)
-    for (let i = 0; i < entry.length; i++) occupied.add(`${entry.row + (entry.direction === 'down' ? i : 0)}:${entry.column + (entry.direction === 'across' ? i : 0)}`)
+    for (let i = 0; i < entry.length; i++) {
+      const cell = `${entry.row + (entry.direction === 'down' ? i : 0)}:${entry.column + (entry.direction === 'across' ? i : 0)}`
+      occupied.add(cell)
+    }
   })
   const dense = definition.columns > 10
   const expandedWidth = definition.columns * 44 + Math.max(0, definition.columns - 1) + 2
 
   return <div>
-    <p className="mb-3 text-sm text-stone-600">Use the clues to fill the white squares. Your letters are saved after each change. Arrow keys move between squares.</p>
+    <p className="mb-3 text-sm text-stone-600">Use the clues to fill the white squares. Type a letter and focus moves to the next playable square in row order; black squares are skipped. Use the arrow keys to move deliberately.</p>
     {dense && <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-950">
       <p className="min-w-0 flex-1">Large crossword: {enlarged ? 'swipe inside the grid to pan between easier-to-tap boxes.' : 'the whole board is fitted to the screen, so boxes are smaller.'}</p>
       <button type="button" aria-pressed={enlarged} onClick={() => setEnlarged(value => !value)} className="min-h-11 rounded-lg border border-sky-700 bg-white px-3 font-semibold">{enlarged ? 'Fit whole grid' : 'Enlarge grid'}</button>
@@ -68,11 +80,12 @@ export default function GridPuzzles({ definition, state, disabled, onChange }: P
           if (!occupied.has(key)) return <div key={key} aria-hidden="true" className="aspect-square min-h-0 min-w-0 bg-stone-800" />
           return <label key={key} className="relative aspect-square min-h-0 min-w-0 bg-white">
             {starts.has(key) && <span aria-hidden="true" className="pointer-events-none absolute left-0.5 top-0 text-[clamp(0.35rem,1.7vw,0.625rem)] font-semibold leading-none">{starts.get(key)}</span>}
-            <input data-row={r} data-column={c} value={cell} maxLength={1} autoCapitalize="characters" autoComplete="off" readOnly={locked} onFocus={event => event.currentTarget.select()} onKeyDown={event => moveFocus(event, r, c, definition.rows, definition.columns)} aria-label={`Row ${r + 1}, column ${c + 1}${starts.has(key) ? `, clue ${starts.get(key)}` : ''}`} className={`h-full w-full min-w-0 appearance-none bg-white pt-[12%] text-center text-[clamp(0.6rem,4vw,1.125rem)] uppercase leading-none text-emerald-950 focus:outline-emerald-600 ${locked ? 'opacity-60' : ''}`} onChange={event => {
+            <input data-row={r} data-column={c} value={cell} maxLength={1} autoCapitalize="characters" autoComplete="off" readOnly={locked} onFocus={event => event.currentTarget.select()} onKeyDown={event => { const root = event.currentTarget.closest('[data-puzzle-grid]'); if (event.key === 'Backspace' && !cell) focusAdjacentCrosswordCell(root, event.currentTarget, -1); else moveFocus(event, r, c, definition.rows, definition.columns) }} aria-label={`Row ${r + 1}, column ${c + 1}${starts.has(key) ? `, clue ${starts.get(key)}` : ''}`} className={`h-full w-full min-w-0 appearance-none bg-white pt-[12%] text-center text-[clamp(0.6rem,4vw,1.125rem)] uppercase leading-none text-emerald-950 focus:outline-emerald-600 ${locked ? 'opacity-60' : ''}`} onChange={event => {
               if (locked) return
               const value = event.target.value.toUpperCase()
               if (!/^[A-Z]?$/.test(value)) return
               const grid = state.grid.map(line => [...line]); grid[r][c] = value
+              if (value) focusAdjacentCrosswordCell(event.currentTarget.closest('[data-puzzle-grid]'), event.currentTarget, 1)
               void submit({ grid })
             }} />
           </label>

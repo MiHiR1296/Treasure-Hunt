@@ -69,6 +69,7 @@ export default function NodeEditor({ checkpoint, hunt, node, onChange, onConnect
 }) {
   return <div className="space-y-5">
     {node.type === 'show_text' && <TextField label="Clue or instructions" value={node.text} multiline onChange={text => onChange({ ...node, text })} />}
+    {'prompt' in node && <TextField label="Clue or context (shown above the action, optional)" value={node.clue || ''} multiline onChange={clue => { const result = { ...node }; if (clue.trim()) result.clue = clue; else delete result.clue; onChange(result); }} hint="Keep the clue and its verification on one task card. Use the action prompt below for the button or answer instruction." />}
     {'prompt' in node && <TextField label="What should the player do?" value={node.prompt} multiline onChange={prompt => onChange({ ...node, prompt })} />}
     {node.type === 'verify_answer' && <>
       <TextField label="Accepted answers — one per line" value={node.answers.join('\n')} multiline onChange={text => onChange({ ...node, answers: text.split('\n') })} hint="Answers are checked on the server. Players do not receive this list." />

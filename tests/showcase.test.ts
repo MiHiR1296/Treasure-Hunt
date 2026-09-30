@@ -84,7 +84,7 @@ test('alternate checkpoint genuinely supports GPS plus code and a live fallback 
 })
 
 test('all starter templates validate and independent instances regenerate QR secrets without mutating the template', () => {
-  assert.deepEqual(huntTemplates.map(item => item.id), ['frankie-code-hunt', 'simple-qr', 'puzzle-trail', 'landmark'])
+  assert.deepEqual(huntTemplates.map(item => item.id), ['lokgram-pilot', 'frankie-code-hunt', 'simple-qr', 'puzzle-trail', 'landmark'])
   for (const template of huntTemplates) assert.deepEqual(validateHunt(template.definition), [], template.id)
   const frankie = huntTemplates.find(template => template.id === 'frankie-code-hunt')!
   assert.equal(frankie.definition.checkpoints.length, 8)

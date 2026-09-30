@@ -24,7 +24,7 @@ flowchart LR
 | `lib/engine/types.ts` | Private/public definitions, commands, progress, scoring, hints and controls. |
 | `lib/engine/validation.ts` | Strict shape/field validation, graph edges, cycles/reachability, prerequisites, media URLs, puzzle configuration and command/control parsing. |
 | `lib/engine/engine.ts` | Pure initialization, traversal, action registry, hint purchasing, puzzle saves, fallback and organizer transitions, public projection. |
-| `lib/engine/puzzles/` | Puzzle configuration/state/public contracts, validators and nine independent module implementations. |
+| `lib/engine/puzzles/` | Puzzle configuration/state/public contracts, validators and ten independent module implementations, including threshold quizzes with optional server-side skip scoring and crossword auto-layout support. |
 | `lib/server/store.ts` | Team sessions/membership, version-pinned state loading, row locks, receipts and atomic command persistence. |
 | `lib/server/hunts.ts` | Draft revisions, publication/versioning, lifecycle and schedule/registration gates. |
 | `lib/server/operations.ts` | Isolated previews, simulations, help/replies, announcements, leaderboard and analytics. |
@@ -83,7 +83,7 @@ Organizer adjustments append entries. Reset hint refunds its active charge. Reop
 
 Theme configuration is a set of validated tokens rather than injected CSS: primary color, logo/cover/background images, typography, button shape, checkpoint badge style and success animation. The player keeps solid readable surfaces over decorative backgrounds, selects contrasting primary-button text, and suppresses effects when reduced motion is requested. Uploaded theme assets use the same explicit media-reference authorization as other visible player content.
 
-Media is stored on the server filesystem or shared persistent volume. Images are oriented, resized to at most 1600×1600 and re-encoded as JPEG; browser photos are compressed before upload too. Jigsaws can be cut into individual image assets, keeping the private answer order server-side. Audio/video is validated by allowed type/signature and bounded upload size; it is not transcoded.
+Media is stored on the server filesystem or shared persistent volume. Images are oriented, resized to at most 1600×1600 and re-encoded as JPEG; browser photos are compressed before upload too. The organizer can upload one source image and have the server cut it into a selected jigsaw grid, keeping the private answer order server-side. The same generated assets are authorized in organizer previews and live player views. Audio/video is validated by allowed type/signature and bounded upload size; it is not transcoded.
 
 Access-controlled asset URLs are served only to an organizer or a team whose current public view contains them; deliberately public hunt covers/logos are readable before joining. Photos are private to their team and organizer, associated with checkpoint/action, and checked again before submission. Configured photo GPS requirements are enforced by the upload adapter. `submit_photo` then records a pending media ID; it does not declare visual success.
 
@@ -121,7 +121,7 @@ Legacy pages are disabled unless explicitly enabled. Current deployment does not
 
 ## Verification and limits
 
-Player feedback is a presentation of confirmed server state. Detailed errors stay beside their action and are associated with answer inputs; a viewport notification announces the result once. Actual task/completion/score changes trigger brief visual cues. Partial puzzle saves remain quiet, and incorrect text/choice attempts are distinguished from successful solutions even though both persist puzzle state. Sound is off until the player enables it, stored only as a browser preference, and unlocked during a user gesture. Loading saved state or polling never plays a success tone. Reduced-motion preferences and an explicit still-animation theme suppress visual motion.
+Player feedback is a presentation of confirmed server state. Detailed errors stay beside their action and are associated with answer inputs; a viewport notification announces the result once. Actual task/completion/score changes trigger brief visual cues. Threshold quizzes complete as soon as their configured correct-answer count is reached; skipping can be free or carry an explicit per-question cost, and the organizer chooses that policy. Partial puzzle saves remain quiet, and incorrect text/choice attempts are distinguished from successful solutions even though both persist puzzle state. Crossword entry advances within the active across/down word after each letter so mobile players do not have to tap every square. Sound is off until the player enables it, stored only as a browser preference, and unlocked during a user gesture. Loading saved state or polling never plays a success tone. Reduced-motion preferences and an explicit still-animation theme suppress visual motion.
 
 Unit tests exercise module/graph/secret/idempotency/recovery behavior; PostgreSQL tests establish actual locking/receipt/version/media guarantees; browser journeys establish rendered behavior against the API. None substitutes for physical mobile camera/sensor testing or a verified public HTTPS deployment. The [acceptance register](acceptance.md) maps each product-plan requirement to current evidence and remaining gaps.
 

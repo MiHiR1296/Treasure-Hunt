@@ -140,7 +140,7 @@ test('incorrect crossword letters save cell by cell, retain focus, survive reloa
   await third.focus()
   await third.fill('G')
   await expect(grid).toHaveAttribute('aria-busy', 'true')
-  await expect(third).toBeFocused()
+  await expect(grid.getByRole('textbox', { name: 'Row 2, column 1', exact: true })).toBeFocused()
   await expect(third).not.toBeDisabled()
   await expect(third).toHaveAttribute('readonly', '')
   await expect(grid).toHaveAttribute('aria-busy', 'false')

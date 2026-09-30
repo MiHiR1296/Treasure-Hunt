@@ -39,7 +39,7 @@ sum: createPuzzleModule('sum', {
 })
 ```
 
-This is an extension example, not an additional shipped tenth puzzle. Bound the configured operands and total, avoid ambiguous numeric formats if the puzzle needs exact integers, and test malformed values before adding its UI.
+This is an extension example, not an additional shipped puzzle. Bound the configured operands and total, avoid ambiguous numeric formats if the puzzle needs exact integers, and test malformed values before adding its UI.
 
 A renderer receives `definition`, `state`, `disabled` and `onChange(submission)`. It sends only its validated input shape. The current adapter wraps that input in `submit_puzzle` with checkpoint/action and per-puzzle `expectedRevision`; puzzle hints use `submit_hint_puzzle` with hint ID. `save_puzzle`/`save_hint_puzzle` persist without advancing if the interaction requires a separate Check button.
 

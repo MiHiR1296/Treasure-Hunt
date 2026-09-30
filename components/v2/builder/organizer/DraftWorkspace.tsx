@@ -51,6 +51,7 @@ export default function DraftWorkspace({ dashboard, pending, run, refresh, notif
   const mediaServices = useMemo(() => ({
     list: async () => (await adminRequest<{ media: Asset[] }>('/api/v2/admin/media')).media,
     upload: async (file: File) => { const form = new FormData(); form.set('file', file); form.set('requestId', requestId()); return (await adminRequest<{ media: Asset }>('/api/v2/admin/media', 'POST', form)).media; },
+    makeJigsaw: async (mediaId: string, rows: number, columns: number) => (await adminRequest<{ puzzle: PuzzleDefinition }>('/api/v2/admin/media', 'POST', { mediaId, rows, columns })).puzzle,
   }), []);
 
   useEffect(() => {
@@ -95,7 +96,7 @@ export default function DraftWorkspace({ dashboard, pending, run, refresh, notif
     let source: unknown;
     try { source = JSON.parse(await file.text()); } catch { throw new AdminRequestError('This file is not valid JSON. Choose a hunt export.', 400); }
     if (legacy) {
-      const converted = await adminRequest<{ definition: HuntDefinition; issues: ValidationIssue[]; warnings: string[] }>('/api/v2/admin/import', 'POST', { source, huntId: `imported-${requestId().slice(0, 8)}` });
+      const converted = await adminRequest<{ definition: HuntDefinition; issues: ValidationIssue[]; warnings: string[] }>('/api/v2/admin/import', 'POST', { source });
       load({ definition: converted.definition, revision: null, dirty: true }); setImportWarnings([...converted.warnings, ...converted.issues.map(issue => `${issue.path}: ${issue.message}`)]);
     } else {
       if (!editable(source)) throw new AdminRequestError('This file does not have a V2 hunt structure. Use Import V1 export for a legacy hunt.', 400);

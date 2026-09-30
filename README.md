@@ -8,7 +8,7 @@ V2 supports:
 
 - Direct node-and-socket checkpoint flow editing, reusable templates, incomplete drafts, visual validation, immutable published versions and isolated player previews.
 - QR and backup codes, answers, approximate GPS areas, maps, camera guidance, private photo uploads with organizer review, and live recovery paths.
-- Nine puzzle modules: jigsaw, Sudoku, word search, crossword, rotation, text, multiple choice, matching and sequence. The same modules can unlock hints.
+- Ten puzzle modules: jigsaw, Sudoku, word search, crossword, rotation, text, multiple choice, threshold quiz, matching and sequence. The same modules can unlock hints.
 - Independent text/image/audio/video/map/camera/puzzle hints with costs, availability rules, and optional step/word/crossword-answer targeting that stops offering obsolete hints.
 - Sequential, open and prerequisite-based hunts; choices, conditions, variables, deterministic weighted routes, scoring rules and optional checkpoints.
 - Shared team progress, revisioned puzzle saves, optional organizer-only answer-attempt history, safe request retries, score ledger, authenticated organizer controls, help requests, activity, analytics and configurable leaderboard.
@@ -73,6 +73,7 @@ The browser suite covers shared progress, retries, keyboard puzzle entry, narrow
 - [Vercel demo and MRBT subdomain](docs/v2/vercel-hosting.md)
 - [Earlier Render hosting and cloud migration](docs/v2/cloud-hosting.md)
 - [Demo and templates](docs/v2/showcase.md)
+- [Lokgram pilot hunt content brief](docs/v2/lokgram-pilot.md)
 - [V1 import and retirement](docs/v2/migration.md)
 - [All 92 product requirements and success evidence](docs/v2/acceptance.md)
 

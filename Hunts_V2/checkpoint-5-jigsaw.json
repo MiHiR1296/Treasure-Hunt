@@ -1,0 +1,101 @@
+{
+  "id": "picture-next-place",
+  "title": "5 · Picture the Next Place",
+  "basePoints": 10,
+  "flow": {
+    "startNodeId": "jigsaw",
+    "nodes": [
+      {
+        "id": "jigsaw",
+        "type": "puzzle",
+        "prompt": "Assemble the artwork to discover the next landmark. Tap two tiles to swap them.",
+        "puzzle": {
+          "type": "jigsaw",
+          "rows": 3,
+          "columns": 3,
+          "pieces": [
+            {
+              "id": "tile-1",
+              "imageUrl": "/v2/lokgram/jigsaw-1.png",
+              "alt": "Top-left section of the blue and gold artwork"
+            },
+            {
+              "id": "tile-2",
+              "imageUrl": "/v2/lokgram/jigsaw-2.png",
+              "alt": "Top-center section of the blue and gold artwork"
+            },
+            {
+              "id": "tile-3",
+              "imageUrl": "/v2/lokgram/jigsaw-3.png",
+              "alt": "Top-right section of the blue and gold artwork"
+            },
+            {
+              "id": "tile-4",
+              "imageUrl": "/v2/lokgram/jigsaw-4.png",
+              "alt": "Middle-left section of the blue and gold artwork"
+            },
+            {
+              "id": "tile-5",
+              "imageUrl": "/v2/lokgram/jigsaw-5.png",
+              "alt": "Middle-center section of the blue and gold artwork"
+            },
+            {
+              "id": "tile-6",
+              "imageUrl": "/v2/lokgram/jigsaw-6.png",
+              "alt": "Middle-right section of the blue and gold artwork"
+            },
+            {
+              "id": "tile-7",
+              "imageUrl": "/v2/lokgram/jigsaw-7.png",
+              "alt": "Bottom-left section of the blue and gold artwork"
+            },
+            {
+              "id": "tile-8",
+              "imageUrl": "/v2/lokgram/jigsaw-8.png",
+              "alt": "Bottom-center section of the blue and gold artwork"
+            },
+            {
+              "id": "tile-9",
+              "imageUrl": "/v2/lokgram/jigsaw-9.png",
+              "alt": "Bottom-right section of the blue and gold artwork"
+            }
+          ],
+          "solution": [
+            "tile-1",
+            "tile-2",
+            "tile-3",
+            "tile-4",
+            "tile-5",
+            "tile-6",
+            "tile-7",
+            "tile-8",
+            "tile-9"
+          ]
+        },
+        "next": "reveal"
+      },
+      {
+        "id": "reveal",
+        "type": "show_text",
+        "text": "The picture is complete. Look for the place of bells, books, and bright minds.",
+        "next": "done"
+      },
+      {
+        "id": "done",
+        "type": "complete"
+      }
+    ]
+  },
+  "hints": [
+    {
+      "id": "picture-help",
+      "title": "See the reference",
+      "cost": 4,
+      "content": {
+        "type": "image",
+        "url": "/v2/lokgram/jigsaw-source.png",
+        "alt": "The complete blue and gold artwork."
+      }
+    }
+  ]
+}

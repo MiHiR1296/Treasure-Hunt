@@ -12,6 +12,7 @@ export type PuzzleDefinition =
   | { type: 'rotation'; columns: number; tiles: (ImagePiece & { correctRotation: QuarterTurn })[] }
   | { type: 'text'; prompt: string; answers: string[]; caseSensitive?: boolean }
   | { type: 'multiple_choice'; prompt: string; options: PuzzleItem[]; correctOptionId: string }
+  | { type: 'quiz'; questions: { id: string; prompt: string; options: PuzzleItem[]; correctOptionId: string; skipPenalty?: number }[]; minimumCorrect: number; bonusPerAdditionalCorrect?: number }
   | { type: 'matching'; left: PuzzleItem[]; right: PuzzleItem[]; solution: MatchingPair[] }
   | { type: 'sequence'; items: PuzzleItem[]; solution: string[] }
 
@@ -23,6 +24,7 @@ export type PuzzlePublicDefinition =
   | { type: 'rotation'; columns: number; tiles: ImagePiece[] }
   | { type: 'text'; prompt: string }
   | { type: 'multiple_choice'; prompt: string; options: PuzzleItem[] }
+  | { type: 'quiz'; questions: { id: string; prompt: string; options: PuzzleItem[]; skipPenalty?: number }[]; minimumCorrect: number; bonusPerAdditionalCorrect?: number }
   | { type: 'matching'; left: PuzzleItem[]; right: PuzzleItem[] }
   | { type: 'sequence'; items: PuzzleItem[] }
 
@@ -35,11 +37,12 @@ export type PuzzleState =
   | { type: 'rotation'; rotations: Record<string, QuarterTurn> }
   | { type: 'text'; value: string }
   | { type: 'multiple_choice'; optionId: string | null }
+  | { type: 'quiz'; responses: { questionId: string; status: 'correct' | 'wrong' | 'skipped'; optionId?: string }[]; correctCount: number; finished: boolean }
   | { type: 'matching'; pairs: MatchingPair[] }
   | { type: 'sequence'; order: string[] }
 
-export interface PuzzleReward { id: string; amount: number; label: string }
-export interface PuzzleUpdate { state: PuzzleState; completed: boolean; rewards?: PuzzleReward[] }
+export interface PuzzleReward { id: string; amount: number; label: string; kind?: 'action_points' | 'skip_penalty' }
+export interface PuzzleUpdate { state: PuzzleState; completed: boolean; rewards?: PuzzleReward[]; message?: string }
 
 export class PuzzleError extends Error {
   constructor(public readonly code: 'invalid_puzzle' | 'invalid_submission' | 'invalid_puzzle_state', message: string) {

@@ -76,7 +76,7 @@ export type InteractiveNode = (
   | { id: string; type: 'camera_guide'; prompt: string; referenceImageUrl?: string; latitude?: number; longitude?: number; next: string }
   | { id: string; type: 'verify_organizer'; prompt: string; next: string }
   | { id: string; type: 'verify_image'; prompt: string; referenceImages: string[]; location?: GPSRegion; next: string }
-) & { fallback?: Fallback }
+) & { fallback?: Fallback; clue?: string }
 export type FlowNode = InteractiveNode
   | { id: string; type: 'set_variable'; key: string; value: VariableValue; next: string }
   | { id: string; type: 'branch'; condition: Condition; ifTrue: string; ifFalse: string }
@@ -232,7 +232,7 @@ export type PlayerNode = (
   | { id: string; type: 'puzzle'; prompt: string; puzzle: PuzzlePublicDefinition; progress: PuzzleProgress }
   | { id: string; type: 'camera_guide'; prompt: string; referenceImageUrl?: string; latitude?: number; longitude?: number }
   | { id: string; type: 'verify_image'; prompt: string; photoStatus?: NodeProgress['photoStatus']; reviewMessage?: string; locationRequired: boolean }
-) & { fallback?: { label: string; enabled: boolean } }
+) & { fallback?: { label: string; enabled: boolean }; clue?: string }
 export interface PlayerHint {
   id: string
   title: string
