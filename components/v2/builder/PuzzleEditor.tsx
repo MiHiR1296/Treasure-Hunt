@@ -6,7 +6,6 @@ import { buttonClass, CheckField, Field, inputClass, NumberField, TextField } fr
 import { moveItem, newId } from './model';
 import { defaultPuzzle } from './puzzleDefaults';
 import AssetField, { useBuilderMedia } from './AssetField';
-import { autoArrangeCrossword } from '@/lib/engine/puzzles/crossword-layout';
 export { defaultPuzzle } from './puzzleDefaults';
 
 export const puzzleLabels: Record<PuzzleDefinition['type'], string> = {
@@ -65,7 +64,7 @@ export default function PuzzleEditor({ value, onChange }: { value: PuzzleDefinit
     </>}
     {value.type === 'crossword' && <>
       <div className="grid grid-cols-2 gap-3"><NumberField label="Grid rows" value={value.rows} min={2} max={25} onChange={rows => onChange({ ...value, rows })} /><NumberField label="Grid columns" value={value.columns} min={2} max={25} onChange={columns => onChange({ ...value, columns })} /></div>
-      <div className="rounded-lg border border-sky-200 bg-sky-50 p-3"><p className="text-sm leading-6 text-sky-950">Enter clues and answers first. The engine can arrange them into a crossing-first layout so you do not have to calculate every starting square manually.</p><button type="button" className={`${buttonClass} mt-3`} onClick={() => onChange({ ...value, entries: autoArrangeCrossword(value.entries, value.rows, value.columns) })}>Auto-arrange crossword</button></div>
+      <p className="text-sm leading-6 text-slate-600">Enter each clue, answer, starting position, and direction. The player layout stays exactly as authored.</p>
       {value.entries.map((entry, index) => <div key={entry.id} className="space-y-3 rounded-lg border border-slate-200 bg-white p-3">
         <TextField label={`Clue ${index + 1}`} value={entry.clue} onChange={clue => onChange({ ...value, entries: value.entries.map(candidate => candidate.id === entry.id ? { ...candidate, clue } : candidate) })} />
         <TextField label="Answer" value={entry.answer} onChange={answer => onChange({ ...value, entries: value.entries.map(candidate => candidate.id === entry.id ? { ...candidate, answer: answer.toUpperCase() } : candidate) })} />

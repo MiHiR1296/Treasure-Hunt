@@ -98,19 +98,21 @@ test('serial grid saves retain keyboard focus, skip printed cells and fit portra
   const corner = crossword.getByRole('textbox', { name: 'Row 1, column 1, clue 1', exact: true });
   await expect(page.getByRole('textbox', { name: /Answer for/ })).toHaveCount(0);
   await fillAndSave(page, corner, 'X', crossword);
-  await expect(corner).toBeFocused();
-  await page.keyboard.press('ArrowRight');
   const across = crossword.getByRole('textbox', { name: 'Row 1, column 2', exact: true });
   await expect(across).toBeFocused();
   await fillAndSave(page, across, 'A', crossword);
+  const nextAcross = crossword.getByRole('textbox', { name: 'Row 1, column 3', exact: true });
+  await expect(nextAcross).toBeFocused();
   await page.keyboard.press('ArrowLeft');
-  await expect(corner).toBeFocused();
-  const selection = await corner.evaluate(input => ({ start: (input as HTMLInputElement).selectionStart, end: (input as HTMLInputElement).selectionEnd }));
+  await expect(across).toBeFocused();
+  const selection = await across.evaluate(input => ({ start: (input as HTMLInputElement).selectionStart, end: (input as HTMLInputElement).selectionEnd }));
   expect(selection).toEqual({ start: 0, end: 1 });
+  await corner.focus();
   await page.keyboard.press('ArrowDown');
   const down = crossword.getByRole('textbox', { name: 'Row 2, column 1', exact: true });
   await expect(down).toBeFocused();
   await fillAndSave(page, down, 'A', crossword);
+  await expect(crossword.getByRole('textbox', { name: 'Row 3, column 1', exact: true })).toBeFocused();
   for (const viewport of [{ width: 320, height: 568 }, { width: 844, height: 390 }]) {
     await page.setViewportSize(viewport);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
