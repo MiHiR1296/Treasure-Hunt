@@ -68,7 +68,7 @@ export default function GridPuzzles({ definition, state, disabled, onChange }: P
   const expandedWidth = definition.columns * 44 + Math.max(0, definition.columns - 1) + 2
 
   return <div>
-    <p className="mb-3 text-sm text-stone-600">Use the clues to fill the white squares. Type a letter and the next square in that word opens automatically; the keyboard stays ready for the next letter. Tap a crossing square again to switch between across and down.</p>
+    <p className="mb-3 text-sm text-stone-600">Use the clues to fill the white squares. Type a letter and focus moves to the next playable square in row order; black squares are skipped. Use the arrow keys to move deliberately.</p>
     {dense && <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-950">
       <p className="min-w-0 flex-1">Large crossword: {enlarged ? 'swipe inside the grid to pan between easier-to-tap boxes.' : 'the whole board is fitted to the screen, so boxes are smaller.'}</p>
       <button type="button" aria-pressed={enlarged} onClick={() => setEnlarged(value => !value)} className="min-h-11 rounded-lg border border-sky-700 bg-white px-3 font-semibold">{enlarged ? 'Fit whole grid' : 'Enlarge grid'}</button>
