@@ -31,6 +31,7 @@ flowchart LR
 | `lib/engine/session.ts`, `lib/server/routes.ts` | Pause-aware personal timing and versioned, precomputed deterministic assignments. |
 | `lib/server/activity.ts`, `results.ts`, `team-summaries.ts` | Transactional private activity, revision-cutoff results/exports and slim dashboard queries. |
 | `lib/server/media.ts` | Authenticated asset/photo storage, derivatives, jigsaw cutting, access and retention. |
+| `lib/server/vision-jobs.ts`, `scripts/v2-vision-worker.mjs` | Optional leased target-profile/photo jobs, scoped worker media access, structured local Ollama results and offline-safe fallback. |
 | `lib/server/security.ts`, `http.ts` | Hashed sessions/PINs, roles, origin checks, bounded requests and friendly error mapping. |
 | `app/api/v2/` | Thin server adapters; privileged endpoints authenticate the organizer independently. |
 | `components/v2/builder/` | Visual/form authoring, graph connections, settings, checkpoint/hint/puzzle fields and operations UI. |

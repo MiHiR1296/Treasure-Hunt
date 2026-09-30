@@ -21,6 +21,7 @@
     "backup": "sh scripts/v2-backup.sh",
     "restore": "sh scripts/v2-restore.sh",
     "maintenance": "node --env-file-if-exists=.env scripts/v2-maintenance.mjs",
+    "vision:worker": "node --env-file-if-exists=.env scripts/v2-vision-worker.mjs",
     "smoke": "node --env-file-if-exists=.env scripts/v2-smoke.mjs"
   },
   "dependencies": {

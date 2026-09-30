@@ -32,8 +32,12 @@ Configure these server-only environment variables for the deployment:
 | `SUPABASE_UPLOAD_BUCKET` | `treasure-hunt-v2-incoming` |
 | `ENABLE_LEGACY_V1` | `false` |
 | `CRON_SECRET` | Random secret of at least 32 characters |
+| `VISION_WORKER_TOKEN` | Optional high-entropy secret shared only with the private Mac worker |
+| `VISION_MODEL` | Optional exact local model identity; defaults to `qwen3.8:27b-mlx` |
 
 The inline CA enables certificate and hostname verification without a filesystem secret. Vercel's database pool uses three connections per instance and the official pool lifecycle helper. No connection strings or storage service keys go to the browser.
+
+When local image review is enabled, set the same `VISION_WORKER_TOKEN` on the Mac and Vercel. The worker initiates outbound HTTPS to the custom domain; do not expose the Mac or Ollama port. Apply the additive vision-job migration before enabling an action. Worker setup and rotation guidance are in [local vision review](local-vision-review.md).
 
 Create both Storage buckets as **private**, with a 20,000,000-byte file limit and only the supported image/audio/video MIME types. Do not grant public upload/read policies. Apply the additive migration before publishing:
 

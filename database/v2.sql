@@ -148,6 +148,49 @@ create table if not exists hunt_v2.media_uploads (
   completed_at timestamptz
 );
 create index if not exists media_upload_cleanup on hunt_v2.media_uploads(cleanup_after);
+-- Durable outbox for organizer-authored target profiles and submitted-photo
+-- recommendations. Image bytes and signed URLs never enter this table.
+create table if not exists hunt_v2.vision_jobs (
+  id uuid primary key default gen_random_uuid(),
+  kind text not null check(kind in ('target_profile','photo_review')),
+  status text not null default 'queued' check(status in ('queued','leased','completed','failed','cancelled')),
+  hunt_id text,
+  definition_version integer,
+  team_id uuid references hunt_v2.teams(id) on delete cascade,
+  media_id uuid references hunt_v2.media(id) on delete cascade,
+  checkpoint_id text,
+  node_id text,
+  payload jsonb not null,
+  result jsonb,
+  result_hash text,
+  attempts integer not null default 0,
+  available_at timestamptz not null default now(),
+  lease_token_hash text,
+  lease_expires_at timestamptz,
+  worker_id text,
+  model text,
+  prompt_version text,
+  last_error text,
+  apply_status text check(apply_status in ('not_applicable','pending','approved','stale','ineligible','failed')),
+  apply_revision integer check(apply_revision is null or apply_revision>=0),
+  created_at timestamptz not null default now(),
+  started_at timestamptz,
+  completed_at timestamptz,
+  updated_at timestamptz not null default now(),
+  check ((kind='photo_review' and team_id is not null and media_id is not null and definition_version is not null and checkpoint_id is not null and node_id is not null)
+    or (kind='target_profile' and team_id is null and media_id is null))
+);
+alter table hunt_v2.vision_jobs add column if not exists apply_revision integer;
+create unique index if not exists vision_photo_job on hunt_v2.vision_jobs(media_id) where kind='photo_review';
+create index if not exists vision_claim_queue on hunt_v2.vision_jobs(status,available_at,created_at);
+create index if not exists vision_team_jobs on hunt_v2.vision_jobs(team_id,created_at desc);
+create table if not exists hunt_v2.vision_workers (
+  id text primary key,
+  model text not null,
+  status text not null,
+  details jsonb not null default '{}'::jsonb,
+  last_seen_at timestamptz not null default now()
+);
 create or replace function hunt_v2.queue_media_deletion() returns trigger
 language plpgsql set search_path = hunt_v2, pg_temp as $$
 begin
@@ -175,6 +218,8 @@ alter table hunt_v2.messages enable row level security;
 alter table hunt_v2.media enable row level security;
 alter table hunt_v2.media_deletions enable row level security;
 alter table hunt_v2.media_uploads enable row level security;
+alter table hunt_v2.vision_jobs enable row level security;
+alter table hunt_v2.vision_workers enable row level security;
 revoke all on function hunt_v2.queue_media_deletion() from public;
 revoke all on all tables in schema hunt_v2 from public;
 revoke all on all sequences in schema hunt_v2 from public;

@@ -1,12 +1,12 @@
 'use client';
 
-import { useId } from 'react';
-import type { CheckpointDefinition, Condition, DisplayContent, FlowNode, HuntDefinition, VariableValue } from '@/lib/engine/types';
+import { useEffect, useId, useRef, useState } from 'react';
+import type { CheckpointDefinition, Condition, DisplayContent, FlowNode, HuntDefinition, VariableValue, VisionComparisonScope, VisionTargetProfile } from '@/lib/engine/types';
 import { actionClass, buttonClass, CheckField, Field, inputClass, LocationFields, NumberField, TextField } from './Fields';
 import { canConnect, isInteractiveNode, newId, nodeLabels } from './model';
 import { ContentEditor } from './HintEditor';
 import PuzzleEditor from './PuzzleEditor';
-import AssetField from './AssetField';
+import AssetField, { useBuilderMedia } from './AssetField';
 
 function ValueEditor({ value, onChange }: { value: VariableValue; onChange: (value: VariableValue) => void }) {
   return <div className="space-y-3"><Field label="Value type"><select className={inputClass} value={typeof value} onChange={event => onChange(event.target.value === 'boolean' ? true : event.target.value === 'number' ? 0 : '')}><option value="boolean">Yes / no</option><option value="string">Text</option><option value="number">Number</option></select></Field>
@@ -63,6 +63,72 @@ export function TargetPicker({ label, checkpoint, sourceId, value, onChange }: {
   </select></Field>;
 }
 
+const scopeLabels: Record<VisionComparisonScope,string> = {
+  same_physical_subject: 'The same individual physical object', same_named_place: 'The same named place or landmark',
+  same_make_model: 'The same make and model', same_kind: 'The same kind or species',
+};
+
+function VisionEditor({ node,onChange }: { node: Extract<FlowNode,{type:'verify_image'}>; onChange:(node:Extract<FlowNode,{type:'verify_image'}>)=>void }) {
+  const [jobId,setJobId]=useState(''),[status,setStatus]=useState(''),[error,setError]=useState('');
+  const mounted=useRef(true), latest=useRef(node), latestChange=useRef(onChange); latest.current=node; latestChange.current=onChange;
+  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false}},[]);
+  const vision=node.vision;
+  async function request(url:string,options?:RequestInit) {
+    const response=await fetch(url,{...options,cache:'no-store',credentials:'same-origin',headers:options?.body?{'Content-Type':'application/json'}:undefined});
+    const value=await response.json().catch(()=>({}));
+    if(!response.ok) throw new Error(typeof value.error==='string'?value.error:'The profile request could not be completed.');
+    return value as {job:{id:string;status:string;result?:VisionTargetProfile;last_error?:string}};
+  }
+  async function generate() {
+    if(!vision||jobId)return;setError('');setStatus('Queued for the local vision worker…');
+    try {
+      const created=await request('/api/v2/admin/vision-profile',{method:'POST',body:JSON.stringify({targetName:vision.targetName,scope:vision.scope,referenceImages:node.referenceImages})});
+      if(!mounted.current)return;setJobId(created.job.id);
+      for(let attempt=0;attempt<150&&mounted.current;attempt++) {
+        await new Promise(resolve=>window.setTimeout(resolve,2000));
+        const response=await request(`/api/v2/admin/vision-profile?id=${encodeURIComponent(created.job.id)}`),job=response.job;
+        if(!mounted.current)return;
+        setStatus(job.status==='leased'?'The Mac is analyzing the references…':job.status==='queued'?'Waiting for the Mac worker…':job.status);
+        if(job.status==='completed'&&job.result) {
+          const current=latest.current;if(!current.vision)return;
+          latestChange.current({...current,vision:{...current.vision,profile:job.result}});setStatus('Profile generated. Review it, then save the draft.');setJobId('');return;
+        }
+        if(job.status==='failed'||job.status==='cancelled')throw new Error(job.last_error?`Profile generation failed (${job.last_error}).`:'Profile generation failed.');
+      }
+      throw new Error('Profile generation is still taking too long. It can be tried again when the worker is available.');
+    } catch(reason) {if(mounted.current){setError(reason instanceof Error?reason.message:'Profile generation failed.');setStatus('');setJobId('')}}
+  }
+  if(!vision)return <div className="rounded-lg border border-slate-200 bg-slate-50 p-3"><CheckField label="Use the local image-review assistant" checked={false} onChange={checked=>{if(checked)onChange({...node,vision:{mode:'assisted',targetName:'',scope:'same_named_place',autoApproveThreshold:.98,minimumEvidence:2,requireLocationForAutoApproval:Boolean(node.location)}})}} /><p className="mt-2 text-xs leading-5 text-slate-600">The organizer can generate a private target profile from the reference set. Existing human review remains available.</p></div>;
+  return <div className="space-y-4 rounded-lg border border-teal-200 bg-teal-50/40 p-4">
+    <CheckField label="Use the local image-review assistant" checked onChange={checked=>{if(!checked){const result={...node};delete result.vision;onChange(result)}}} />
+    <TextField label="Target name" value={vision.targetName} onChange={targetName=>onChange({...node,vision:{...vision,targetName,profile:undefined}})} hint="For example: Royal Enfield Bullet 350 or Kalyan Durgadi Fort main gate." />
+    <Field label="What must match?"><select className={inputClass} value={vision.scope} onChange={event=>onChange({...node,vision:{...vision,scope:event.target.value as VisionComparisonScope,profile:undefined}})}>{Object.entries(scopeLabels).map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></Field>
+    <button type="button" className={actionClass} disabled={Boolean(jobId)||!vision.targetName.trim()||node.referenceImages.length<2} onClick={()=>void generate()}>{jobId?'Generating profile…':vision.profile?'Regenerate profile from references':'Generate profile from references'}</button>
+    <p className="text-xs leading-5 text-slate-600">Uses 2–30 application-managed reference images. The worker automatically chooses up to six varied views for later comparisons.</p>
+    {status&&<p role="status" className="text-sm text-teal-900">{status}</p>}{error&&<p role="alert" className="text-sm text-red-700">{error}</p>}
+    {vision.profile&&<div className="space-y-2 rounded-lg border border-teal-200 bg-white p-3 text-sm"><p className="font-semibold">Generated target profile</p><p>{vision.profile.summary}</p><p className="text-xs"><strong>Visible identity cues:</strong> {vision.profile.distinguishingFeatures.join(' · ')}</p>{vision.profile.confusingAlternatives.length>0&&<p className="text-xs"><strong>Close alternatives:</strong> {vision.profile.confusingAlternatives.join(' · ')}</p>}<p className="text-xs text-slate-500">{vision.profile.referenceSelections.map(item=>`Reference ${item.index+1}: ${item.role}`).join(' · ')} · {vision.profile.model} · {vision.profile.promptVersion}</p></div>}
+    <Field label="Assistant behavior"><select className={inputClass} value={vision.mode} onChange={event=>onChange({...node,vision:{...vision,mode:event.target.value as typeof vision.mode}})}><option value="shadow">Shadow — record only</option><option value="assisted">Assisted — advise the organizer</option><option value="auto_approve">Auto-approve qualifying matches</option></select></Field>
+    {vision.mode==='auto_approve'&&<div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50 p-3"><p className="text-sm leading-6 text-amber-950">Only a two-pass MATCH with usable quality, profile agreement, enough visible evidence, and the threshold below can advance. Every other outcome remains for human review.</p><NumberField label="Minimum model confidence" value={vision.autoApproveThreshold} min={0.5} max={1} step={0.01} onChange={autoApproveThreshold=>onChange({...node,vision:{...vision,autoApproveThreshold}})} /><NumberField label="Minimum visible evidence items" value={vision.minimumEvidence} min={1} max={6} onChange={minimumEvidence=>onChange({...node,vision:{...vision,minimumEvidence}})} /><CheckField label="Require this action's GPS check for automatic approval" checked={vision.requireLocationForAutoApproval} onChange={requireLocationForAutoApproval=>onChange({...node,vision:{...vision,requireLocationForAutoApproval}})} /></div>}
+  </div>;
+}
+
+function ReferenceSetUploader({ node,onChange }: { node:Extract<FlowNode,{type:'verify_image'}>; onChange:(node:Extract<FlowNode,{type:'verify_image'}>)=>void }) {
+  const services=useBuilderMedia(),[busy,setBusy]=useState(false),[error,setError]=useState('');
+  async function upload(files:FileList|null) {
+    if(!services||!files?.length||busy)return;setBusy(true);setError('');
+    try {
+      const available=Math.max(0,30-node.referenceImages.length),selected=Array.from(files).filter(file=>file.type.startsWith('image/')).slice(0,available),urls:string[]=[];
+      if(!selected.length)throw new Error(available?'Choose one or more image files.':'This step already has the maximum 30 references.');
+      for(const file of selected)urls.push((await services.upload(file)).url);
+      const vision=node.vision?{...node.vision,profile:undefined}:undefined;
+      onChange({...node,referenceImages:[...node.referenceImages,...urls],...(vision?{vision}:{})});
+    } catch(reason) {setError(reason instanceof Error?reason.message:'The reference set could not be uploaded.');}
+    finally {setBusy(false);}
+  }
+  if(!services)return null;
+  return <div className="space-y-2"><label className={`${buttonClass} relative inline-flex cursor-pointer overflow-hidden`}>{busy?'Uploading reference set…':'Upload several reference images'}<input type="file" accept="image/*" multiple disabled={busy} className="absolute inset-0 cursor-pointer opacity-0" onChange={event=>{void upload(event.target.files);event.target.value=''}} /></label>{error&&<p role="alert" className="text-sm text-red-700">{error}</p>}<p className="text-xs text-slate-500">Select several images in one picker. A changed reference set requires regenerating its target profile.</p></div>;
+}
+
 export default function NodeEditor({ checkpoint, hunt, node, onChange, onConnect, onAddQrFallback }: {
   checkpoint: CheckpointDefinition; hunt: HuntDefinition; node: FlowNode; onChange: (node: FlowNode) => void;
   onConnect: (choiceId?: string) => void; onAddQrFallback: () => void;
@@ -108,11 +174,12 @@ export default function NodeEditor({ checkpoint, hunt, node, onChange, onConnect
       <p className="text-sm leading-6 text-slate-600">Players compare the scene with your reference. Add a photo or another verification step after this guide when confirmation is needed.</p>
     </>}
     {node.type === 'verify_image' && <>
-      {node.referenceImages.map((image, index) => <div key={index} className="space-y-2"><AssetField label={`Reference image ${index + 1}`} value={image} onChange={url => onChange({ ...node, referenceImages: node.referenceImages.map((candidate, candidateIndex) => candidateIndex === index ? url : candidate) })} /><button type="button" className={buttonClass} onClick={() => onChange({ ...node, referenceImages: node.referenceImages.filter((_, candidateIndex) => candidateIndex !== index) })}>Remove reference</button></div>)}
-      <button type="button" className={buttonClass} onClick={() => onChange({ ...node, referenceImages: [...node.referenceImages, ''] })}>Add reference image</button>
+      {node.referenceImages.map((image, index) => <div key={index} className="space-y-2"><AssetField label={`Reference image ${index + 1}`} value={image} onChange={url => onChange({ ...node, referenceImages: node.referenceImages.map((candidate, candidateIndex) => candidateIndex === index ? url : candidate),...(node.vision?{vision:{...node.vision,profile:undefined}}:{}) })} /><button type="button" className={buttonClass} onClick={() => onChange({ ...node, referenceImages: node.referenceImages.filter((_, candidateIndex) => candidateIndex !== index),...(node.vision?{vision:{...node.vision,profile:undefined}}:{}) })}>Remove reference</button></div>)}
+      <div className="flex flex-wrap gap-2"><button type="button" className={buttonClass} onClick={() => onChange({ ...node, referenceImages: [...node.referenceImages, ''],...(node.vision?{vision:{...node.vision,profile:undefined}}:{}) })}>Add reference image</button><ReferenceSetUploader node={node} onChange={onChange} /></div>
       <CheckField label="Also require a GPS region" checked={Boolean(node.location)} onChange={checked => { const result = { ...node }; if (checked) result.location = { latitude: 0, longitude: 0, radiusMeters: 75, maxAccuracyMeters: 100 }; else delete result.location; onChange(result); }} />
       {node.location && <LocationFields value={node.location} accuracy onChange={location => onChange({ ...node, location: { ...location, radiusMeters: location.radiusMeters!, maxAccuracyMeters: location.maxAccuracyMeters! } })} />}
-      <p className="rounded-lg bg-amber-50 p-3 text-sm leading-6 text-amber-950">Photographs require organizer review. Include an alternative route if the player cannot upload a photo.</p>
+      <VisionEditor node={node} onChange={onChange} />
+      <p className="rounded-lg bg-amber-50 p-3 text-sm leading-6 text-amber-950">Manual organizer review always remains available. Include an alternative route if the player cannot upload a photo.</p>
     </>}
     {node.type === 'verify_organizer' && <p className="rounded-lg bg-teal-50 p-3 text-sm leading-6 text-teal-950">The team waits here until an organizer approves the step. The approval and its reason are recorded.</p>}
     {node.type === 'set_variable' && <><VariableKeyField label="Remembered value name" value={node.key} hunt={hunt} onChange={key => onChange({ ...node, key })} /><ValueEditor value={node.value} onChange={value => onChange({ ...node, value })} />{(() => { const known = knownVariables(hunt).find(variable => variable.key === node.key); return known && (known.types.size > 1 || !known.types.has(typeof node.value)) ? <p className="rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-900">This variable is assigned with more than one value type. Prefer one consistent type throughout the hunt.</p> : null; })()}</>}
