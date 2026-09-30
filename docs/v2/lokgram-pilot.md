@@ -90,9 +90,10 @@ Question bank (one correct answer each):
 Use the engine’s threshold-quiz implementation so that three correct answers
 unlock the checkpoint, each later correct answer adds two points, and question
 order is fixed for a team. A wrong answer closes that question instead of
-allowing brute-force retries. A skip moves to the next question and charges a
-single two-point penalty in the server score ledger. Do not make the player
-enter an extracted word.
+allowing brute-force retries. A skip moves to the next question without a
+penalty in this pilot. The engine still supports an explicit per-question skip
+cost for hunts that intentionally want one. Do not make the player enter an
+extracted word.
 
 ### 4. The Quiet Corner
 
@@ -112,6 +113,11 @@ public landmark. The image must not show children, private homes, vehicle
 number plates, or a school interior. After completion:
 
 > The picture is complete. Look for the place of bells, books, and bright minds.
+
+Organizers can upload one source image in the jigsaw editor and choose the
+grid size; the server creates the individual tiles and the same tiles are
+available in a player preview. Do not ask the organizer to prepare or upload
+each tile manually.
 
 ### 6. Bells, Books, Belonging
 
@@ -220,7 +226,7 @@ hint once per team.
 4. Photograph only organizer-owned/reference material for the jigsaw; obtain
    permission before using any identifiable venue image.
 5. Generate and visually inspect all four word-search and crossword variants.
-6. Confirm the quiz’s three-correct progression and bonus scoring in a player
-   preview.
+6. Confirm the quiz’s three-correct progression, penalty-free skips, and bonus
+   scoring in a player preview.
 7. Confirm the prize shop’s consent, redemption process, and fallback contact.
 8. Publish only after the organizer has replaced every field-test placeholder.

@@ -148,7 +148,7 @@ export const puzzleRegistry: Readonly<Record<PuzzleType, RegistryEntry>> = Objec
       const rewards: PuzzleReward[] = []
       if (status === 'skipped' && question.skipPenalty) rewards.push({ id: `quiz:skip:${question.id}`, amount: -question.skipPenalty, kind: 'skip_penalty', label: `Skipped quiz question: ${question.id}` })
       if (status === 'correct' && definition.bonusPerAdditionalCorrect && correctCount > definition.minimumCorrect) rewards.push({ id: `quiz:bonus:${question.id}`, amount: definition.bonusPerAdditionalCorrect, kind: 'action_points', label: `Extra correct quiz answer: ${question.id}` })
-      return { state: { type: 'quiz', responses, correctCount }, completed, ...(rewards.length ? { rewards } : {}), message: skip ? `Question skipped. −${question.skipPenalty ?? 0} points.` : status === 'correct' ? completed ? 'Correct — the quiz threshold is complete.' : `Correct — ${correctCount} correct so far.` : 'That answer is not correct. This question is closed; continue with the next one.' }
+      return { state: { type: 'quiz', responses, correctCount }, completed, ...(rewards.length ? { rewards } : {}), message: skip ? question.skipPenalty ? `Question skipped. −${question.skipPenalty} points.` : 'Question skipped. Continue with the next one.' : status === 'correct' ? completed ? 'Correct — the quiz threshold is complete.' : `Correct — ${correctCount} correct so far.` : 'That answer is not correct. This question is closed; continue with the next one.' }
     },
   }),
   matching: createPuzzleModule('matching', {

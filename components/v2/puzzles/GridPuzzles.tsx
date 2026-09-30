@@ -16,10 +16,28 @@ function moveFocus(event: KeyboardEvent<HTMLInputElement>, row: number, column: 
   }
 }
 
+type CrosswordDirection = 'across' | 'down'
+
+function focusCrosswordCell(row: number, column: number, direction: CrosswordDirection, offset: number, entries: { row: number; column: number; length: number; direction: CrosswordDirection }[]) {
+  const entry = entries.find(candidate => candidate.direction === direction && Array.from({ length: candidate.length }, (_, index) => `${candidate.row + (direction === 'down' ? index : 0)}:${candidate.column + (direction === 'across' ? index : 0)}`).includes(`${row}:${column}`))
+  if (!entry) return
+  const currentIndex = direction === 'across' ? column - entry.column : row - entry.row
+  const nextIndex = currentIndex + offset
+  if (nextIndex < 0 || nextIndex >= entry.length) return
+  const nextRow = entry.row + (direction === 'down' ? nextIndex : 0)
+  const nextColumn = entry.column + (direction === 'across' ? nextIndex : 0)
+  window.setTimeout(() => {
+    const grid = document.querySelector('[data-puzzle-grid]')
+    const cell = grid?.querySelector<HTMLInputElement>(`input[data-row="${nextRow}"][data-column="${nextColumn}"]`)
+    if (cell) { cell.focus(); cell.select() }
+  }, 0)
+}
+
 export default function GridPuzzles({ definition, state, disabled, onChange }: PuzzlePlayerProps) {
   const instanceId = useId().replace(/:/g, '')
   const crosswordColumns = definition.type === 'crossword' ? definition.columns : 0
   const [enlarged, setEnlarged] = useState(crosswordColumns > 10)
+  const [activeDirection, setActiveDirection] = useState<CrosswordDirection>('across')
   const { submit, busy, error } = usePuzzleSubmission(onChange)
   const locked = disabled || busy
 
@@ -47,16 +65,23 @@ export default function GridPuzzles({ definition, state, disabled, onChange }: P
 
   const occupied = new Set<string>()
   const starts = new Map<string, number>()
+  const cellDirections = new Map<string, CrosswordDirection[]>()
   definition.entries.forEach((entry, index) => {
     const key = `${entry.row}:${entry.column}`
     if (!starts.has(key)) starts.set(key, index + 1)
-    for (let i = 0; i < entry.length; i++) occupied.add(`${entry.row + (entry.direction === 'down' ? i : 0)}:${entry.column + (entry.direction === 'across' ? i : 0)}`)
+    for (let i = 0; i < entry.length; i++) {
+      const cell = `${entry.row + (entry.direction === 'down' ? i : 0)}:${entry.column + (entry.direction === 'across' ? i : 0)}`
+      occupied.add(cell)
+      const directions = cellDirections.get(cell) || []
+      if (!directions.includes(entry.direction)) directions.push(entry.direction)
+      cellDirections.set(cell, directions)
+    }
   })
   const dense = definition.columns > 10
   const expandedWidth = definition.columns * 44 + Math.max(0, definition.columns - 1) + 2
 
   return <div>
-    <p className="mb-3 text-sm text-stone-600">Use the clues to fill the white squares. Your letters are saved after each change. Arrow keys move between squares.</p>
+    <p className="mb-3 text-sm text-stone-600">Use the clues to fill the white squares. Type a letter and the next square in that word opens automatically; the keyboard stays ready for the next letter. Tap a crossing square again to switch between across and down.</p>
     {dense && <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-950">
       <p className="min-w-0 flex-1">Large crossword: {enlarged ? 'swipe inside the grid to pan between easier-to-tap boxes.' : 'the whole board is fitted to the screen, so boxes are smaller.'}</p>
       <button type="button" aria-pressed={enlarged} onClick={() => setEnlarged(value => !value)} className="min-h-11 rounded-lg border border-sky-700 bg-white px-3 font-semibold">{enlarged ? 'Fit whole grid' : 'Enlarge grid'}</button>
@@ -68,11 +93,12 @@ export default function GridPuzzles({ definition, state, disabled, onChange }: P
           if (!occupied.has(key)) return <div key={key} aria-hidden="true" className="aspect-square min-h-0 min-w-0 bg-stone-800" />
           return <label key={key} className="relative aspect-square min-h-0 min-w-0 bg-white">
             {starts.has(key) && <span aria-hidden="true" className="pointer-events-none absolute left-0.5 top-0 text-[clamp(0.35rem,1.7vw,0.625rem)] font-semibold leading-none">{starts.get(key)}</span>}
-            <input data-row={r} data-column={c} value={cell} maxLength={1} autoCapitalize="characters" autoComplete="off" readOnly={locked} onFocus={event => event.currentTarget.select()} onKeyDown={event => moveFocus(event, r, c, definition.rows, definition.columns)} aria-label={`Row ${r + 1}, column ${c + 1}${starts.has(key) ? `, clue ${starts.get(key)}` : ''}`} className={`h-full w-full min-w-0 appearance-none bg-white pt-[12%] text-center text-[clamp(0.6rem,4vw,1.125rem)] uppercase leading-none text-emerald-950 focus:outline-emerald-600 ${locked ? 'opacity-60' : ''}`} onChange={event => {
+            <input data-row={r} data-column={c} value={cell} maxLength={1} autoCapitalize="characters" autoComplete="off" readOnly={locked} onFocus={event => { event.currentTarget.select(); const directions = cellDirections.get(key) || []; if (!directions.includes(activeDirection)) setActiveDirection(directions[0] || 'across') }} onKeyDown={event => { if (event.key === 'Backspace' && !cell) focusCrosswordCell(r, c, activeDirection, -1, definition.entries); else moveFocus(event, r, c, definition.rows, definition.columns) }} onClick={() => { const directions = cellDirections.get(key) || []; if (directions.length > 1) setActiveDirection(direction => direction === 'across' ? 'down' : 'across') }} aria-label={`Row ${r + 1}, column ${c + 1}${starts.has(key) ? `, clue ${starts.get(key)}` : ''}`} className={`h-full w-full min-w-0 appearance-none bg-white pt-[12%] text-center text-[clamp(0.6rem,4vw,1.125rem)] uppercase leading-none text-emerald-950 focus:outline-emerald-600 ${locked ? 'opacity-60' : ''}`} onChange={event => {
               if (locked) return
               const value = event.target.value.toUpperCase()
               if (!/^[A-Z]?$/.test(value)) return
               const grid = state.grid.map(line => [...line]); grid[r][c] = value
+              if (value) focusCrosswordCell(r, c, activeDirection, 1, definition.entries)
               void submit({ grid })
             }} />
           </label>

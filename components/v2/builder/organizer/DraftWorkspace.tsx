@@ -51,6 +51,7 @@ export default function DraftWorkspace({ dashboard, pending, run, refresh, notif
   const mediaServices = useMemo(() => ({
     list: async () => (await adminRequest<{ media: Asset[] }>('/api/v2/admin/media')).media,
     upload: async (file: File) => { const form = new FormData(); form.set('file', file); form.set('requestId', requestId()); return (await adminRequest<{ media: Asset }>('/api/v2/admin/media', 'POST', form)).media; },
+    makeJigsaw: async (mediaId: string, rows: number, columns: number) => (await adminRequest<{ puzzle: PuzzleDefinition }>('/api/v2/admin/media', 'POST', { mediaId, rows, columns })).puzzle,
   }), []);
 
   useEffect(() => {

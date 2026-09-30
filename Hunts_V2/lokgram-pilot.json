@@ -688,7 +688,7 @@
             "id": "quiz",
             "type": "puzzle",
             "clue": "“Satyamev Jayate” means “Truth alone triumphs.” Work together and choose the fairest, most evidence-based response.",
-            "prompt": "Answer three questions correctly to continue. Wrong answers close only that question; skipping costs 2 points.",
+            "prompt": "Answer any three questions correctly to continue. You may skip the others without losing points.",
             "puzzle": {
               "type": "quiz",
               "minimumCorrect": 3,
@@ -711,8 +711,7 @@
                       "label": "Let one person decide without asking."
                     }
                   ],
-                  "correctOptionId": "vote-0",
-                  "skipPenalty": 2
+                  "correctOptionId": "vote-0"
                 },
                 {
                   "id": "source",
@@ -731,8 +730,7 @@
                       "label": "Guess."
                     }
                   ],
-                  "correctOptionId": "source-0",
-                  "skipPenalty": 2
+                  "correctOptionId": "source-0"
                 },
                 {
                   "id": "listen",
@@ -751,8 +749,7 @@
                       "label": "Ignore the speaker."
                     }
                   ],
-                  "correctOptionId": "listen-0",
-                  "skipPenalty": 2
+                  "correctOptionId": "listen-0"
                 },
                 {
                   "id": "park",
@@ -771,8 +768,7 @@
                       "label": "Move it somewhere hidden."
                     }
                   ],
-                  "correctOptionId": "park-0",
-                  "skipPenalty": 2
+                  "correctOptionId": "park-0"
                 },
                 {
                   "id": "ideas",
@@ -791,8 +787,7 @@
                       "label": "Choose randomly."
                     }
                   ],
-                  "correctOptionId": "ideas-0",
-                  "skipPenalty": 2
+                  "correctOptionId": "ideas-0"
                 },
                 {
                   "id": "rule",
@@ -811,8 +806,7 @@
                       "label": "So the fastest team wins automatically."
                     }
                   ],
-                  "correctOptionId": "rule-0",
-                  "skipPenalty": 2
+                  "correctOptionId": "rule-0"
                 },
                 {
                   "id": "mistake",
@@ -831,8 +825,7 @@
                       "label": "Blame another teammate."
                     }
                   ],
-                  "correctOptionId": "mistake-0",
-                  "skipPenalty": 2
+                  "correctOptionId": "mistake-0"
                 },
                 {
                   "id": "space",
@@ -851,8 +844,7 @@
                       "label": "Blocking a public path."
                     }
                   ],
-                  "correctOptionId": "space-0",
-                  "skipPenalty": 2
+                  "correctOptionId": "space-0"
                 },
                 {
                   "id": "evidence",
@@ -871,8 +863,7 @@
                       "label": "A secret source nobody can inspect."
                     }
                   ],
-                  "correctOptionId": "evidence-0",
-                  "skipPenalty": 2
+                  "correctOptionId": "evidence-0"
                 },
                 {
                   "id": "team",
@@ -891,8 +882,7 @@
                       "label": "Rushing."
                     }
                   ],
-                  "correctOptionId": "team-0",
-                  "skipPenalty": 2
+                  "correctOptionId": "team-0"
                 }
               ]
             },

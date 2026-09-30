@@ -26,7 +26,7 @@ test('Lokgram uses unified clue-plus-verification tasks and the threshold quiz',
     if (quiz.puzzle.type === 'quiz') {
       assert.equal(quiz.puzzle.questions.length, 10)
       assert.equal(quiz.puzzle.minimumCorrect, 3)
-      assert.ok(quiz.puzzle.questions.every(question => question.skipPenalty === 2))
+      assert.ok(quiz.puzzle.questions.every(question => question.skipPenalty === undefined))
     }
   }
 })

@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { initialPuzzleState, publicPuzzle, puzzleHintItems, puzzleHintItemSolved, PuzzleError, updatePuzzle, validatePuzzle, type PuzzleDefinition, type PuzzleState } from '../lib/engine/puzzles'
+import { autoArrangeCrossword } from '../lib/engine/puzzles/crossword-layout'
 
 const fixtures: Record<PuzzleDefinition['type'], PuzzleDefinition> = {
   jigsaw: { type: 'jigsaw', rows: 2, columns: 2, pieces: ['sky', 'river', 'stone', 'leaf'].map(id => ({ id, imageUrl: `/tiles/${id}.png` })), solution: ['river', 'stone', 'leaf', 'sky'] },
@@ -117,6 +118,16 @@ test('crossword keeps answers private and checks letters and black squares', () 
   assert.ok(!JSON.stringify(projection).includes('CAT'))
   assert.ok(!JSON.stringify(projection).includes('CAR'))
   if (projection.type === 'crossword') assert.equal(projection.entries[0].length, 3)
+})
+
+test('crossword auto-layout creates a valid crossing-first arrangement for authored answers', () => {
+  const entries = autoArrangeCrossword([
+    { id: 'cat', clue: 'A pet', answer: 'CAT', row: 0, column: 0, direction: 'across' },
+    { id: 'art', clue: 'Creative work', answer: 'ART', row: 0, column: 0, direction: 'across' },
+    { id: 'tea', clue: 'A warm drink', answer: 'TEA', row: 0, column: 0, direction: 'across' },
+  ], 7, 7)
+  assert.deepEqual(validatePuzzle({ type: 'crossword', rows: 7, columns: 7, entries }), [])
+  assert.ok(entries.some(entry => entry.direction === 'down'))
 })
 
 test('quiz closes answered questions, applies skip penalties, and completes at its threshold', () => {

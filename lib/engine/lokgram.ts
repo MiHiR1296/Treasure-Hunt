@@ -33,7 +33,6 @@ const truthQuiz = {
     prompt,
     options: labels.map((label, optionIndex) => ({ id: `${id}-${optionIndex}`, label })),
     correctOptionId: `${id}-0`,
-    skipPenalty: 2,
   })),
 }
 
@@ -123,7 +122,7 @@ export const lokgramPilotHunt: HuntDefinition = {
       text('reveal', 'Books, pages, quiet corners, and curious minds point you toward the Satyamev Jayate Public Library area.', 'done'), finish(),
     ] }, hints: [{ id: 'word-search-help', title: 'Reveal one word', cost: 3, content: { type: 'text', text: 'Start with the shortest word in your list and scan across each row.' } }] },
     { id: 'truth-in-action', title: '3 · Truth in Action', basePoints: 10, flow: { startNodeId: 'quiz', nodes: [
-      { id: 'quiz', type: 'puzzle', clue: '“Satyamev Jayate” means “Truth alone triumphs.” Work together and choose the fairest, most evidence-based response.', prompt: 'Answer three questions correctly to continue. Wrong answers close only that question; skipping costs 2 points.', puzzle: truthQuiz, next: 'done' },
+      { id: 'quiz', type: 'puzzle', clue: '“Satyamev Jayate” means “Truth alone triumphs.” Work together and choose the fairest, most evidence-based response.', prompt: 'Answer any three questions correctly to continue. You may skip the others without losing points.', puzzle: truthQuiz, next: 'done' },
       finish(),
     ] }, hints: [{ id: 'truth-nudge', title: 'A gentle nudge', cost: 2, content: { type: 'text', text: 'Choose the answer that is fair, evidence-based, and considerate of others.' } }] },
     { id: 'satyamev-library', title: '4 · The Quiet Corner', basePoints: 10, flow: { startNodeId: 'arrival', nodes: [
