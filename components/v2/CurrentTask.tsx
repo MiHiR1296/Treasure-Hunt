@@ -60,7 +60,8 @@ export default function CurrentTask({ teamId, checkpointId, node, disabled, send
       setLocationMessage(error.code === 1 ? 'Location permission is blocked. Enable it in your browser settings and try again, or use Need help below.' : 'We could not get a reliable location. Move to an open area and retry, use an available fallback, or ask your organizer for help.');
     }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
   };
-  const showPuzzleInstructions = node.type === 'puzzle' && node.puzzle.type !== 'text' && node.puzzle.type !== 'multiple_choice';
+  const puzzlePrompt = node.type === 'puzzle' && 'prompt' in node.puzzle ? node.puzzle.prompt : undefined;
+  const showPuzzleInstructions = node.type !== 'puzzle' || puzzlePrompt === undefined || node.prompt.trim() !== puzzlePrompt.trim();
   return <div className="space-y-6">
     {'clue' in node && typeof node.clue === 'string' && node.clue && <TaskCopy text={node.clue} />}
     {node.type === 'show_text' ? <TaskCopy text={node.text} /> : 'prompt' in node && typeof node.prompt === 'string' && (node.type !== 'puzzle' || showPuzzleInstructions) ? <TaskCopy text={node.prompt} /> : null}

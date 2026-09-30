@@ -130,6 +130,15 @@ test('crossword auto-layout creates a valid crossing-first arrangement for autho
   assert.ok(entries.some(entry => entry.direction === 'down'))
 })
 
+test('crossword auto-layout does not overlap related answers in the same direction', () => {
+  const entries = autoArrangeCrossword([
+    { id: 'book', clue: 'Something with pages', answer: 'BOOK', row: 0, column: 0, direction: 'across' },
+    { id: 'books', clue: 'More than one volume', answer: 'BOOKS', row: 2, column: 0, direction: 'across' },
+  ], 9, 9)
+  assert.deepEqual(validatePuzzle({ type: 'crossword', rows: 9, columns: 9, entries }), [])
+  assert.notDeepEqual(entries.map(entry => `${entry.row}:${entry.column}:${entry.direction}`), ['4:4:across', '4:4:across'])
+})
+
 test('quiz closes answered questions, applies skip penalties, and completes at its threshold', () => {
   const definition = fixtures.quiz
   if (definition.type !== 'quiz') throw new Error('Fixture')
@@ -157,7 +166,7 @@ test('quiz keeps the bonus path open after the threshold until the team explicit
   const threshold = updatePuzzle(definition, state, { questionId: 'one', optionId: 'sun', skip: false })
   assert.equal(threshold.completed, false)
   const extra = updatePuzzle(definition, threshold.state, { questionId: 'two', optionId: 'moon', skip: false })
-  assert.deepEqual(extra.rewards, [{ id: 'quiz:bonus:two', amount: 3, kind: 'action_points', label: 'Extra correct quiz answer: two' }])
+  assert.deepEqual(extra.rewards, [{ id: 'quiz:bonus:1', amount: 3, kind: 'action_points', label: 'Extra correct quiz answer: two' }])
   assert.equal(extra.completed, false)
   state = extra.state
   assert.equal(updatePuzzle(definition, state, { finish: true }).completed, true)

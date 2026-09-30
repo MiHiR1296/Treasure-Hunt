@@ -10,6 +10,7 @@ export interface CrosswordLayoutEntry {
 /** Arrange authored answers into a compact, crossing-first layout for the builder. */
 export function autoArrangeCrossword(entries: CrosswordLayoutEntry[], rows: number, columns: number): CrosswordLayoutEntry[] {
   const board = Array.from({ length: rows }, () => Array<string>(columns).fill(''))
+  const boardDirections = new Map<string, Set<'across' | 'down'>>()
   const placed: CrosswordLayoutEntry[] = []
   const cells = (entry: CrosswordLayoutEntry, row: number, column: number, direction: 'across' | 'down') => [...entry.answer.toUpperCase()].map((letter, index) => ({
     row: row + (direction === 'down' ? index : 0),
@@ -21,6 +22,7 @@ export function autoArrangeCrossword(entries: CrosswordLayoutEntry[], rows: numb
     if (!candidate.length || candidate.some(cell => cell.row < 0 || cell.column < 0 || cell.row >= rows || cell.column >= columns)) return null
     let crossings = 0
     for (const cell of candidate) {
+      if (boardDirections.get(`${cell.row}:${cell.column}`)?.has(direction)) return null
       const existing = board[cell.row][cell.column]
       if (existing && existing !== cell.letter) return null
       if (existing === cell.letter) crossings++
@@ -42,7 +44,13 @@ export function autoArrangeCrossword(entries: CrosswordLayoutEntry[], rows: numb
     }
     const chosen = candidates.sort((a, b) => b.crossings - a.crossings || a.distance - b.distance)[0]
     if (!chosen) { placed.push({ ...original }); continue }
-    for (const cell of chosen.candidate) board[cell.row][cell.column] = cell.letter
+    for (const cell of chosen.candidate) {
+      board[cell.row][cell.column] = cell.letter
+      const key = `${cell.row}:${cell.column}`
+      const directions = boardDirections.get(key) || new Set<'across' | 'down'>()
+      directions.add(chosen.direction)
+      boardDirections.set(key, directions)
+    }
     placed.push({ ...original, row: chosen.row, column: chosen.column, direction: chosen.direction })
   }
   return placed

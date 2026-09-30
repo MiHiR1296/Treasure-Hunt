@@ -19,6 +19,14 @@ function bonusWordSearchHunt(): HuntDefinition {
   return hunt([cp('first', [{ id: 'puzzle', type: 'puzzle', prompt: 'Find the animals', puzzle: { type: 'word_search', grid: [['C', 'A', 'T'], ['D', 'O', 'G'], ['O', 'W', 'L']], words: ['CAT', 'DOG', 'OWL'], minimumWords: 1, bonusPerExtraWord: 2 }, next: 'done' }, { id: 'done', type: 'complete' }])])
 }
 
+function bonusQuizHunt(): HuntDefinition {
+  const questions = Array.from({ length: 10 }, (_, index) => {
+    const id = `question-${index + 1}`
+    return { id, prompt: `Question ${index + 1}`, options: [{ id: `${id}-correct`, label: 'Correct' }, { id: `${id}-other`, label: 'Other' }], correctOptionId: `${id}-correct` }
+  })
+  return hunt([cp('first', [{ id: 'puzzle', type: 'puzzle', prompt: 'Answer the quiz', puzzle: { type: 'quiz', minimumCorrect: 3, bonusPerAdditionalCorrect: 2, questions }, next: 'done' }, { id: 'done', type: 'complete' }])])
+}
+
 test('puzzle save is durable and private, stale teammate edits are rejected, submission advances once', () => {
   const h = puzzleHunt(), original = createInitialState(h, 'team', now)
   const initial = copy(original), publicView = getPlayerView(h, original, now)
@@ -183,6 +191,22 @@ test('word-search bonus slots stay capped across changed order, duplicate submis
   assert.equal(state.score, 24)
   assert.equal(activeAwards(state).length, 2)
   assert.equal(state.ledger.filter(entry => entry.kind === 'action_points').length, 4, 'the replay appends a new compensated ledger generation')
+})
+
+test('quiz bonus slots stay capped when an organizer resets and changes answer order', () => {
+  const h = bonusQuizHunt()
+  const submit = (state: GameState, questionId: string) => executeCommand(h, state, { type: 'submit_puzzle', checkpointId: 'first', nodeId: 'puzzle', expectedRevision: state.checkpoints.first.nodes.puzzle.puzzle!.revision, value: { questionId, optionId: `${questionId}-correct`, skip: false } }, now).state
+  const activeAwards = (state: GameState) => state.ledger.filter(entry => entry.kind === 'action_points' && entry.nodeId === 'puzzle' && !state.ledger.some(refund => refund.reverses === entry.id))
+  let state = createInitialState(h, 'team', now)
+  for (let index = 1; index <= 10; index++) state = submit(state, `question-${index}`)
+  assert.deepEqual(activeAwards(state).map(entry => entry.id), Array.from({ length: 7 }, (_, index) => `puzzle:first:puzzle:quiz:bonus:${index + 1}`))
+  assert.equal(state.score, 14)
+
+  state = executeControl(h, state, { type: 'reset_action', checkpointId: 'first', nodeId: 'puzzle', expectedRevision: state.revision, reason: 'Try a different order' }, now).state
+  for (let index = 4; index <= 10; index++) state = submit(state, `question-${index}`)
+  for (let index = 1; index <= 3; index++) state = submit(state, `question-${index}`)
+  assert.equal(state.score, 14)
+  assert.equal(activeAwards(state).length, 7)
 })
 
 test('targeted hints unlock from step attempts, expire after the answer is solved, and never charge a stale purchase', () => {
