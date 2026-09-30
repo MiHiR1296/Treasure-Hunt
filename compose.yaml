@@ -24,6 +24,8 @@ services:
       ORGANIZER_PASSWORD: ${ORGANIZER_PASSWORD:?Set ORGANIZER_PASSWORD in .env}
       APP_ORIGIN: ${APP_ORIGIN:-http://localhost:3000}
       ADDITIONAL_ORIGINS: ${ADDITIONAL_ORIGINS:-}
+      VISION_WORKER_TOKEN: ${VISION_WORKER_TOKEN:-}
+      VISION_MODEL: ${VISION_MODEL:-qwen3.8:27b-mlx}
       ENABLE_LEGACY_V1: "false"
     depends_on:
       db:

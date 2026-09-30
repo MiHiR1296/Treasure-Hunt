@@ -106,6 +106,15 @@ async function readRecord(id: string): Promise<MediaRecord> {
   return rows[0];
 }
 
+/** Caller must first prove the media belongs to an active vision-job lease. */
+export async function readVisionMedia(id: string) {
+  const media = await readRecord(id)
+  return { media, bytes: await readMediaBytes(media.storage_key) }
+}
+
+/** Caller must first prove the media belongs to an active vision-job lease. */
+export async function authorizeVisionMediaRecord(id: string) { return readRecord(id) }
+
 export async function canReadMedia(request: NextRequest, media: MediaRecord) {
   const admin = request.cookies.get(ADMIN_COOKIE)?.value;
   if (admin) {

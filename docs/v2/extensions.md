@@ -68,7 +68,7 @@ The generic engine owns revision/event/advance behavior. Automatic or display-on
 4. Before applying a result, reload the team and require the same pending photo/action. Use an idempotent request ID and the latest expected team revision through the server command boundary. Stale/mismatched evidence must not approve another action.
 5. Apply organizer/service-authorized approval or rejection using the ordinary engine path; append audit information and respect media retention. Never expose a privileged result endpoint to ordinary team sessions.
 
-The shipped UI/API authorizes human organizers. A production automated worker needs its own explicit authenticated service boundary, provider adapter, confidence/error policy and tests; those integrations are not secretly active today. No model API key is required for current photo review.
+The optional local worker follows this boundary. It uses a dedicated bearer secret, durable leased jobs, job-scoped private-media access, structured bounded results, and the ordinary revisioned control path. Shadow and assisted modes never change team state. Explicit per-action automatic mode can approve only a two-pass match that also satisfies the server policy; it never automatically rejects a submission. See [local vision review](local-vision-review.md). No external model API key is required.
 
 ## Add a hint content renderer
 

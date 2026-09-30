@@ -12,6 +12,7 @@ import { getPool, transaction } from './db';
 import { assertPlayable, listDrafts } from './hunts';
 import type { HuntStatus } from './hunts';
 import { canonicalJson, createSessionToken, digest, hashPin, HttpError, rateLimit, SESSION_SECONDS, verifyPin } from './security';
+import { enqueuePhotoVisionJob, latestVisionWorker, visionQueueSummary } from './vision-jobs';
 
 export { listHunts, publishHunt, setHuntStatus } from './hunts';
 export interface TeamRecord { id: string; name: string; hunt_id: string; state: GameState; definition: HuntDefinition; status: HuntStatus; is_preview: boolean; last_activity: string; created_at: string }
@@ -184,6 +185,15 @@ export async function applyTeamCommand(teamId: string, requestId: string, input:
       if (type === 'extend_session' && hunts[0].status === 'paused') result.state = pauseSession(result.state, now);
     }
     if (!result.state.routeAssignments) result.state.routeAssignments = assignRoutes(definition, teamId, now);
+    if (!mode && type === 'submit_photo') {
+      const submitted = command as Extract<ReturnType<typeof parseCommand>, { type: 'submit_photo' }>;
+      const configured = definition.checkpoints.find(item => item.id === submitted.checkpointId)?.flow.nodes.find(item => item.id === submitted.nodeId);
+      const progress = result.state.checkpoints[submitted.checkpointId]?.nodes[submitted.nodeId];
+      if (configured?.type === 'verify_image' && configured.vision && progress?.pendingPhotoId === submitted.mediaId && progress.photoStatus === 'pending') {
+        await enqueuePhotoVisionJob(client, { huntId: teams[0].hunt_id, definitionVersion: state.definitionVersion, teamId, mediaId: submitted.mediaId,
+          checkpointId: submitted.checkpointId, nodeId: submitted.nodeId, referenceImages: configured.referenceImages, configuration: configured.vision });
+      }
+    }
     // Review the exact photograph consumed by this transition, inside its receipt
     // transaction. Replaying an old approval must never delete a later upload.
     for (const [checkpointId, checkpoint] of Object.entries(state.checkpoints)) {
@@ -195,6 +205,8 @@ export async function applyTeamCommand(teamId: string, requestId: string, input:
         await client.query(`update hunt_v2.media set reviewed_at=$3,
           expires_at=case when retention='after_review' then $3::timestamptz else expires_at end
           where id=$1 and team_id=$2 and kind='photo'`, [node.pendingPhotoId, teamId, now]);
+        await client.query(`update hunt_v2.vision_jobs set status='cancelled',apply_status=case when apply_status='approved' then 'approved' else 'stale' end,
+          lease_expires_at=null,updated_at=$3 where media_id=$1 and team_id=$2 and status in ('queued','leased')`, [node.pendingPhotoId,teamId,now]);
       }
     }
     await client.query('update hunt_v2.teams set state=$1,last_activity=$3 where id=$2', [result.state, teamId, now]);
@@ -218,8 +230,11 @@ export async function organizerSnapshot() {
   const now = new Date((await getPool().query('select clock_timestamp() as at')).rows[0].at).toISOString();
   const teamCount = await getPool().query('select count(*)::int as count from hunt_v2.teams');
   const { rows: help } = await getPool().query(`select r.*,t.name as team_name,t.hunt_id from hunt_v2.help_requests r join hunt_v2.teams t on t.id=r.team_id order by r.created_at desc limit 300`);
-  const { rows: photos } = await getPool().query(`select m.id,m.team_id,m.checkpoint_id,m.node_id,m.created_at,t.name as team_name,t.hunt_id,v.definition from hunt_v2.media m join hunt_v2.teams t on t.id=m.team_id
+  const { rows: photos } = await getPool().query(`select m.id,m.team_id,m.checkpoint_id,m.node_id,m.created_at,t.name as team_name,t.hunt_id,v.definition,
+    case when j.id is null then null else jsonb_build_object('jobId',j.id,'status',j.status,'result',j.result,'applyStatus',j.apply_status,'model',j.model,'promptVersion',j.prompt_version,'lastError',j.last_error,'createdAt',j.created_at,'completedAt',j.completed_at) end as vision
+    from hunt_v2.media m join hunt_v2.teams t on t.id=m.team_id
     join hunt_v2.hunt_versions v on v.hunt_id=t.hunt_id and v.version=(t.state->>'definitionVersion')::int
+    left join hunt_v2.vision_jobs j on j.media_id=m.id and j.kind='photo_review'
     where m.kind='photo' and m.reviewed_at is null and (m.expires_at is null or m.expires_at>now())
     and t.state->'checkpoints'->m.checkpoint_id->'nodes'->m.node_id->>'pendingPhotoId'=m.id::text
     and t.state->'checkpoints'->m.checkpoint_id->'nodes'->m.node_id->>'photoStatus'='pending'
@@ -231,7 +246,7 @@ export async function organizerSnapshot() {
     const node = (definition as HuntDefinition).checkpoints.find(checkpoint => checkpoint.id === photo.checkpoint_id)?.flow.nodes.find(node => node.id === photo.node_id);
     return { ...fields, referenceImages: node?.type === 'verify_image' ? node.referenceImages : [] };
   });
-  return { hunts, drafts: await listDrafts(), help, photos: reviewPhotos, teamTotal: teamCount.rows[0].count, teams: teams.map((team: TeamRecord) => ({
+  return { hunts, drafts: await listDrafts(), help, photos: reviewPhotos, visionWorker: await latestVisionWorker(), visionQueue: await visionQueueSummary(), teamTotal: teamCount.rows[0].count, teams: teams.map((team: TeamRecord) => ({
     id: team.id, name: team.name, huntId: team.hunt_id, version: team.state.definitionVersion, isPreview: team.is_preview, lastActivity: team.last_activity,
     view: organizerSummaryView(team, now), ledger: [], events: team.state.events,
     checkpoints: {}, detailed: false,

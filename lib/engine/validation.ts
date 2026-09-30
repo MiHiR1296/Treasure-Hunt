@@ -109,7 +109,7 @@ export function validateHunt(value: unknown): ValidationIssue[] {
         if (!isObject(node)) { issue(np, 'Must be a node object.'); return }
         const fields: Record<string, string[]> = {
           show_text: ['text', 'next'], show_media: ['content', 'next'], verify_qr: ['prompt', 'token', 'backupCode', 'next'], verify_code: ['prompt', 'code', 'caseSensitive', 'recapAnswer', 'next'], verify_answer: ['prompt', 'answers', 'caseSensitive', 'recapAnswer', 'recordAnswerAttempts', 'next'],
-          verify_gps: ['prompt', 'latitude', 'longitude', 'radiusMeters', 'maxAccuracyMeters', 'next'], choose_path: ['prompt', 'choices'], puzzle: ['prompt', 'puzzle', 'next'], camera_guide: ['prompt', 'referenceImageUrl', 'latitude', 'longitude', 'next'], verify_organizer: ['prompt', 'next'], verify_image: ['prompt', 'referenceImages', 'location', 'next'],
+          verify_gps: ['prompt', 'latitude', 'longitude', 'radiusMeters', 'maxAccuracyMeters', 'next'], choose_path: ['prompt', 'choices'], puzzle: ['prompt', 'puzzle', 'next'], camera_guide: ['prompt', 'referenceImageUrl', 'latitude', 'longitude', 'next'], verify_organizer: ['prompt', 'next'], verify_image: ['prompt', 'referenceImages', 'location', 'vision', 'next'],
           set_variable: ['key', 'value', 'next'], branch: ['condition', 'ifTrue', 'ifFalse'], random_branch: ['choices'], add_points: ['amount', 'label', 'next'], complete: [],
         }
         if (typeof node.type !== 'string' || !Object.hasOwn(fields, node.type)) { issue(`${np}.type`, 'Unsupported action type.'); return }
@@ -128,7 +128,43 @@ export function validateHunt(value: unknown): ValidationIssue[] {
         if (node.recapAnswer !== undefined) string(node.recapAnswer, `${np}.recapAnswer`, 500)
         if (node.type === 'verify_gps') { coordinates(node, np); number(node.radiusMeters, `${np}.radiusMeters`, 1, 100000); number(node.maxAccuracyMeters, `${np}.maxAccuracyMeters`, 1, 100000) }
         if (node.type === 'camera_guide') { optionalCoordinates(node, np); if (node.referenceImageUrl !== undefined) url(node.referenceImageUrl, `${np}.referenceImageUrl`) }
-        if (node.type === 'verify_image') { if (array(node.referenceImages, `${np}.referenceImages`, 0, 30)) node.referenceImages.forEach((ref, i) => url(ref, `${np}.referenceImages[${i}]`)); if (node.location !== undefined) region(node.location, `${np}.location`, true) }
+        if (node.type === 'verify_image') {
+          const references = Array.isArray(node.referenceImages) ? node.referenceImages : []
+          const referencesValid = array(node.referenceImages, `${np}.referenceImages`, 0, 30)
+          if (referencesValid) references.forEach((ref, i) => url(ref, `${np}.referenceImages[${i}]`))
+          if (node.location !== undefined) region(node.location, `${np}.location`, true)
+          if (node.vision !== undefined && object(node.vision, `${np}.vision`, ['mode', 'targetName', 'scope', 'profile', 'autoApproveThreshold', 'minimumEvidence', 'requireLocationForAutoApproval'])) {
+            choice(node.vision.mode, `${np}.vision.mode`, ['shadow', 'assisted', 'auto_approve'])
+            string(node.vision.targetName, `${np}.vision.targetName`, 200)
+            choice(node.vision.scope, `${np}.vision.scope`, ['same_physical_subject', 'same_named_place', 'same_make_model', 'same_kind'])
+            number(node.vision.autoApproveThreshold, `${np}.vision.autoApproveThreshold`, 0.5, 1)
+            number(node.vision.minimumEvidence, `${np}.vision.minimumEvidence`, 1, 6, true)
+            boolean(node.vision.requireLocationForAutoApproval, `${np}.vision.requireLocationForAutoApproval`)
+            if (!referencesValid || references.length < 2) issue(`${np}.referenceImages`, 'Image assistance needs at least two reference images.')
+            else references.forEach((ref, i) => { if (typeof ref === 'string' && !/^\/api\/v2\/media\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(ref)) issue(`${np}.referenceImages[${i}]`, 'Image assistance requires an image uploaded to this application.') })
+            if (node.vision.mode === 'auto_approve' && !node.vision.profile) issue(`${np}.vision.profile`, 'Generate and review a target profile before enabling automatic approval.')
+            if (node.vision.mode === 'auto_approve' && node.vision.requireLocationForAutoApproval && !node.location) issue(`${np}.location`, 'This automatic-approval policy requires a GPS region.')
+            if (node.vision.profile !== undefined && object(node.vision.profile, `${np}.vision.profile`, ['version', 'summary', 'distinguishingFeatures', 'confusingAlternatives', 'referenceSelections', 'model', 'promptVersion'])) {
+              if (node.vision.profile.version !== 1) issue(`${np}.vision.profile.version`, 'Only target profile version 1 is supported.')
+              string(node.vision.profile.summary, `${np}.vision.profile.summary`, 2000)
+              string(node.vision.profile.model, `${np}.vision.profile.model`, 200)
+              string(node.vision.profile.promptVersion, `${np}.vision.profile.promptVersion`, 100)
+              if (array(node.vision.profile.distinguishingFeatures, `${np}.vision.profile.distinguishingFeatures`, 1, 12)) node.vision.profile.distinguishingFeatures.forEach((item, i) => string(item, `${np}.vision.profile.distinguishingFeatures[${i}]`, 300))
+              if (array(node.vision.profile.confusingAlternatives, `${np}.vision.profile.confusingAlternatives`, 0, 12)) node.vision.profile.confusingAlternatives.forEach((item, i) => string(item, `${np}.vision.profile.confusingAlternatives[${i}]`, 300))
+              if (array(node.vision.profile.referenceSelections, `${np}.vision.profile.referenceSelections`, 2, 6)) {
+                const selectedReferences = new Set<number>()
+                node.vision.profile.referenceSelections.forEach((item, i) => {
+                  const path = `${np}.vision.profile.referenceSelections[${i}]`
+                  if (!object(item, path, ['index', 'role'])) return
+                  number(item.index, `${path}.index`, 0, Math.max(0, references.length - 1), true)
+                  if (typeof item.index === 'number' && selectedReferences.has(item.index)) issue(`${path}.index`, 'Choose each reference image only once.')
+                  if (typeof item.index === 'number') selectedReferences.add(item.index)
+                  string(item.role, `${path}.role`, 200)
+                })
+              }
+            }
+          }
+        }
         if (node.type === 'puzzle') puzzle(node.puzzle, `${np}.puzzle`)
         if (node.type === 'choose_path' && array(node.choices, `${np}.choices`, 2, 20)) node.choices.forEach((option, i) => { const op = `${np}.choices[${i}]`; if (object(option, op, ['id', 'label', 'next'])) { id(option.id, `${op}.id`); string(option.label, `${op}.label`, 200); id(option.next, `${op}.next`) } })
         if (node.type === 'random_branch' && array(node.choices, `${np}.choices`, 2, 20)) node.choices.forEach((option, i) => { const op = `${np}.choices[${i}]`; if (object(option, op, ['next', 'weight'])) { id(option.next, `${op}.next`); number(option.weight, `${op}.weight`, 1, 10000, true) } })

@@ -9,6 +9,7 @@ export interface BuilderAsset { id: string; url: string; contentType: string; by
 export interface BuilderMediaServices { list: () => Promise<BuilderAsset[]>; upload: (file: File) => Promise<BuilderAsset> }
 const MediaContext = createContext<BuilderMediaServices | null>(null);
 export function BuilderMediaProvider({ services, children }: { services: BuilderMediaServices; children: ReactNode }) { return <MediaContext.Provider value={services}>{children}</MediaContext.Provider>; }
+export function useBuilderMedia() { return useContext(MediaContext); }
 
 /** Network/storage are supplied by the host; the builder itself has no server dependency. */
 export default function AssetField({ label, value, onChange, kind = 'image', hint }: { label: string; value: string; onChange: (url: string) => void; kind?: 'image' | 'audio' | 'video'; hint?: string }) {

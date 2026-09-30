@@ -43,6 +43,26 @@ export interface HuntTheme {
 }
 export interface MapLocation { latitude: number; longitude: number; radiusMeters: number }
 export interface GPSRegion extends MapLocation { maxAccuracyMeters: number }
+export type VisionComparisonScope = 'same_physical_subject' | 'same_named_place' | 'same_make_model' | 'same_kind'
+export type VisionReviewMode = 'shadow' | 'assisted' | 'auto_approve'
+export interface VisionTargetProfile {
+  version: 1
+  summary: string
+  distinguishingFeatures: string[]
+  confusingAlternatives: string[]
+  referenceSelections: { index: number; role: string }[]
+  model: string
+  promptVersion: string
+}
+export interface VisionReviewConfiguration {
+  mode: VisionReviewMode
+  targetName: string
+  scope: VisionComparisonScope
+  profile?: VisionTargetProfile
+  autoApproveThreshold: number
+  minimumEvidence: number
+  requireLocationForAutoApproval: boolean
+}
 export interface CheckpointDefinition {
   id: string
   title: string
@@ -75,7 +95,7 @@ export type InteractiveNode = (
   | { id: string; type: 'puzzle'; prompt: string; puzzle: PuzzleDefinition; next: string }
   | { id: string; type: 'camera_guide'; prompt: string; referenceImageUrl?: string; latitude?: number; longitude?: number; next: string }
   | { id: string; type: 'verify_organizer'; prompt: string; next: string }
-  | { id: string; type: 'verify_image'; prompt: string; referenceImages: string[]; location?: GPSRegion; next: string }
+  | { id: string; type: 'verify_image'; prompt: string; referenceImages: string[]; location?: GPSRegion; vision?: VisionReviewConfiguration; next: string }
 ) & { fallback?: Fallback }
 export type FlowNode = InteractiveNode
   | { id: string; type: 'set_variable'; key: string; value: VariableValue; next: string }

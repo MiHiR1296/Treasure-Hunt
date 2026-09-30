@@ -18,7 +18,7 @@ V2 supports:
 - Feedback beside answers, floating progress/points confirmations and optional success sound, with quiet puzzle saves and reloads.
 - Standard Node/PostgreSQL hosting, Docker, persistent media, optional HTTPS reverse proxy, backup/restore tools and V1 content import.
 
-Photo verification currently uses an organizer's judgement, optionally preceded by GPS. Camera guidance provides reference overlays and direction; automated landmark recognition remains an extension described in the [product plan](docs/v2/product-plan.md).
+Photo verification always retains organizer controls and can optionally use a private local Ollama worker. The builder can generate a target profile from organizer reference images; shadow and assisted modes leave progression to the organizer, while explicit per-action automatic mode approves only policy-qualified two-pass matches. The hosted game remains authoritative and works normally while the Mac is offline. See [local vision review](docs/v2/local-vision-review.md).
 
 ## Start locally
 
@@ -69,6 +69,7 @@ The browser suite covers shared progress, retries, keyboard puzzle entry, narrow
 - [Architecture and data contracts](docs/v2/architecture.md)
 - [Timed teams, route preview, hints, draft cleanup and Results guide](docs/v2/timed-teams.md)
 - [Creating action, puzzle, verification and hint modules](docs/v2/extensions.md)
+- [Local target-profile and photo-review worker](docs/v2/local-vision-review.md)
 - [Self-hosting and operations](docs/v2/self-hosting.md)
 - [Vercel demo and MRBT subdomain](docs/v2/vercel-hosting.md)
 - [Earlier Render hosting and cloud migration](docs/v2/cloud-hosting.md)
