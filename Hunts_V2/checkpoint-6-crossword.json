@@ -1,0 +1,1177 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": {
+    "id": "school-crossword",
+    "title": "6 · Bells, Books, Belonging",
+    "basePoints": 10,
+    "flow": {
+      "startNodeId": "intro",
+      "nodes": [
+        {
+          "id": "intro",
+          "type": "show_text",
+          "text": "Complete this small crossword. Every answer is connected to learning, friendship, or the sounds of a school day. Your team receives one of four fixed variants.",
+          "next": "variant-route"
+        },
+        {
+          "id": "variant-route",
+          "type": "random_branch",
+          "choices": [
+            {
+              "next": "variant-a",
+              "weight": 1
+            },
+            {
+              "next": "variant-b",
+              "weight": 1
+            },
+            {
+              "next": "variant-c",
+              "weight": 1
+            },
+            {
+              "next": "variant-d",
+              "weight": 1
+            }
+          ]
+        },
+        {
+          "id": "variant-a",
+          "type": "puzzle",
+          "prompt": "Variant A — solve the learning-themed crossword.",
+          "puzzle": {
+            "type": "crossword",
+            "rows": 10,
+            "columns": 12,
+            "entries": [
+              {
+                "id": "book",
+                "clue": "Something with pages",
+                "answer": "BOOK",
+                "row": 1,
+                "column": 3,
+                "direction": "down"
+              },
+              {
+                "id": "class",
+                "clue": "A group learning together",
+                "answer": "CLASS",
+                "row": 0,
+                "column": 6,
+                "direction": "down"
+              },
+              {
+                "id": "bell",
+                "clue": "A sound that can begin a school day",
+                "answer": "BELL",
+                "row": 1,
+                "column": 3,
+                "direction": "across"
+              },
+              {
+                "id": "teach",
+                "clue": "Help someone learn",
+                "answer": "TEACH",
+                "row": 2,
+                "column": 4,
+                "direction": "across"
+              },
+              {
+                "id": "learn",
+                "clue": "Gain knowledge",
+                "answer": "LEARN",
+                "row": 1,
+                "column": 5,
+                "direction": "down"
+              },
+              {
+                "id": "friend",
+                "clue": "A person who stands by you",
+                "answer": "FRIEND",
+                "row": 0,
+                "column": 0,
+                "direction": "across"
+              }
+            ]
+          },
+          "next": "reveal"
+        },
+        {
+          "id": "variant-b",
+          "type": "puzzle",
+          "prompt": "Variant B — solve the learning-themed crossword.",
+          "puzzle": {
+            "type": "crossword",
+            "rows": 10,
+            "columns": 12,
+            "entries": [
+              {
+                "id": "page",
+                "clue": "One side of a book",
+                "answer": "PAGE",
+                "row": 0,
+                "column": 0,
+                "direction": "down"
+              },
+              {
+                "id": "lesson",
+                "clue": "Something taught in class",
+                "answer": "LESSON",
+                "row": 1,
+                "column": 4,
+                "direction": "down"
+              },
+              {
+                "id": "ring",
+                "clue": "A circular shape or a bell sound",
+                "answer": "RING",
+                "row": 1,
+                "column": 2,
+                "direction": "down"
+              },
+              {
+                "id": "guide",
+                "clue": "A person or thing that shows the way",
+                "answer": "GUIDE",
+                "row": 2,
+                "column": 0,
+                "direction": "across"
+              },
+              {
+                "id": "study",
+                "clue": "Spend time learning",
+                "answer": "STUDY",
+                "row": 3,
+                "column": 4,
+                "direction": "across"
+              },
+              {
+                "id": "team",
+                "clue": "A group working together",
+                "answer": "TEAM",
+                "row": 3,
+                "column": 5,
+                "direction": "down"
+              }
+            ]
+          },
+          "next": "reveal"
+        },
+        {
+          "id": "variant-c",
+          "type": "puzzle",
+          "prompt": "Variant C — solve the learning-themed crossword.",
+          "puzzle": {
+            "type": "crossword",
+            "rows": 10,
+            "columns": 12,
+            "entries": [
+              {
+                "id": "novel",
+                "clue": "A long fictional story",
+                "answer": "NOVEL",
+                "row": 4,
+                "column": 6,
+                "direction": "across"
+              },
+              {
+                "id": "school",
+                "clue": "A place where people learn",
+                "answer": "SCHOOL",
+                "row": 0,
+                "column": 7,
+                "direction": "down"
+              },
+              {
+                "id": "chime",
+                "clue": "A clear ringing sound",
+                "answer": "CHIME",
+                "row": 3,
+                "column": 0,
+                "direction": "across"
+              },
+              {
+                "id": "mentor",
+                "clue": "An experienced person who guides you",
+                "answer": "MENTOR",
+                "row": 3,
+                "column": 3,
+                "direction": "across"
+              },
+              {
+                "id": "read",
+                "clue": "Look at and understand written words",
+                "answer": "READ",
+                "row": 3,
+                "column": 8,
+                "direction": "across"
+              },
+              {
+                "id": "ally",
+                "clue": "A helpful friend or supporter",
+                "answer": "ALLY",
+                "row": 3,
+                "column": 10,
+                "direction": "down"
+              }
+            ]
+          },
+          "next": "reveal"
+        },
+        {
+          "id": "variant-d",
+          "type": "puzzle",
+          "prompt": "Variant D — solve the learning-themed crossword.",
+          "puzzle": {
+            "type": "crossword",
+            "rows": 10,
+            "columns": 12,
+            "entries": [
+              {
+                "id": "story",
+                "clue": "A tale that is told or written",
+                "answer": "STORY",
+                "row": 6,
+                "column": 0,
+                "direction": "across"
+              },
+              {
+                "id": "pupil",
+                "clue": "A student",
+                "answer": "PUPIL",
+                "row": 0,
+                "column": 1,
+                "direction": "across"
+              },
+              {
+                "id": "tone",
+                "clue": "The quality or character of a sound",
+                "answer": "TONE",
+                "row": 5,
+                "column": 0,
+                "direction": "across"
+              },
+              {
+                "id": "coach",
+                "clue": "Someone who trains or guides a team",
+                "answer": "COACH",
+                "row": 1,
+                "column": 1,
+                "direction": "across"
+              },
+              {
+                "id": "know",
+                "clue": "Understand or be aware of",
+                "answer": "KNOW",
+                "row": 4,
+                "column": 2,
+                "direction": "down"
+              },
+              {
+                "id": "partner",
+                "clue": "A person who works with you",
+                "answer": "PARTNER",
+                "row": 0,
+                "column": 3,
+                "direction": "down"
+              }
+            ]
+          },
+          "next": "reveal"
+        },
+        {
+          "id": "reveal",
+          "type": "show_text",
+          "text": "Bells, books, learning, and friendship point toward the Lok Kalyan Public School vicinity. Stay outside on the public road.",
+          "next": "done"
+        },
+        {
+          "id": "done",
+          "type": "complete"
+        }
+      ]
+    },
+    "hints": [
+      {
+        "id": "crossword-a-strategy",
+        "title": "How to work this crossword",
+        "cost": 1,
+        "content": {
+          "type": "text",
+          "text": "Start with the shortest clues, enter any letters you know, and use crossing letters to confirm longer answers. This hint is available as soon as this crossword opens."
+        },
+        "relevance": {
+          "nodeId": "variant-a",
+          "unlockAfterSeconds": 0,
+          "expireWhenSolved": false
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-a-book-gentle",
+        "title": "A gentle clue for this word",
+        "cost": 2,
+        "content": {
+          "type": "text",
+          "text": "This is a 4-letter answer. Clue: Something with pages. The first letter is B."
+        },
+        "relevance": {
+          "nodeId": "variant-a",
+          "puzzleItemId": "book",
+          "unlockAfterSeconds": 0,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-a-book-direct",
+        "title": "A stronger clue for this word",
+        "cost": 4,
+        "content": {
+          "type": "text",
+          "text": "The answer is BOOK. Enter it using the crossing squares, then continue with the remaining unsolved words."
+        },
+        "relevance": {
+          "nodeId": "variant-a",
+          "puzzleItemId": "book",
+          "unlockAfterSeconds": 60,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-a-class-gentle",
+        "title": "A gentle clue for this word",
+        "cost": 2,
+        "content": {
+          "type": "text",
+          "text": "This is a 5-letter answer. Clue: A group learning together. The first letter is C."
+        },
+        "relevance": {
+          "nodeId": "variant-a",
+          "puzzleItemId": "class",
+          "unlockAfterSeconds": 0,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-a-class-direct",
+        "title": "A stronger clue for this word",
+        "cost": 4,
+        "content": {
+          "type": "text",
+          "text": "The answer is CLASS. Enter it using the crossing squares, then continue with the remaining unsolved words."
+        },
+        "relevance": {
+          "nodeId": "variant-a",
+          "puzzleItemId": "class",
+          "unlockAfterSeconds": 60,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-a-bell-gentle",
+        "title": "A gentle clue for this word",
+        "cost": 2,
+        "content": {
+          "type": "text",
+          "text": "This is a 4-letter answer. Clue: A sound that can begin a school day. The first letter is B."
+        },
+        "relevance": {
+          "nodeId": "variant-a",
+          "puzzleItemId": "bell",
+          "unlockAfterSeconds": 0,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-a-bell-direct",
+        "title": "A stronger clue for this word",
+        "cost": 4,
+        "content": {
+          "type": "text",
+          "text": "The answer is BELL. Enter it using the crossing squares, then continue with the remaining unsolved words."
+        },
+        "relevance": {
+          "nodeId": "variant-a",
+          "puzzleItemId": "bell",
+          "unlockAfterSeconds": 60,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-a-teach-gentle",
+        "title": "A gentle clue for this word",
+        "cost": 2,
+        "content": {
+          "type": "text",
+          "text": "This is a 5-letter answer. Clue: Help someone learn. The first letter is T."
+        },
+        "relevance": {
+          "nodeId": "variant-a",
+          "puzzleItemId": "teach",
+          "unlockAfterSeconds": 0,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-a-teach-direct",
+        "title": "A stronger clue for this word",
+        "cost": 4,
+        "content": {
+          "type": "text",
+          "text": "The answer is TEACH. Enter it using the crossing squares, then continue with the remaining unsolved words."
+        },
+        "relevance": {
+          "nodeId": "variant-a",
+          "puzzleItemId": "teach",
+          "unlockAfterSeconds": 60,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-a-learn-gentle",
+        "title": "A gentle clue for this word",
+        "cost": 2,
+        "content": {
+          "type": "text",
+          "text": "This is a 5-letter answer. Clue: Gain knowledge. The first letter is L."
+        },
+        "relevance": {
+          "nodeId": "variant-a",
+          "puzzleItemId": "learn",
+          "unlockAfterSeconds": 0,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-a-learn-direct",
+        "title": "A stronger clue for this word",
+        "cost": 4,
+        "content": {
+          "type": "text",
+          "text": "The answer is LEARN. Enter it using the crossing squares, then continue with the remaining unsolved words."
+        },
+        "relevance": {
+          "nodeId": "variant-a",
+          "puzzleItemId": "learn",
+          "unlockAfterSeconds": 60,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-a-friend-gentle",
+        "title": "A gentle clue for this word",
+        "cost": 2,
+        "content": {
+          "type": "text",
+          "text": "This is a 6-letter answer. Clue: A person who stands by you. The first letter is F."
+        },
+        "relevance": {
+          "nodeId": "variant-a",
+          "puzzleItemId": "friend",
+          "unlockAfterSeconds": 0,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-a-friend-direct",
+        "title": "A stronger clue for this word",
+        "cost": 4,
+        "content": {
+          "type": "text",
+          "text": "The answer is FRIEND. Enter it using the crossing squares, then continue with the remaining unsolved words."
+        },
+        "relevance": {
+          "nodeId": "variant-a",
+          "puzzleItemId": "friend",
+          "unlockAfterSeconds": 60,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-b-strategy",
+        "title": "How to work this crossword",
+        "cost": 1,
+        "content": {
+          "type": "text",
+          "text": "Start with the shortest clues, enter any letters you know, and use crossing letters to confirm longer answers. This hint is available as soon as this crossword opens."
+        },
+        "relevance": {
+          "nodeId": "variant-b",
+          "unlockAfterSeconds": 0,
+          "expireWhenSolved": false
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-b-page-gentle",
+        "title": "A gentle clue for this word",
+        "cost": 2,
+        "content": {
+          "type": "text",
+          "text": "This is a 4-letter answer. Clue: One side of a book. The first letter is P."
+        },
+        "relevance": {
+          "nodeId": "variant-b",
+          "puzzleItemId": "page",
+          "unlockAfterSeconds": 0,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-b-page-direct",
+        "title": "A stronger clue for this word",
+        "cost": 4,
+        "content": {
+          "type": "text",
+          "text": "The answer is PAGE. Enter it using the crossing squares, then continue with the remaining unsolved words."
+        },
+        "relevance": {
+          "nodeId": "variant-b",
+          "puzzleItemId": "page",
+          "unlockAfterSeconds": 60,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-b-lesson-gentle",
+        "title": "A gentle clue for this word",
+        "cost": 2,
+        "content": {
+          "type": "text",
+          "text": "This is a 6-letter answer. Clue: Something taught in class. The first letter is L."
+        },
+        "relevance": {
+          "nodeId": "variant-b",
+          "puzzleItemId": "lesson",
+          "unlockAfterSeconds": 0,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-b-lesson-direct",
+        "title": "A stronger clue for this word",
+        "cost": 4,
+        "content": {
+          "type": "text",
+          "text": "The answer is LESSON. Enter it using the crossing squares, then continue with the remaining unsolved words."
+        },
+        "relevance": {
+          "nodeId": "variant-b",
+          "puzzleItemId": "lesson",
+          "unlockAfterSeconds": 60,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-b-ring-gentle",
+        "title": "A gentle clue for this word",
+        "cost": 2,
+        "content": {
+          "type": "text",
+          "text": "This is a 4-letter answer. Clue: A circular shape or a bell sound. The first letter is R."
+        },
+        "relevance": {
+          "nodeId": "variant-b",
+          "puzzleItemId": "ring",
+          "unlockAfterSeconds": 0,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-b-ring-direct",
+        "title": "A stronger clue for this word",
+        "cost": 4,
+        "content": {
+          "type": "text",
+          "text": "The answer is RING. Enter it using the crossing squares, then continue with the remaining unsolved words."
+        },
+        "relevance": {
+          "nodeId": "variant-b",
+          "puzzleItemId": "ring",
+          "unlockAfterSeconds": 60,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-b-guide-gentle",
+        "title": "A gentle clue for this word",
+        "cost": 2,
+        "content": {
+          "type": "text",
+          "text": "This is a 5-letter answer. Clue: A person or thing that shows the way. The first letter is G."
+        },
+        "relevance": {
+          "nodeId": "variant-b",
+          "puzzleItemId": "guide",
+          "unlockAfterSeconds": 0,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-b-guide-direct",
+        "title": "A stronger clue for this word",
+        "cost": 4,
+        "content": {
+          "type": "text",
+          "text": "The answer is GUIDE. Enter it using the crossing squares, then continue with the remaining unsolved words."
+        },
+        "relevance": {
+          "nodeId": "variant-b",
+          "puzzleItemId": "guide",
+          "unlockAfterSeconds": 60,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-b-study-gentle",
+        "title": "A gentle clue for this word",
+        "cost": 2,
+        "content": {
+          "type": "text",
+          "text": "This is a 5-letter answer. Clue: Spend time learning. The first letter is S."
+        },
+        "relevance": {
+          "nodeId": "variant-b",
+          "puzzleItemId": "study",
+          "unlockAfterSeconds": 0,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-b-study-direct",
+        "title": "A stronger clue for this word",
+        "cost": 4,
+        "content": {
+          "type": "text",
+          "text": "The answer is STUDY. Enter it using the crossing squares, then continue with the remaining unsolved words."
+        },
+        "relevance": {
+          "nodeId": "variant-b",
+          "puzzleItemId": "study",
+          "unlockAfterSeconds": 60,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-b-team-gentle",
+        "title": "A gentle clue for this word",
+        "cost": 2,
+        "content": {
+          "type": "text",
+          "text": "This is a 4-letter answer. Clue: A group working together. The first letter is T."
+        },
+        "relevance": {
+          "nodeId": "variant-b",
+          "puzzleItemId": "team",
+          "unlockAfterSeconds": 0,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-b-team-direct",
+        "title": "A stronger clue for this word",
+        "cost": 4,
+        "content": {
+          "type": "text",
+          "text": "The answer is TEAM. Enter it using the crossing squares, then continue with the remaining unsolved words."
+        },
+        "relevance": {
+          "nodeId": "variant-b",
+          "puzzleItemId": "team",
+          "unlockAfterSeconds": 60,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-c-strategy",
+        "title": "How to work this crossword",
+        "cost": 1,
+        "content": {
+          "type": "text",
+          "text": "Start with the shortest clues, enter any letters you know, and use crossing letters to confirm longer answers. This hint is available as soon as this crossword opens."
+        },
+        "relevance": {
+          "nodeId": "variant-c",
+          "unlockAfterSeconds": 0,
+          "expireWhenSolved": false
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-c-novel-gentle",
+        "title": "A gentle clue for this word",
+        "cost": 2,
+        "content": {
+          "type": "text",
+          "text": "This is a 5-letter answer. Clue: A long fictional story. The first letter is N."
+        },
+        "relevance": {
+          "nodeId": "variant-c",
+          "puzzleItemId": "novel",
+          "unlockAfterSeconds": 0,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-c-novel-direct",
+        "title": "A stronger clue for this word",
+        "cost": 4,
+        "content": {
+          "type": "text",
+          "text": "The answer is NOVEL. Enter it using the crossing squares, then continue with the remaining unsolved words."
+        },
+        "relevance": {
+          "nodeId": "variant-c",
+          "puzzleItemId": "novel",
+          "unlockAfterSeconds": 60,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-c-school-gentle",
+        "title": "A gentle clue for this word",
+        "cost": 2,
+        "content": {
+          "type": "text",
+          "text": "This is a 6-letter answer. Clue: A place where people learn. The first letter is S."
+        },
+        "relevance": {
+          "nodeId": "variant-c",
+          "puzzleItemId": "school",
+          "unlockAfterSeconds": 0,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-c-school-direct",
+        "title": "A stronger clue for this word",
+        "cost": 4,
+        "content": {
+          "type": "text",
+          "text": "The answer is SCHOOL. Enter it using the crossing squares, then continue with the remaining unsolved words."
+        },
+        "relevance": {
+          "nodeId": "variant-c",
+          "puzzleItemId": "school",
+          "unlockAfterSeconds": 60,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-c-chime-gentle",
+        "title": "A gentle clue for this word",
+        "cost": 2,
+        "content": {
+          "type": "text",
+          "text": "This is a 5-letter answer. Clue: A clear ringing sound. The first letter is C."
+        },
+        "relevance": {
+          "nodeId": "variant-c",
+          "puzzleItemId": "chime",
+          "unlockAfterSeconds": 0,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-c-chime-direct",
+        "title": "A stronger clue for this word",
+        "cost": 4,
+        "content": {
+          "type": "text",
+          "text": "The answer is CHIME. Enter it using the crossing squares, then continue with the remaining unsolved words."
+        },
+        "relevance": {
+          "nodeId": "variant-c",
+          "puzzleItemId": "chime",
+          "unlockAfterSeconds": 60,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-c-mentor-gentle",
+        "title": "A gentle clue for this word",
+        "cost": 2,
+        "content": {
+          "type": "text",
+          "text": "This is a 6-letter answer. Clue: An experienced person who guides you. The first letter is M."
+        },
+        "relevance": {
+          "nodeId": "variant-c",
+          "puzzleItemId": "mentor",
+          "unlockAfterSeconds": 0,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-c-mentor-direct",
+        "title": "A stronger clue for this word",
+        "cost": 4,
+        "content": {
+          "type": "text",
+          "text": "The answer is MENTOR. Enter it using the crossing squares, then continue with the remaining unsolved words."
+        },
+        "relevance": {
+          "nodeId": "variant-c",
+          "puzzleItemId": "mentor",
+          "unlockAfterSeconds": 60,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-c-read-gentle",
+        "title": "A gentle clue for this word",
+        "cost": 2,
+        "content": {
+          "type": "text",
+          "text": "This is a 4-letter answer. Clue: Look at and understand written words. The first letter is R."
+        },
+        "relevance": {
+          "nodeId": "variant-c",
+          "puzzleItemId": "read",
+          "unlockAfterSeconds": 0,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-c-read-direct",
+        "title": "A stronger clue for this word",
+        "cost": 4,
+        "content": {
+          "type": "text",
+          "text": "The answer is READ. Enter it using the crossing squares, then continue with the remaining unsolved words."
+        },
+        "relevance": {
+          "nodeId": "variant-c",
+          "puzzleItemId": "read",
+          "unlockAfterSeconds": 60,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-c-ally-gentle",
+        "title": "A gentle clue for this word",
+        "cost": 2,
+        "content": {
+          "type": "text",
+          "text": "This is a 4-letter answer. Clue: A helpful friend or supporter. The first letter is A."
+        },
+        "relevance": {
+          "nodeId": "variant-c",
+          "puzzleItemId": "ally",
+          "unlockAfterSeconds": 0,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-c-ally-direct",
+        "title": "A stronger clue for this word",
+        "cost": 4,
+        "content": {
+          "type": "text",
+          "text": "The answer is ALLY. Enter it using the crossing squares, then continue with the remaining unsolved words."
+        },
+        "relevance": {
+          "nodeId": "variant-c",
+          "puzzleItemId": "ally",
+          "unlockAfterSeconds": 60,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-d-strategy",
+        "title": "How to work this crossword",
+        "cost": 1,
+        "content": {
+          "type": "text",
+          "text": "Start with the shortest clues, enter any letters you know, and use crossing letters to confirm longer answers. This hint is available as soon as this crossword opens."
+        },
+        "relevance": {
+          "nodeId": "variant-d",
+          "unlockAfterSeconds": 0,
+          "expireWhenSolved": false
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-d-story-gentle",
+        "title": "A gentle clue for this word",
+        "cost": 2,
+        "content": {
+          "type": "text",
+          "text": "This is a 5-letter answer. Clue: A tale that is told or written. The first letter is S."
+        },
+        "relevance": {
+          "nodeId": "variant-d",
+          "puzzleItemId": "story",
+          "unlockAfterSeconds": 0,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-d-story-direct",
+        "title": "A stronger clue for this word",
+        "cost": 4,
+        "content": {
+          "type": "text",
+          "text": "The answer is STORY. Enter it using the crossing squares, then continue with the remaining unsolved words."
+        },
+        "relevance": {
+          "nodeId": "variant-d",
+          "puzzleItemId": "story",
+          "unlockAfterSeconds": 60,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-d-pupil-gentle",
+        "title": "A gentle clue for this word",
+        "cost": 2,
+        "content": {
+          "type": "text",
+          "text": "This is a 5-letter answer. Clue: A student. The first letter is P."
+        },
+        "relevance": {
+          "nodeId": "variant-d",
+          "puzzleItemId": "pupil",
+          "unlockAfterSeconds": 0,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-d-pupil-direct",
+        "title": "A stronger clue for this word",
+        "cost": 4,
+        "content": {
+          "type": "text",
+          "text": "The answer is PUPIL. Enter it using the crossing squares, then continue with the remaining unsolved words."
+        },
+        "relevance": {
+          "nodeId": "variant-d",
+          "puzzleItemId": "pupil",
+          "unlockAfterSeconds": 60,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-d-tone-gentle",
+        "title": "A gentle clue for this word",
+        "cost": 2,
+        "content": {
+          "type": "text",
+          "text": "This is a 4-letter answer. Clue: The quality or character of a sound. The first letter is T."
+        },
+        "relevance": {
+          "nodeId": "variant-d",
+          "puzzleItemId": "tone",
+          "unlockAfterSeconds": 0,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-d-tone-direct",
+        "title": "A stronger clue for this word",
+        "cost": 4,
+        "content": {
+          "type": "text",
+          "text": "The answer is TONE. Enter it using the crossing squares, then continue with the remaining unsolved words."
+        },
+        "relevance": {
+          "nodeId": "variant-d",
+          "puzzleItemId": "tone",
+          "unlockAfterSeconds": 60,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-d-coach-gentle",
+        "title": "A gentle clue for this word",
+        "cost": 2,
+        "content": {
+          "type": "text",
+          "text": "This is a 5-letter answer. Clue: Someone who trains or guides a team. The first letter is C."
+        },
+        "relevance": {
+          "nodeId": "variant-d",
+          "puzzleItemId": "coach",
+          "unlockAfterSeconds": 0,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-d-coach-direct",
+        "title": "A stronger clue for this word",
+        "cost": 4,
+        "content": {
+          "type": "text",
+          "text": "The answer is COACH. Enter it using the crossing squares, then continue with the remaining unsolved words."
+        },
+        "relevance": {
+          "nodeId": "variant-d",
+          "puzzleItemId": "coach",
+          "unlockAfterSeconds": 60,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-d-know-gentle",
+        "title": "A gentle clue for this word",
+        "cost": 2,
+        "content": {
+          "type": "text",
+          "text": "This is a 4-letter answer. Clue: Understand or be aware of. The first letter is K."
+        },
+        "relevance": {
+          "nodeId": "variant-d",
+          "puzzleItemId": "know",
+          "unlockAfterSeconds": 0,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-d-know-direct",
+        "title": "A stronger clue for this word",
+        "cost": 4,
+        "content": {
+          "type": "text",
+          "text": "The answer is KNOW. Enter it using the crossing squares, then continue with the remaining unsolved words."
+        },
+        "relevance": {
+          "nodeId": "variant-d",
+          "puzzleItemId": "know",
+          "unlockAfterSeconds": 60,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-d-partner-gentle",
+        "title": "A gentle clue for this word",
+        "cost": 2,
+        "content": {
+          "type": "text",
+          "text": "This is a 7-letter answer. Clue: A person who works with you. The first letter is P."
+        },
+        "relevance": {
+          "nodeId": "variant-d",
+          "puzzleItemId": "partner",
+          "unlockAfterSeconds": 0,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      },
+      {
+        "id": "crossword-d-partner-direct",
+        "title": "A stronger clue for this word",
+        "cost": 4,
+        "content": {
+          "type": "text",
+          "text": "The answer is PARTNER. Enter it using the crossing squares, then continue with the remaining unsolved words."
+        },
+        "relevance": {
+          "nodeId": "variant-d",
+          "puzzleItemId": "partner",
+          "unlockAfterSeconds": 60,
+          "expireWhenSolved": true
+        },
+        "enabled": true,
+        "showWhenLocked": false
+      }
+    ]
+  }
+}

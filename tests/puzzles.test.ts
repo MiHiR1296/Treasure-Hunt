@@ -10,6 +10,11 @@ const fixtures: Record<PuzzleDefinition['type'], PuzzleDefinition> = {
   rotation: { type: 'rotation', columns: 1, tiles: [{ id: 'tile', imageUrl: '/tiles/turned.png', correctRotation: 90 }] },
   text: { type: 'text', prompt: 'Enter the words you collected.', answers: ['secret answer'] },
   multiple_choice: { type: 'multiple_choice', prompt: 'Choose the daylight star.', options: [{ id: 'sun', label: 'Sun' }, { id: 'moon', label: 'Moon' }], correctOptionId: 'sun' },
+  quiz: { type: 'quiz', minimumCorrect: 1, bonusPerAdditionalCorrect: 3, questions: [
+    { id: 'one', prompt: 'Choose the daylight star.', options: [{ id: 'sun', label: 'Sun' }, { id: 'moon', label: 'Moon' }], correctOptionId: 'sun', skipPenalty: 2 },
+    { id: 'two', prompt: 'Choose the night light.', options: [{ id: 'sun', label: 'Sun' }, { id: 'moon', label: 'Moon' }], correctOptionId: 'moon', skipPenalty: 2 },
+    { id: 'three', prompt: 'Choose the red planet.', options: [{ id: 'mars', label: 'Mars' }, { id: 'earth', label: 'Earth' }], correctOptionId: 'mars', skipPenalty: 2 },
+  ] },
   matching: { type: 'matching', left: [{ id: 'sun', label: 'Sun' }, { id: 'moon', label: 'Moon' }], right: [{ id: 'day', label: 'Day' }, { id: 'night', label: 'Night' }], solution: [{ leftId: 'sun', rightId: 'day' }, { leftId: 'moon', rightId: 'night' }] },
   sequence: { type: 'sequence', items: [{ id: 'dawn', label: 'Dawn' }, { id: 'noon', label: 'Noon' }, { id: 'dusk', label: 'Dusk' }], solution: ['dawn', 'noon', 'dusk'] },
 }
@@ -18,7 +23,7 @@ const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value))
 const invalid = (error: unknown) => error instanceof PuzzleError && error.code === 'invalid_submission'
 function solve(definition: PuzzleDefinition, submission: unknown) { return updatePuzzle(definition, initialPuzzleState(definition), submission) }
 
-test('all nine modules validate, initialize serializable state, and project public definitions', () => {
+test('all puzzle modules validate, initialize serializable state, and project public definitions', () => {
   for (const definition of Object.values(fixtures)) {
     assert.deepEqual(validatePuzzle(definition), [], definition.type)
     assert.equal(initialPuzzleState(definition).type, definition.type)
@@ -112,6 +117,24 @@ test('crossword keeps answers private and checks letters and black squares', () 
   assert.ok(!JSON.stringify(projection).includes('CAT'))
   assert.ok(!JSON.stringify(projection).includes('CAR'))
   if (projection.type === 'crossword') assert.equal(projection.entries[0].length, 3)
+})
+
+test('quiz closes answered questions, applies skip penalties, and completes at its threshold', () => {
+  const definition = fixtures.quiz
+  if (definition.type !== 'quiz') throw new Error('Fixture')
+  let state = initialPuzzleState(definition)
+  const wrong = updatePuzzle(definition, state, { questionId: 'one', optionId: 'moon', skip: false })
+  assert.equal(wrong.completed, false)
+  assert.equal(wrong.state.type, 'quiz')
+  if (wrong.state.type !== 'quiz') throw new Error('State')
+  assert.deepEqual(wrong.state.responses, [{ questionId: 'one', status: 'wrong', optionId: 'moon' }])
+  assert.throws(() => updatePuzzle(definition, wrong.state, { questionId: 'one', optionId: 'sun', skip: false }), invalid)
+  state = wrong.state
+  const skipped = updatePuzzle(definition, state, { questionId: 'two', optionId: null, skip: true })
+  assert.deepEqual(skipped.rewards, [{ id: 'quiz:skip:two', amount: -2, kind: 'skip_penalty', label: 'Skipped quiz question: two' }])
+  state = skipped.state
+  const completed = updatePuzzle(definition, state, { questionId: 'three', optionId: 'mars', skip: false })
+  assert.equal(completed.completed, true)
 })
 
 test('crossword hint targets recognize one solved entry before the whole grid is complete', () => {

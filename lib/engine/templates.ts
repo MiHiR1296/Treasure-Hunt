@@ -1,11 +1,17 @@
 import { randomUUID } from 'node:crypto'
 import type { HuntDefinition } from './types'
 import { exampleHunt } from './example'
+import { lokgramPilotHunt } from './lokgram'
 
 export interface HuntTemplate { id: string; title: string; description: string; definition: HuntDefinition }
 
 /** Server-only starter content; never import these private configurations into player bundles. */
 export const huntTemplates: HuntTemplate[] = [
+  {
+    id: 'lokgram-pilot', title: 'Lokgram Learning Trail',
+    description: 'Nine-checkpoint Kalyan East pilot with varied word-search routes, a threshold civic quiz, jigsaw, crossword, Sudoku, GPS-ready location steps and prize-stop handoff placeholders.',
+    definition: lokgramPilotHunt,
+  },
   {
     id: 'frankie-code-hunt', title: 'Frankie challenge', description: 'An eight-stage shop game showcasing riddles, a photo jigsaw, bonus word search, QR phrase, matching, crossword, branching and a final campaign phrase.',
     definition: {

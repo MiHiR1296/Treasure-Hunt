@@ -61,7 +61,8 @@ export default function CurrentTask({ teamId, checkpointId, node, disabled, send
     }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
   };
   return <div className="space-y-6">
-    {node.type === 'show_text' ? <TaskCopy text={node.text} /> : 'prompt' in node ? <TaskCopy text={node.prompt} /> : null}
+    {'clue' in node && node.clue && <TaskCopy text={node.clue} />}
+    {node.type === 'show_text' ? <TaskCopy text={node.text} /> : 'prompt' in node && node.type !== 'puzzle' ? <TaskCopy text={node.prompt} /> : null}
     {node.type === 'show_media' && <MediaContent content={node.content} />}
     {(node.type === 'show_text' || node.type === 'show_media') && <button type="button" disabled={disabled} onClick={() => void send({ type: 'continue', ...address })} className={primaryButton}>Continue</button>}
     {node.type === 'verify_qr' && <div className="hunt-qr-actions"><QRScanner onScanSuccess={async (value) => {

@@ -9,7 +9,7 @@ export { defaultPuzzle } from './puzzleDefaults';
 
 export const puzzleLabels: Record<PuzzleDefinition['type'], string> = {
   jigsaw: 'Jigsaw tiles', sudoku: 'Sudoku', word_search: 'Word search', crossword: 'Crossword',
-  rotation: 'Rotate image tiles', text: 'Text answer', multiple_choice: 'Multiple choice',
+  rotation: 'Rotate image tiles', text: 'Text answer', multiple_choice: 'Multiple choice', quiz: 'Multi-question quiz',
   matching: 'Match pairs', sequence: 'Put items in order',
 };
 
@@ -17,6 +17,11 @@ export default function PuzzleEditor({ value, onChange }: { value: PuzzleDefinit
   return <div className="space-y-4 rounded-lg border border-indigo-200 bg-indigo-50/30 p-4">
     <Field label="Puzzle type" hint="Changing the type starts a new puzzle configuration."><select className={inputClass} value={value.type} onChange={event => onChange(defaultPuzzle(event.target.value as PuzzleDefinition['type']))}>{Object.entries(puzzleLabels).map(([type, label]) => <option key={type} value={type}>{label}</option>)}</select></Field>
     {(value.type === 'text' || value.type === 'multiple_choice') && <TextField label="Puzzle question" value={value.prompt} multiline onChange={prompt => onChange({ ...value, prompt })} />}
+    {value.type === 'quiz' && <>
+      <div className="grid grid-cols-2 gap-3"><NumberField label="Correct answers required" value={value.minimumCorrect} min={1} max={value.questions.length} onChange={minimumCorrect => onChange({ ...value, minimumCorrect })} /><NumberField label="Bonus per extra correct answer" value={value.bonusPerAdditionalCorrect ?? 0} min={0} max={100} onChange={bonusPerAdditionalCorrect => onChange({ ...value, bonusPerAdditionalCorrect })} /></div>
+      {value.questions.map((question, index) => <div key={question.id} className="space-y-3 rounded-lg border border-slate-200 bg-white p-3"><TextField label={`Question ${index + 1}`} value={question.prompt} multiline onChange={prompt => onChange({ ...value, questions: value.questions.map(candidate => candidate.id === question.id ? { ...candidate, prompt } : candidate) })} />{question.options.map((option, optionIndex) => <div key={option.id} className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end"><TextField label={`Option ${optionIndex + 1}`} value={option.label} onChange={label => onChange({ ...value, questions: value.questions.map(candidate => candidate.id === question.id ? { ...candidate, options: candidate.options.map(item => item.id === option.id ? { ...item, label } : item) } : candidate) })} /><CheckField label="Correct" checked={question.correctOptionId === option.id} onChange={checked => checked && onChange({ ...value, questions: value.questions.map(candidate => candidate.id === question.id ? { ...candidate, correctOptionId: option.id } : candidate) })} /></div>)}<NumberField label="Skip penalty" value={question.skipPenalty ?? 0} min={0} max={100} onChange={skipPenalty => onChange({ ...value, questions: value.questions.map(candidate => candidate.id === question.id ? { ...candidate, skipPenalty } : candidate) })} /><button type="button" className={buttonClass} disabled={value.questions.length <= 1} onClick={() => onChange({ ...value, questions: value.questions.filter(candidate => candidate.id !== question.id), minimumCorrect: Math.min(value.minimumCorrect, Math.max(1, value.questions.length - 1)) })}>Remove question</button></div>)}
+      <button type="button" className={buttonClass} onClick={() => { const id = newId('question', value.questions.map(question => question.id)); onChange({ ...value, questions: [...value.questions, { id, prompt: '', options: [{ id: `${id}-option-1`, label: '' }, { id: `${id}-option-2`, label: '' }], correctOptionId: `${id}-option-1`, skipPenalty: 2 }] }); }}>Add question</button>
+    </>}
     {value.type === 'text' && <>
       <TextField label="Accepted answers — one per line" value={value.answers.join('\n')} multiline onChange={text => onChange({ ...value, answers: text.split('\n') })} />
       <CheckField label="Match letter case" checked={value.caseSensitive === true} onChange={caseSensitive => onChange({ ...value, caseSensitive })} />

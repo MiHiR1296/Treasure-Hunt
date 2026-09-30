@@ -1,6 +1,6 @@
 import { copy, integer, matrix, permutation, record, same, shuffled, straightPath, submission, sudokuConsistent } from './helpers'
 import { crosswordSolution, validatePuzzle } from './validation'
-import { PuzzleError, type ImagePiece, type MatchingPair, type PuzzleDefinition, type PuzzlePublicDefinition, type PuzzleState, type PuzzleUpdate, type QuarterTurn } from './types'
+import { PuzzleError, type ImagePiece, type MatchingPair, type PuzzleDefinition, type PuzzlePublicDefinition, type PuzzleReward, type PuzzleState, type PuzzleUpdate, type QuarterTurn } from './types'
 
 type PuzzleType = PuzzleDefinition['type']
 interface PuzzleModule<T extends PuzzleType> {
@@ -121,6 +121,34 @@ export const puzzleRegistry: Readonly<Record<PuzzleType, RegistryEntry>> = Objec
       const { optionId } = submission(value, ['optionId'])
       if (typeof optionId !== 'string' || !definition.options.some(option => option.id === optionId)) return invalidMove('Choose one of the available answers.')
       return { state: { type: 'multiple_choice', optionId }, completed: optionId === definition.correctOptionId }
+    },
+  }),
+  quiz: createPuzzleModule('quiz', {
+    initial: () => ({ type: 'quiz', responses: [], correctCount: 0 }),
+    public: definition => ({
+      type: 'quiz',
+      minimumCorrect: definition.minimumCorrect,
+      ...(definition.bonusPerAdditionalCorrect === undefined ? {} : { bonusPerAdditionalCorrect: definition.bonusPerAdditionalCorrect }),
+      questions: definition.questions.map(question => ({
+        id: question.id,
+        prompt: question.prompt,
+        ...(question.skipPenalty === undefined ? {} : { skipPenalty: question.skipPenalty }),
+        options: shuffled(question.options.map(option => option.id), [question.correctOptionId]).map(id => question.options.find(option => option.id === id)!),
+      })),
+    }),
+    update(definition, state, value) {
+      const { questionId, optionId, skip } = submission(value, ['questionId', 'optionId', 'skip'])
+      if (typeof questionId !== 'string' || typeof skip !== 'boolean') return invalidMove('Choose an available quiz question and answer.')
+      const question = definition.questions.find(candidate => candidate.id === questionId)
+      if (!question || state.responses.some(answer => answer.questionId === questionId) || (!skip && (typeof optionId !== 'string' || !question.options.some(option => option.id === optionId)))) return invalidMove('Choose an available quiz question and answer.')
+      const status: 'correct' | 'wrong' | 'skipped' = skip ? 'skipped' : optionId === question.correctOptionId ? 'correct' : 'wrong'
+      const responses = [...state.responses, { questionId, status, ...(skip ? {} : { optionId: optionId as string }) }]
+      const correctCount = state.correctCount + (status === 'correct' ? 1 : 0)
+      const completed = correctCount >= definition.minimumCorrect
+      const rewards: PuzzleReward[] = []
+      if (status === 'skipped' && question.skipPenalty) rewards.push({ id: `quiz:skip:${question.id}`, amount: -question.skipPenalty, kind: 'skip_penalty', label: `Skipped quiz question: ${question.id}` })
+      if (status === 'correct' && definition.bonusPerAdditionalCorrect && correctCount > definition.minimumCorrect) rewards.push({ id: `quiz:bonus:${question.id}`, amount: definition.bonusPerAdditionalCorrect, kind: 'action_points', label: `Extra correct quiz answer: ${question.id}` })
+      return { state: { type: 'quiz', responses, correctCount }, completed, ...(rewards.length ? { rewards } : {}), message: skip ? `Question skipped. −${question.skipPenalty ?? 0} points.` : status === 'correct' ? completed ? 'Correct — the quiz threshold is complete.' : `Correct — ${correctCount} correct so far.` : 'That answer is not correct. This question is closed; continue with the next one.' }
     },
   }),
   matching: createPuzzleModule('matching', {

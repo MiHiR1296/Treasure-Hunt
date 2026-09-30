@@ -7,7 +7,7 @@ export function validatePuzzle(value: unknown): string[] {
   if (!record(value) || typeof value.type !== 'string') return ['Puzzle must be an object with a supported type.']
   const fields: Record<string, string[]> = {
     jigsaw: ['rows', 'columns', 'pieces', 'solution'], sudoku: ['size', 'givens'], word_search: ['grid', 'words', 'minimumWords', 'bonusPerExtraWord'], crossword: ['rows', 'columns', 'entries'],
-    rotation: ['columns', 'tiles'], text: ['prompt', 'answers', 'caseSensitive'], multiple_choice: ['prompt', 'options', 'correctOptionId'], matching: ['left', 'right', 'solution'], sequence: ['items', 'solution'],
+    rotation: ['columns', 'tiles'], text: ['prompt', 'answers', 'caseSensitive'], multiple_choice: ['prompt', 'options', 'correctOptionId'], quiz: ['questions', 'minimumCorrect', 'bonusPerAdditionalCorrect'], matching: ['left', 'right', 'solution'], sequence: ['items', 'solution'],
   }
   if (!Object.hasOwn(fields, value.type)) return ['Unsupported puzzle type.']
   if (Object.keys(value).some(key => key !== 'type' && !fields[value.type as string].includes(key))) fail('Puzzle contains unsupported fields.')
@@ -87,6 +87,20 @@ export function validatePuzzle(value: unknown): string[] {
       if (!itemList(value.options)) fail('Multiple choice needs 2 to 30 unique, labeled options.')
       else if (!(value.options as { id: string }[]).some(option => option.id === value.correctOptionId)) fail('Multiple choice needs a correct option ID from its options.')
       break
+    case 'quiz': {
+      if (!list(value.questions, 1, 50)) { fail('Quiz needs between 1 and 50 questions.'); break }
+      const questions = value.questions as Record<string, unknown>[]
+      const ids = new Set<string>()
+      for (const question of questions) {
+        if (!record(question)) { fail('Quiz questions need unique IDs, prompts, valid options, a server-side correct option, and an optional non-negative skip penalty.'); continue }
+        if (Object.keys(question).some(key => !['id', 'prompt', 'options', 'correctOptionId', 'skipPenalty'].includes(key)) || !identifier(question.id) || !text(question.prompt) || !itemList(question.options) || typeof question.correctOptionId !== 'string' || !(question.options as { id: string }[]).some(option => option.id === question.correctOptionId) || (question.skipPenalty !== undefined && !integer(question.skipPenalty, 0, 1000000))) fail('Quiz questions need unique IDs, prompts, valid options, a server-side correct option, and an optional non-negative skip penalty.')
+        if (typeof question.id === 'string') ids.add(question.id)
+      }
+      if (ids.size !== questions.length) fail('Quiz question IDs must be unique.')
+      if (!integer(value.minimumCorrect, 1, questions.length)) fail('Quiz minimumCorrect must be between 1 and the number of questions.')
+      if (value.bonusPerAdditionalCorrect !== undefined && !integer(value.bonusPerAdditionalCorrect, 0, 1000000)) fail('Quiz bonusPerAdditionalCorrect must be a non-negative whole number.')
+      break
+    }
     case 'matching': {
       if (!itemList(value.left) || !itemList(value.right)) { fail('Matching needs two lists of 2 to 30 unique, labeled items.'); break }
       const left = (value.left as { id: string }[]).map(item => item.id)

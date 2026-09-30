@@ -4,6 +4,7 @@ export function defaultPuzzle(type: PuzzleDefinition['type']): PuzzleDefinition 
   switch (type) {
     case 'text': return { type, prompt: '', answers: [''] };
     case 'multiple_choice': return { type, prompt: '', options: [{ id: 'option-1', label: '' }, { id: 'option-2', label: '' }], correctOptionId: 'option-1' };
+    case 'quiz': return { type, minimumCorrect: 1, bonusPerAdditionalCorrect: 0, questions: [{ id: 'question-1', prompt: '', options: [{ id: 'option-1', label: '' }, { id: 'option-2', label: '' }], correctOptionId: 'option-1', skipPenalty: 2 }] };
     case 'matching': return { type, left: [{ id: 'left-1', label: '' }, { id: 'left-2', label: '' }], right: [{ id: 'right-1', label: '' }, { id: 'right-2', label: '' }], solution: [{ leftId: 'left-1', rightId: 'right-1' }, { leftId: 'left-2', rightId: 'right-2' }] };
     case 'sequence': return { type, items: [{ id: 'item-1', label: '' }, { id: 'item-2', label: '' }], solution: ['item-1', 'item-2'] };
     case 'sudoku': return { type, size: 4, givens: [[1, 0, 0, 4], [0, 4, 1, 0], [0, 1, 4, 0], [4, 0, 0, 1]] };

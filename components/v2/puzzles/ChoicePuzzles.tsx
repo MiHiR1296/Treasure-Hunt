@@ -28,6 +28,19 @@ export default function ChoicePuzzles({ definition, state, disabled, onChange, d
     {definition.options.map(option => <button type="button" key={option.id} disabled={locked} aria-pressed={state.optionId === option.id} onClick={() => void submit({ optionId: option.id })} className={`${puzzleButton} w-full text-left ${state.optionId === option.id ? 'bg-emerald-50 ring-2 ring-emerald-700' : 'bg-white'}`}>{state.optionId === option.id ? 'Selected: ' : ''}{option.label}</button>)}
     <PuzzleSaveMessage busy={busy} error={error} />
   </div>
+  if (definition.type === 'quiz' && state.type === 'quiz') {
+    const answered = new Map(state.responses.map(answer => [answer.questionId, answer]))
+    const question = definition.questions.find(candidate => !answered.has(candidate.id))
+    if (!question) return <div className="space-y-3"><p className="font-semibold">Your team answered every question.</p><p className="text-sm text-stone-600">{state.correctCount} correct answers. The configured threshold is {definition.minimumCorrect}.</p><PuzzleSaveMessage busy={busy} error={error} /></div>
+    return <div className="space-y-4">
+      <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950"><p className="font-bold">{state.correctCount} of {definition.minimumCorrect} correct needed</p><p className="mt-1">Question {state.responses.length + 1} of {definition.questions.length}. A wrong answer closes this question; it cannot be guessed repeatedly.</p></div>
+      <p className="whitespace-pre-wrap leading-relaxed">{question.prompt}</p>
+      <div className="space-y-3">{question.options.map(option => <button type="button" key={option.id} disabled={locked} onClick={() => void submit({ questionId: question.id, optionId: option.id, skip: false })} className={`${puzzleButton} w-full text-left bg-white`}>{option.label}</button>)}</div>
+      <button type="button" disabled={locked} onClick={() => void submit({ questionId: question.id, optionId: null, skip: true })} className="hunt-action min-h-12 w-full rounded-xl border border-amber-700 px-4 py-3 text-sm font-semibold text-amber-950">Skip this question{question.skipPenalty ? ` · −${question.skipPenalty} points` : ''}</button>
+      <p className="text-xs leading-5 text-stone-500">Skipping moves forward without revealing the answer. The deduction is recorded once by the server.</p>
+      {error && <PuzzleSaveMessage busy={busy} error={error} />}
+    </div>
+  }
   if (definition.type === 'matching' && state.type === 'matching') return <div className="space-y-3">
     <p className="text-sm text-stone-600">Match every item with its partner. You can change a match until the whole set is correct.</p>
     {definition.left.map(item => <label key={item.id} className="block rounded-xl border border-stone-200 bg-white p-3 text-sm font-semibold">{item.label}

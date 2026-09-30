@@ -24,7 +24,7 @@ flowchart LR
 | `lib/engine/types.ts` | Private/public definitions, commands, progress, scoring, hints and controls. |
 | `lib/engine/validation.ts` | Strict shape/field validation, graph edges, cycles/reachability, prerequisites, media URLs, puzzle configuration and command/control parsing. |
 | `lib/engine/engine.ts` | Pure initialization, traversal, action registry, hint purchasing, puzzle saves, fallback and organizer transitions, public projection. |
-| `lib/engine/puzzles/` | Puzzle configuration/state/public contracts, validators and nine independent module implementations. |
+| `lib/engine/puzzles/` | Puzzle configuration/state/public contracts, validators and ten independent module implementations, including threshold quizzes with server-side skip scoring. |
 | `lib/server/store.ts` | Team sessions/membership, version-pinned state loading, row locks, receipts and atomic command persistence. |
 | `lib/server/hunts.ts` | Draft revisions, publication/versioning, lifecycle and schedule/registration gates. |
 | `lib/server/operations.ts` | Isolated previews, simulations, help/replies, announcements, leaderboard and analytics. |

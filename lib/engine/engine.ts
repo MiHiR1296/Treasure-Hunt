@@ -166,12 +166,12 @@ interface Context { definition: HuntDefinition; state: GameState; checkpoint: Ch
 interface ActionOutcome { accepted: boolean; next?: string; message: string; dud?: boolean; audit?: GameEvent['type']; attempt?: boolean; response?: string }
 interface ActionModule { commands: GameCommand['type'][]; execute: (node: InteractiveNode, command: GameCommand, context: Context) => ActionOutcome; toPlayer: (node: InteractiveNode, context: Context) => PlayerNode }
 function action<T extends InteractiveNode['type']>(type: T, implementation: { commands: GameCommand['type'][]; execute: (node: Extract<InteractiveNode, { type: T }>, command: GameCommand, context: Context) => ActionOutcome; toPlayer: (node: Extract<InteractiveNode, { type: T }>, context: Context) => PlayerNode }): ActionModule {
-  return { commands: implementation.commands, execute(node, command, context) { if (node.type !== type) return invalidAction(); return implementation.execute(node as Extract<InteractiveNode, { type: T }>, command, context) }, toPlayer(node, context) { if (node.type !== type) return invalidAction(); return implementation.toPlayer(node as Extract<InteractiveNode, { type: T }>, context) } }
+  return { commands: implementation.commands, execute(node, command, context) { if (node.type !== type) return invalidAction(); return implementation.execute(node as Extract<InteractiveNode, { type: T }>, command, context) }, toPlayer(node, context) { if (node.type !== type) return invalidAction(); const player = implementation.toPlayer(node as Extract<InteractiveNode, { type: T }>, context); return node.clue ? { ...player, clue: node.clue } : player } }
 }
 const invalidAction = (): never => { throw new EngineError('invalid_action', 'That action is not available for the current task.') }
-function puzzleUpdate(definition: PuzzleDefinition, progress: PuzzleProgress, command: { expectedRevision: number; value: unknown }, submit: boolean): { progress: PuzzleProgress; rewards: PuzzleReward[] } {
+function puzzleUpdate(definition: PuzzleDefinition, progress: PuzzleProgress, command: { expectedRevision: number; value: unknown }, submit: boolean): { progress: PuzzleProgress; rewards: PuzzleReward[]; message?: string } {
   if (command.expectedRevision !== progress.revision) throw new EngineError('puzzle_conflict', 'A teammate updated this puzzle. Refresh to see their work before making another move.')
-  try { const result = updatePuzzle(definition, progress.state, command.value); return { progress: { revision: progress.revision + 1, state: result.state, completed: submit && result.completed }, rewards: result.rewards ?? [] } }
+  try { const result = updatePuzzle(definition, progress.state, command.value); return { progress: { revision: progress.revision + 1, state: result.state, completed: submit && result.completed }, rewards: result.rewards ?? [], ...(result.message ? { message: result.message } : {}) } }
   catch (error) { if (error instanceof PuzzleError) throw new EngineError(error.code, error.message); throw error }
 }
 function applyPuzzleRewards(state: GameState, checkpointId: string, now: string, rewards: PuzzleReward[], identity: { nodeId?: string; hintId?: string }): void {
@@ -180,7 +180,7 @@ function applyPuzzleRewards(state: GameState, checkpointId: string, now: string,
     const semanticId = `puzzle:${checkpointId}:${owner}:${reward.id}`
     const activeAward = state.ledger.some(entry => (entry.id === semanticId || entry.id.startsWith(`${semanticId}:`)) && !state.ledger.some(refund => refund.reverses === entry.id))
     if (activeAward) continue
-    score(state, { kind: 'action_points', checkpointId, ...identity, amount: reward.amount, at: now, reason: reward.label }, semanticId)
+    score(state, { kind: reward.kind ?? 'action_points', checkpointId, ...identity, amount: reward.amount, at: now, reason: reward.label }, semanticId)
     event(state, { type: 'points_changed', checkpointId, ...identity, amount: reward.amount, at: now, reason: reward.label })
   }
 }
@@ -194,6 +194,7 @@ function puzzleResponse(definition: PuzzleDefinition, state: PuzzleState): strin
     case 'rotation': return 'Picture aligned'
     case 'text': return 'Answer solved'
     case 'multiple_choice': return definition.type === 'multiple_choice' ? definition.options.find(option => option.id === state.optionId)?.label ?? 'Choice completed' : 'Choice completed'
+    case 'quiz': return `Quiz completed with ${state.correctCount} correct answers`
     case 'matching': return `${state.pairs.length} pairs matched`
     case 'sequence': return definition.type === 'sequence' ? state.order.map(id => definition.items.find(item => item.id === id)?.label ?? id).join(' ') : 'Sequence completed'
   }
@@ -243,7 +244,7 @@ export const actionRegistry: Readonly<Record<InteractiveNode['type'], ActionModu
       if (retained.length || discoveries.length) saved.puzzleDiscoveries = [...retained, ...discoveries.map(item => ({ itemId: item.id, solvedAt: context.now }))]
       applyPuzzleRewards(context.state, context.checkpoint.id, context.now, update.rewards, { nodeId: node.id })
       const bonus = update.rewards.reduce((sum, reward) => sum + reward.amount, 0)
-      return { accepted: true, next: saved.puzzle.completed ? node.next : undefined, message: saved.puzzle.completed ? 'Puzzle solved!' : bonus ? `Ingredient found — +${bonus} bonus points!` : 'Your puzzle progress is saved. Keep going.', audit: saved.puzzle.completed ? 'puzzle_completed' : 'puzzle_saved', ...(saved.puzzle.completed ? { response: puzzleResponse(node.puzzle, saved.puzzle.state) } : {}) }
+      return { accepted: true, next: saved.puzzle.completed ? node.next : undefined, message: saved.puzzle.completed ? 'Puzzle solved!' : update.message ?? (bonus ? `Ingredient found — +${bonus} bonus points!` : 'Your puzzle progress is saved. Keep going.'), audit: saved.puzzle.completed ? 'puzzle_completed' : 'puzzle_saved', ...(saved.puzzle.completed ? { response: puzzleResponse(node.puzzle, saved.puzzle.state) } : {}) }
     }, toPlayer: (node, context) => ({ id: node.id, type: node.type, prompt: node.prompt, puzzle: publicPuzzle(node.puzzle), progress: copy(context.state.checkpoints[context.checkpoint.id].nodes[node.id].puzzle ?? newPuzzle(node.puzzle)) }),
   }),
   verify_organizer: action('verify_organizer', { commands: [], execute: () => invalidAction(), toPlayer: node => ({ id: node.id, type: node.type, prompt: node.prompt }) }),
