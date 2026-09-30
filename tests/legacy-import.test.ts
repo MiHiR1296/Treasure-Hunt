@@ -18,3 +18,25 @@ test('legacy puzzle configs without server-verifiable structure cannot silently 
   assert.ok(result.warnings.some(warning => warning.includes('structured data')));
   assert.throws(() => importLegacy({ hunts: [{ id: 'one' }, { id: 'two' }] }));
 });
+
+test('legacy import preserves valid team, timing, display and public settings', () => {
+  const result = importLegacy({
+    hunts: [{
+      id: 'old', name: 'Configured quest',
+      settings: {
+        minTeamSize: 2, maxTeamSize: 6, sessionDurationSeconds: 5400,
+        assignmentVersion: 2, mode: 'sequential', leaderboard: 'live', ranking: 'points_time', map: 'visited',
+        registrationOpen: false, rules: 'Stay together.', completionMessage: 'You made it.',
+      },
+      theme: { primaryColor: '#0f766e', font: 'system', buttonShape: 'pill', feedback: true, successAnimation: 'celebrate' },
+    }],
+    checkpoints: [{ id: 'first', hunt_id: 'old', title: 'Start', points: 20, unlock_method: 'manual_code', manual_code: 'READY' }],
+  });
+  assert.deepEqual(result.issues, []);
+  assert.deepEqual(result.definition.settings, {
+    minTeamSize: 2, maxTeamSize: 6, sessionDurationSeconds: 5400, assignmentVersion: 2,
+    mode: 'sequential', leaderboard: 'live', ranking: 'points_time', map: 'visited',
+    registrationOpen: false, rules: 'Stay together.', completionMessage: 'You made it.',
+  });
+  assert.deepEqual(result.definition.theme, { primaryColor: '#0f766e', font: 'system', buttonShape: 'pill', feedback: true, successAnimation: 'celebrate' });
+});

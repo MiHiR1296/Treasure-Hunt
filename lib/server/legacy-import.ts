@@ -1,12 +1,94 @@
-import type { FlowNode, HintContent, HuntDefinition, PuzzleDefinition } from '../engine/types';
+import type { FlowNode, HintContent, HuntDefinition, HuntTheme, PuzzleDefinition } from '../engine/types';
 import { validateHunt } from '../engine';
 import { validatePuzzle } from '../engine/puzzles';
 import { HttpError } from './security';
 
 type Row = Record<string, unknown>;
 const rows = (value: unknown): Row[] => Array.isArray(value) ? value.filter(item => item && typeof item === 'object' && !Array.isArray(item)) : [];
+const object = (value: unknown): Row | undefined => value && typeof value === 'object' && !Array.isArray(value) ? value as Row : undefined;
 const text = (value: unknown, fallback = '') => typeof value === 'string' ? value : fallback;
 const number = (value: unknown, fallback: number) => typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+const finite = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+
+const settingSources = (hunt: Row): Row[] => [hunt.settings, hunt.config, hunt.options, hunt]
+  .map(object)
+  .filter((value): value is Row => Boolean(value));
+
+function settingValue(sources: Row[], keys: string[]) {
+  for (const source of sources) for (const key of keys) if (source[key] !== undefined) return source[key];
+  return undefined;
+}
+
+function importedSettings(hunt: Row, warnings: string[]): HuntDefinition['settings'] {
+  const sources = settingSources(hunt);
+  const settings: HuntDefinition['settings'] = { mode: 'sequential', leaderboard: 'live', registrationOpen: true };
+  const choice = <T extends string>(name: string, keys: string[], allowed: readonly T[]) => {
+    const value = settingValue(sources, keys);
+    if (value === undefined) return;
+    if (typeof value === 'string' && allowed.includes(value as T)) (settings as Record<string, unknown>)[name] = value;
+    else warnings.push(`Legacy ${name} setting was not imported because it is not supported: ${String(value)}.`);
+  };
+  const boundedNumber = (name: string, keys: string[], minimum: number, maximum: number) => {
+    const value = settingValue(sources, keys);
+    if (value === undefined) return;
+    const parsed = finite(value);
+    if (parsed === undefined || parsed < minimum || parsed > maximum || !Number.isInteger(parsed)) {
+      warnings.push(`Legacy ${name} setting was not imported because it must be an integer from ${minimum} to ${maximum}.`);
+      return;
+    }
+    (settings as Record<string, unknown>)[name] = parsed;
+  };
+  const optionalText = (name: string, keys: string[]) => {
+    const value = settingValue(sources, keys);
+    if (value !== undefined) {
+      if (typeof value === 'string') (settings as Record<string, unknown>)[name] = value;
+      else warnings.push(`Legacy ${name} setting was not imported because it is not text.`);
+    }
+  };
+  const optionalBoolean = (name: string, keys: string[]) => {
+    const value = settingValue(sources, keys);
+    if (value !== undefined) {
+      if (typeof value === 'boolean') (settings as Record<string, unknown>)[name] = value;
+      else warnings.push(`Legacy ${name} setting was not imported because it must be true or false.`);
+    }
+  };
+
+  // V1 exports used several spellings over time. Preserve valid values instead
+  // of silently replacing them with the importer defaults.
+  boundedNumber('minTeamSize', ['minTeamSize', 'min_team_size', 'minimumTeamSize', 'minimum_team_size', 'min_players', 'minimum_players'], 1, 1000);
+  boundedNumber('maxTeamSize', ['maxTeamSize', 'max_team_size', 'maximumTeamSize', 'maximum_team_size', 'max_players', 'maximum_players'], 1, 1000);
+  boundedNumber('sessionDurationSeconds', ['sessionDurationSeconds', 'session_duration_seconds', 'durationSeconds', 'duration_seconds'], 1, 31536000);
+  boundedNumber('assignmentVersion', ['assignmentVersion', 'assignment_version'], 2, 2);
+  choice('mode', ['mode'], ['sequential', 'open', 'dependency']);
+  choice('leaderboard', ['leaderboard'], ['live', 'hidden', 'finish']);
+  choice('ranking', ['ranking'], ['points', 'progress', 'points_time']);
+  choice('map', ['map'], ['none', 'all', 'visited']);
+  choice('photoRetention', ['photoRetention', 'photo_retention'], ['after_verification', 'after_event', 'retain']);
+  optionalText('rules', ['rules']);
+  optionalText('startsAt', ['startsAt', 'starts_at']);
+  optionalText('endsAt', ['endsAt', 'ends_at']);
+  optionalText('completionMessage', ['completionMessage', 'completion_message']);
+  optionalBoolean('registrationOpen', ['registrationOpen', 'registration_open']);
+  return settings;
+}
+
+function importedTheme(hunt: Row): HuntTheme | undefined {
+  const config = object(hunt.config);
+  const source = object(hunt.theme) ?? object(object(hunt.settings)?.theme) ?? object(config?.theme);
+  if (!source) return undefined;
+  const theme: HuntTheme = {};
+  const values: Array<[keyof HuntTheme, string[]]> = [
+    ['primaryColor', ['primaryColor', 'primary_color']], ['logoUrl', ['logoUrl', 'logo_url']],
+    ['coverUrl', ['coverUrl', 'cover_url']], ['backgroundUrl', ['backgroundUrl', 'background_url']],
+    ['font', ['font']], ['feedback', ['feedback']], ['buttonShape', ['buttonShape', 'button_shape']],
+    ['checkpointIconStyle', ['checkpointIconStyle', 'checkpoint_icon_style']], ['successAnimation', ['successAnimation', 'success_animation']],
+  ];
+  for (const [key, keys] of values) {
+    const value = keys.map(candidate => source[candidate]).find(candidate => candidate !== undefined);
+    if (value !== undefined) (theme as Record<string, unknown>)[key] = value;
+  }
+  return Object.keys(theme).length ? theme : undefined;
+}
 
 /** Content conversion only: legacy client-authoritative progress is not trusted. */
 export function importLegacy(source: unknown, huntId?: string) {
@@ -34,9 +116,11 @@ export function importLegacy(source: unknown, huntId?: string) {
     return value as PuzzleDefinition;
   }
   const checkpointRows = rows(exportData.checkpoints).filter(cp => cp.hunt_id === hunt.id).sort((a,b) => number(a.order_index,0)-number(b.order_index,0));
+  const theme = importedTheme(hunt);
   const definition: HuntDefinition = {
     schemaVersion: 1, id: `import-${id}`, version: 1, title: text(hunt.name, 'Imported hunt'), ...(hunt.description ? { description: text(hunt.description) } : {}),
-    settings: { mode: 'sequential', leaderboard: 'live', registrationOpen: true },
+    settings: importedSettings(hunt, warnings),
+    ...(theme ? { theme } : {}),
     dudQrs: checkpointRows.filter(cp => cp.is_dud_qr === true).map(cp => ({ token: text(cp.qr_code_value), message: text(cp.dud_message, 'Keep looking!') })),
     checkpoints: checkpointRows.filter(cp => cp.is_dud_qr !== true).map(cp => {
       const cpId = text(cp.id);

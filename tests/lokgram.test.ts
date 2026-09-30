@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
 import { lokgramPilotHunt } from '../lib/engine/lokgram'
 import { validateHunt } from '../lib/engine/validation'
 
@@ -29,4 +30,21 @@ test('Lokgram uses unified clue-plus-verification tasks and the threshold quiz',
       assert.ok(quiz.puzzle.questions.every(question => question.skipPenalty === undefined))
     }
   }
+})
+
+test('Lokgram export stays importable with its public settings and visual routes', () => {
+  const exported = JSON.parse(fs.readFileSync(new URL('../Hunts_V2/lokgram-pilot.json', import.meta.url), 'utf8'))
+  assert.deepEqual(validateHunt(exported), [])
+  assert.deepEqual(exported.settings, lokgramPilotHunt.settings)
+  assert.deepEqual(exported.theme, lokgramPilotHunt.theme)
+  assert.deepEqual(exported.checkpoints.map((checkpoint: { id: string }) => checkpoint.id), lokgramPilotHunt.checkpoints.map(checkpoint => checkpoint.id))
+})
+
+test('Lokgram has four balanced crossword variants with targeted clue hints', () => {
+  const crossword = lokgramPilotHunt.checkpoints[5]
+  const puzzleNodes = crossword.flow.nodes.filter(node => node.type === 'puzzle')
+  assert.equal(puzzleNodes.length, 4)
+  assert.ok(puzzleNodes.every(node => node.type === 'puzzle' && node.puzzle.type === 'crossword' && node.puzzle.entries.length === 6))
+  assert.equal(crossword.hints.filter(hint => hint.relevance?.puzzleItemId).length, 48)
+  assert.ok(crossword.hints.every(hint => hint.relevance?.nodeId ? ['variant-a', 'variant-b', 'variant-c', 'variant-d'].includes(hint.relevance.nodeId) : true))
 })
