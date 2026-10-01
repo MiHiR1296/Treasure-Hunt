@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useState, type KeyboardEvent } from 'react'
 import { PuzzleSaveMessage, usePuzzleSubmission, type PuzzlePlayerProps } from './shared'
+import { sudokuBoxDimensions } from '@/lib/engine/puzzles/helpers'
 
 function moveFocus(event: KeyboardEvent<HTMLInputElement>, row: number, column: number, rows: number, columns: number) {
   if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
@@ -37,11 +38,11 @@ export default function GridPuzzles({ definition, state, disabled, onChange }: P
   }, [definition.type, crosswordColumns])
 
   if (definition.type === 'sudoku' && state.type === 'sudoku') {
-    const box = Math.sqrt(definition.size)
+    const box = sudokuBoxDimensions(definition.size)
     return <div>
       <p className="mb-3 text-sm text-stone-600">Fill every row, column, and box with the numbers 1–{definition.size}. Printed numbers stay fixed. Arrow keys move between editable squares.</p>
       <div data-puzzle-grid role="group" aria-label="Sudoku puzzle grid" aria-busy={locked} className="mx-auto grid w-full max-w-md touch-manipulation border-2 border-stone-700" style={{ gridTemplateColumns: `repeat(${definition.size}, minmax(0, 1fr))` }}>
-        {state.grid.flatMap((row, r) => row.map((cell, c) => <input key={`${r}:${c}`} data-row={r} data-column={c} value={cell || ''} inputMode="numeric" pattern={`[1-${definition.size}]?`} maxLength={1} readOnly={locked || definition.givens[r][c] !== 0} tabIndex={definition.givens[r][c] ? -1 : 0} onFocus={event => event.currentTarget.select()} onKeyDown={event => moveFocus(event, r, c, definition.size, definition.size)} aria-label={`Row ${r + 1}, column ${c + 1}${definition.givens[r][c] ? ', printed number' : ''}`} className={`aspect-square w-full min-w-0 rounded-none border border-stone-300 text-center text-[clamp(0.75rem,4vw,1.125rem)] focus:z-10 focus:outline-emerald-600 ${locked ? 'opacity-60' : ''} ${definition.givens[r][c] ? 'bg-stone-200 font-bold text-stone-900' : 'bg-white text-emerald-900'}`} style={{ borderRightWidth: (c + 1) % box === 0 ? 2 : 1, borderBottomWidth: (r + 1) % box === 0 ? 2 : 1, borderRightColor: (c + 1) % box === 0 ? '#44403c' : undefined, borderBottomColor: (r + 1) % box === 0 ? '#44403c' : undefined }} onChange={event => {
+        {state.grid.flatMap((row, r) => row.map((cell, c) => <input key={`${r}:${c}`} data-row={r} data-column={c} value={cell || ''} inputMode="numeric" pattern={`[1-${definition.size}]?`} maxLength={1} readOnly={locked || definition.givens[r][c] !== 0} tabIndex={definition.givens[r][c] ? -1 : 0} onFocus={event => event.currentTarget.select()} onKeyDown={event => moveFocus(event, r, c, definition.size, definition.size)} aria-label={`Row ${r + 1}, column ${c + 1}${definition.givens[r][c] ? ', printed number' : ''}`} className={`aspect-square w-full min-w-0 rounded-none border border-stone-300 text-center text-[clamp(0.75rem,4vw,1.125rem)] focus:z-10 focus:outline-emerald-600 ${locked ? 'opacity-60' : ''} ${definition.givens[r][c] ? 'bg-stone-200 font-bold text-stone-900' : 'bg-white text-emerald-900'}`} style={{ borderRightWidth: (c + 1) % box.columns === 0 ? 2 : 1, borderBottomWidth: (r + 1) % box.rows === 0 ? 2 : 1, borderRightColor: (c + 1) % box.columns === 0 ? '#44403c' : undefined, borderBottomColor: (r + 1) % box.rows === 0 ? '#44403c' : undefined }} onChange={event => {
           if (locked) return
           const value = event.target.value
           if (value && !new RegExp(`^[1-${definition.size}]$`).test(value)) return

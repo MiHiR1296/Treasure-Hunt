@@ -6,6 +6,7 @@ import { buttonClass, CheckField, Field, inputClass, NumberField, TextField } fr
 import { moveItem, newId } from './model';
 import { defaultPuzzle } from './puzzleDefaults';
 import AssetField, { useBuilderMedia } from './AssetField';
+import PuzzleGenerator from './PuzzleGenerator';
 export { defaultPuzzle } from './puzzleDefaults';
 
 export const puzzleLabels: Record<PuzzleDefinition['type'], string> = {
@@ -46,14 +47,18 @@ export default function PuzzleEditor({ value, onChange }: { value: PuzzleDefinit
       <button type="button" className={buttonClass} onClick={() => onChange({ ...value, options: [...value.options, { id: newId('option', value.options.map(option => option.id)), label: '' }] })}>Add option</button>
     </>}
     {value.type === 'sudoku' && <>
+      <PuzzleGenerator key={value.type} value={value} onChange={onChange} />
       <Field label="Grid size"><select className={inputClass} value={value.size} onChange={event => {
-        const size = Number(event.target.value) as 4 | 9;
-        onChange(size === 4 ? defaultPuzzle('sudoku') : { type: 'sudoku', size, givens: [[5,3,0,0,7,0,0,0,0],[6,0,0,1,9,5,0,0,0],[0,9,8,0,0,0,0,6,0],[8,0,0,0,6,0,0,0,3],[4,0,0,8,0,3,0,0,1],[7,0,0,0,2,0,0,0,6],[0,6,0,0,0,0,2,8,0],[0,0,0,4,1,9,0,0,5],[0,0,0,0,8,0,0,7,9]] });
-      }}><option value={4}>4 × 4</option><option value={9}>9 × 9</option></select></Field>
+        const size = Number(event.target.value) as 4 | 6 | 9;
+        if (size === 4) onChange(defaultPuzzle('sudoku'));
+        else if (size === 6) onChange({ type: 'sudoku', size, givens: [[1,0,0,4,0,6],[0,5,6,0,2,0],[2,0,4,5,0,1],[0,6,0,2,3,0],[3,0,5,0,1,2],[6,1,0,3,0,5]] });
+        else onChange({ type: 'sudoku', size, givens: [[5,3,0,0,7,0,0,0,0],[6,0,0,1,9,5,0,0,0],[0,9,8,0,0,0,0,6,0],[8,0,0,0,6,0,0,0,3],[4,0,0,8,0,3,0,0,1],[7,0,0,0,2,0,0,0,6],[0,6,0,0,0,0,2,8,0],[0,0,0,4,1,9,0,0,5],[0,0,0,0,8,0,0,7,9]] });
+      }}><option value={4}>4 × 4</option><option value={6}>6 × 6</option><option value={9}>9 × 9</option></select></Field>
       <p className="text-sm leading-6 text-slate-600">Fill in starting numbers. Leave player cells blank. The puzzle must be solvable.</p>
       <div className="grid max-w-md gap-1" style={{ gridTemplateColumns: `repeat(${value.size}, minmax(0, 1fr))` }}>{value.givens.flatMap((row, rowIndex) => row.map((cell, columnIndex) => <input key={`${rowIndex}:${columnIndex}`} type="number" aria-label={`Starting number, row ${rowIndex + 1}, column ${columnIndex + 1}`} inputMode="numeric" min={1} max={value.size} className="h-11 min-w-0 rounded border border-slate-300 bg-white text-center text-sm" value={cell || ''} onChange={event => onChange({ ...value, givens: value.givens.map((candidateRow, candidateRowIndex) => candidateRowIndex === rowIndex ? candidateRow.map((candidateCell, candidateColumnIndex) => candidateColumnIndex === columnIndex ? Number(event.target.value) : candidateCell) : candidateRow) })} />))}</div>
     </>}
     {value.type === 'word_search' && <>
+      <PuzzleGenerator key={value.type} value={value} onChange={onChange} />
       <TextField label="Letter grid — one row per line" value={value.grid.map(row => row.join('')).join('\n')} multiline onChange={text => onChange({ ...value, grid: text.split('\n').map(row => Array.from(row.toUpperCase())) })} hint="Each row must have the same number of letters. Place each target word in the grid." />
       <TextField label="Words to find — one per line" value={value.words.join('\n')} multiline onChange={text => onChange({ ...value, words: text.split('\n').map(word => word.toUpperCase()) })} />
       <div className="grid gap-3 sm:grid-cols-2">
@@ -63,6 +68,7 @@ export default function PuzzleEditor({ value, onChange }: { value: PuzzleDefinit
       <p className="text-sm leading-6 text-slate-600">Players may continue after the required number. Every additional hidden word can award the configured bonus.</p>
     </>}
     {value.type === 'crossword' && <>
+      <PuzzleGenerator key={value.type} value={value} onChange={onChange} />
       <div className="grid grid-cols-2 gap-3"><NumberField label="Grid rows" value={value.rows} min={2} max={25} onChange={rows => onChange({ ...value, rows })} /><NumberField label="Grid columns" value={value.columns} min={2} max={25} onChange={columns => onChange({ ...value, columns })} /></div>
       <p className="text-sm leading-6 text-slate-600">Enter each clue, answer, starting position, and direction. The player layout stays exactly as authored.</p>
       {value.entries.map((entry, index) => <div key={entry.id} className="space-y-3 rounded-lg border border-slate-200 bg-white p-3">

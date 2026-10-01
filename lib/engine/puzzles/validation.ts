@@ -30,7 +30,7 @@ export function validatePuzzle(value: unknown): string[] {
       break
     }
     case 'sudoku': {
-      if (value.size !== 4 && value.size !== 9) { fail('Sudoku size must be 4 or 9.'); break }
+      if (value.size !== 4 && value.size !== 6 && value.size !== 9) { fail('Sudoku size must be 4, 6, or 9.'); break }
       if (!matrix(value.givens, value.size, value.size, cell => integer(cell, 0, value.size as number))) fail('Sudoku givens must be a square number grid; use 0 for blank cells.')
       else if (!sudokuSolvable(value.givens as number[][], value.size)) fail('Sudoku givens conflict, have no solution, or exceed the supported solving complexity.')
       else if ((value.givens as number[][]).every(row => row.every(Boolean))) fail('Sudoku needs at least one blank cell for the player.')

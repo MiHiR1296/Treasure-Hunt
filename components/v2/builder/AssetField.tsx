@@ -4,9 +4,15 @@
 
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { buttonClass, Field, inputClass } from './Fields';
+import type { GeneratedPuzzle, PuzzleGenerationInput } from '@/lib/engine/puzzles/generator';
 
 export interface BuilderAsset { id: string; url: string; contentType: string; bytes: number }
-export interface BuilderMediaServices { list: () => Promise<BuilderAsset[]>; upload: (file: File) => Promise<BuilderAsset>; makeJigsaw?: (mediaId: string, rows: number, columns: number) => Promise<import('@/lib/engine/puzzles/types').PuzzleDefinition> }
+export interface BuilderMediaServices {
+  list: () => Promise<BuilderAsset[]>;
+  upload: (file: File) => Promise<BuilderAsset>;
+  makeJigsaw?: (mediaId: string, rows: number, columns: number) => Promise<import('@/lib/engine/puzzles/types').PuzzleDefinition>;
+  generatePuzzles?: (input: PuzzleGenerationInput) => Promise<GeneratedPuzzle[]>;
+}
 const MediaContext = createContext<BuilderMediaServices | null>(null);
 export function BuilderMediaProvider({ services, children }: { services: BuilderMediaServices; children: ReactNode }) { return <MediaContext.Provider value={services}>{children}</MediaContext.Provider>; }
 export function useBuilderMedia() { return useContext(MediaContext); }

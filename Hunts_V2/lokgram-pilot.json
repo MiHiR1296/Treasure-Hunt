@@ -1,79 +1,74 @@
 {
-  "schemaVersion": 1,
   "id": "lokgram-pilot",
-  "version": 1,
-  "title": "Lokgram: The Learning Trail",
-  "description": "A nine-checkpoint family treasure hunt through Lokgram, combining outdoor discovery with friendly puzzles.",
-  "settings": {
-    "mode": "sequential",
-    "leaderboard": "live",
-    "ranking": "points_time",
-    "map": "visited",
-    "assignmentVersion": 2,
-    "maxTeamSize": 6,
-    "minTeamSize": 2,
-    "sessionDurationSeconds": 5400,
-    "registrationOpen": true,
-    "rules": "Stay together on public paths. Do not enter the school or library unless it is open and the organizer has confirmed access. No running is required. Hints cost points and are shared by the team. Ask the organizer for help if GPS or a puzzle misbehaves.",
-    "completionMessage": "You completed the Lokgram Learning Trail. Show this screen to the organizer at the confirmed prize stop."
-  },
   "theme": {
-    "primaryColor": "#0f766e",
     "font": "system",
     "feedback": true,
     "buttonShape": "pill",
-    "checkpointIconStyle": "numbers",
-    "successAnimation": "celebrate"
+    "primaryColor": "#0f766e",
+    "successAnimation": "celebrate",
+    "checkpointIconStyle": "numbers"
+  },
+  "title": "Lokgram: The Learning Trail",
+  "version": 1,
+  "settings": {
+    "map": "visited",
+    "mode": "sequential",
+    "rules": "Stay together on public paths. Do not enter the school or library unless it is open and the organizer has confirmed access. No running is required. Hints cost points and are shared by the team. Ask the organizer for help if GPS or a puzzle misbehaves.",
+    "ranking": "points_time",
+    "leaderboard": "live",
+    "maxTeamSize": 6,
+    "minTeamSize": 2,
+    "registrationOpen": true,
+    "assignmentVersion": 2,
+    "completionMessage": "You completed the Lokgram Learning Trail. Show this screen to the organizer at the confirmed prize stop.",
+    "sessionDurationSeconds": 5400
   },
   "checkpoints": [
     {
       "id": "mango-garden",
-      "title": "1 · The Green Beginning",
-      "basePoints": 10,
       "flow": {
-        "startNodeId": "arrival",
         "nodes": [
           {
             "id": "arrival",
-            "type": "verify_gps",
             "clue": "Your first destination is a leafy outdoor space in Lokgram, with trees, open paths, shaded corners, and room to pause. It carries the name of a tropical summer favourite—the fruit known for golden flesh, a sweet fragrance, and a taste people wait for all year. Find this refreshing green retreat, then let the map confirm when you are nearby.",
+            "next": "done",
+            "type": "verify_gps",
             "prompt": "When you have arrived, tap “I’m here — check location”.",
             "latitude": 19.229060298879688,
             "longitude": 73.12851504111595,
             "radiusMeters": 125,
-            "maxAccuracyMeters": 100,
-            "next": "done"
+            "maxAccuracyMeters": 100
           },
           {
             "id": "done",
             "type": "complete"
           }
-        ]
+        ],
+        "startNodeId": "arrival"
       },
       "hints": [
         {
           "id": "mango-nudge",
-          "title": "A little nudge",
           "cost": 2,
+          "title": "A little nudge",
           "content": {
-            "type": "text",
-            "text": "Think of the fruit that many people wait for in summer."
+            "text": "Think of the fruit that many people wait for in summer.",
+            "type": "text"
           }
         }
-      ]
+      ],
+      "title": "1 · The Green Beginning",
+      "basePoints": 10
     },
     {
       "id": "library-word-search",
-      "title": "2 · The Library Hunt",
-      "basePoints": 10,
       "flow": {
-        "startNodeId": "intro",
         "nodes": [
           {
             "id": "intro",
-            "type": "show_text",
-            "text": "Find all six library-related words in your grid. Your team receives one fixed variant; it will not change after refresh.",
-            "next": "route"
+            "next": "route",
+            "text": "Find all words in your grid. Your team receives one fixed variant; it will not change after a refresh. Once you submit, you will be locked out, so think well before submitting ",
+            "type": "show_text"
           },
           {
             "id": "route",
@@ -99,600 +94,823 @@
           },
           {
             "id": "variant-0",
+            "next": "reveal",
             "type": "puzzle",
-            "prompt": "Find all six hidden words.",
+            "prompt": "Find all six hidden words.\n\n(Players may continue after the required number. Every additional hidden word can award the configured bonus.)",
             "puzzle": {
-              "type": "word_search",
               "grid": [
                 [
-                  "B",
-                  "O",
-                  "O",
-                  "K",
-                  "O",
-                  "M",
-                  "U",
-                  "X",
-                  "H",
-                  "V"
-                ],
-                [
-                  "J",
-                  "U",
-                  "Q",
-                  "W",
-                  "X",
-                  "U",
+                  "I",
                   "N",
-                  "A",
-                  "R",
-                  "B"
-                ],
-                [
-                  "A",
-                  "U",
-                  "T",
-                  "H",
                   "O",
-                  "R",
+                  "S",
                   "S",
                   "E",
-                  "W",
+                  "L",
+                  "Y",
+                  "Y",
+                  "L",
+                  "Z",
                   "Y"
                 ],
                 [
-                  "I",
-                  "O",
-                  "Y",
-                  "S",
-                  "N",
-                  "A",
-                  "A",
-                  "B",
-                  "P",
-                  "C"
-                ],
-                [
-                  "P",
-                  "A",
-                  "G",
-                  "E",
                   "F",
-                  "D",
-                  "T",
-                  "R",
-                  "L",
-                  "C"
-                ],
-                [
                   "M",
                   "V",
+                  "S",
+                  "X",
+                  "V",
+                  "D",
+                  "Y",
+                  "B",
+                  "P",
+                  "R",
+                  "L"
+                ],
+                [
+                  "I",
+                  "B",
+                  "A",
+                  "A",
+                  "Z",
+                  "U",
+                  "M",
                   "K",
-                  "Z",
-                  "C",
-                  "Z",
-                  "M",
-                  "B",
-                  "H",
-                  "A"
-                ],
-                [
-                  "Q",
-                  "U",
                   "I",
-                  "E",
                   "T",
-                  "Q",
-                  "I",
-                  "O",
-                  "Q",
-                  "Z"
-                ],
-                [
-                  "R",
-                  "D",
-                  "G",
-                  "X",
-                  "Y",
-                  "T",
-                  "R",
-                  "X",
-                  "F",
-                  "I"
-                ],
-                [
-                  "S",
-                  "T",
-                  "O",
-                  "R",
-                  "Y",
-                  "Y",
-                  "L",
-                  "Y",
-                  "R",
-                  "N"
-                ],
-                [
-                  "Q",
-                  "I",
-                  "E",
-                  "X",
-                  "F",
-                  "B",
-                  "M",
-                  "B",
-                  "P",
-                  "V"
-                ]
-              ],
-              "words": [
-                "BOOK",
-                "AUTHOR",
-                "PAGE",
-                "QUIET",
-                "STORY",
-                "READ"
-              ]
-            },
-            "next": "reveal"
-          },
-          {
-            "id": "variant-1",
-            "type": "puzzle",
-            "prompt": "Find all six hidden words.",
-            "puzzle": {
-              "type": "word_search",
-              "grid": [
-                [
-                  "N",
-                  "O",
-                  "V",
-                  "E",
-                  "L",
-                  "U",
-                  "S",
-                  "R",
-                  "I",
-                  "I"
-                ],
-                [
                   "W",
-                  "A",
+                  "H"
+                ],
+                [
                   "C",
-                  "Q",
-                  "K",
-                  "X",
+                  "U",
+                  "Y",
                   "G",
-                  "K",
+                  "T",
+                  "I",
+                  "O",
+                  "O",
+                  "E",
+                  "L",
+                  "E",
+                  "C"
+                ],
+                [
+                  "T",
+                  "E",
+                  "B",
                   "S",
+                  "I",
+                  "G",
+                  "C",
+                  "O",
+                  "E",
+                  "K",
+                  "H",
                   "U"
                 ],
                 [
                   "I",
-                  "K",
                   "H",
-                  "F",
-                  "C",
-                  "E",
-                  "L",
-                  "T",
-                  "T",
-                  "I"
-                ],
-                [
+                  "V",
                   "N",
-                  "O",
-                  "A",
-                  "I",
-                  "K",
+                  "W",
+                  "N",
                   "P",
-                  "U",
-                  "U",
                   "B",
+                  "M",
+                  "A",
+                  "J",
                   "R"
                 ],
                 [
-                  "J",
-                  "I",
-                  "P",
-                  "W",
-                  "X",
-                  "D",
-                  "Y",
-                  "C",
-                  "B",
-                  "J"
-                ],
-                [
-                  "F",
-                  "I",
-                  "T",
-                  "Y",
-                  "Y",
-                  "S",
-                  "H",
-                  "E",
-                  "L",
-                  "F"
-                ],
-                [
+                  "O",
                   "M",
+                  "L",
+                  "I",
+                  "W",
+                  "A",
+                  "A",
+                  "E",
+                  "P",
+                  "K",
+                  "K",
+                  "R"
+                ],
+                [
+                  "N",
+                  "Q",
+                  "R",
+                  "E",
+                  "H",
+                  "I",
+                  "S",
+                  "T",
+                  "O",
+                  "R",
+                  "Y",
+                  "O"
+                ],
+                [
+                  "X",
                   "N",
                   "E",
-                  "W",
-                  "B",
-                  "B",
+                  "D",
                   "Z",
-                  "I",
                   "C",
+                  "E",
+                  "O",
+                  "I",
+                  "M",
+                  "V",
                   "T"
                 ],
                 [
-                  "K",
-                  "L",
-                  "R",
-                  "P",
                   "O",
+                  "F",
                   "E",
-                  "M",
-                  "A",
-                  "B",
-                  "X"
-                ],
-                [
+                  "L",
+                  "J",
+                  "R",
+                  "R",
+                  "N",
                   "G",
-                  "Q",
-                  "B",
-                  "V",
-                  "C",
+                  "O",
                   "M",
-                  "M",
-                  "M",
-                  "S",
                   "N"
                 ],
                 [
-                  "E",
-                  "J",
-                  "K",
                   "V",
-                  "X",
-                  "W",
-                  "D",
-                  "R",
                   "O",
-                  "W"
+                  "C",
+                  "A",
+                  "B",
+                  "U",
+                  "L",
+                  "A",
+                  "R",
+                  "Y",
+                  "N",
+                  "E"
+                ],
+                [
+                  "R",
+                  "E",
+                  "F",
+                  "E",
+                  "R",
+                  "E",
+                  "N",
+                  "C",
+                  "E",
+                  "R",
+                  "C",
+                  "M"
                 ]
               ],
+              "type": "word_search",
               "words": [
-                "NOVEL",
-                "CHAPTER",
-                "SHELF",
+                "IMAGINATION",
+                "VOCABULARY",
+                "NOTEBOOK",
+                "LESSON",
                 "STUDY",
-                "POEM",
-                "WORD"
-              ]
-            },
-            "next": "reveal"
+                "MENTOR",
+                "HISTORY",
+                "FICTION",
+                "POETRY",
+                "REFERENCE",
+                "CHAPTER",
+                "ARCHIVE"
+              ],
+              "minimumWords": 6,
+              "bonusPerExtraWord": 2
+            }
           },
           {
-            "id": "variant-2",
+            "id": "variant-1",
+            "next": "reveal",
             "type": "puzzle",
-            "prompt": "Find all six hidden words.",
+            "prompt": "Find all six hidden words.\n\n(Players may continue after the required number. Every additional hidden word can award the configured bonus.)",
             "puzzle": {
-              "type": "word_search",
               "grid": [
                 [
-                  "A",
-                  "S",
+                  "E",
                   "W",
-                  "B",
-                  "Z",
-                  "S",
-                  "U",
-                  "L",
-                  "W",
-                  "L"
-                ],
-                [
-                  "U",
-                  "L",
-                  "Y",
-                  "A",
-                  "U",
+                  "M",
                   "D",
                   "I",
+                  "S",
                   "C",
-                  "P",
-                  "Z"
-                ],
-                [
-                  "T",
-                  "P",
-                  "T",
-                  "I",
-                  "T",
-                  "L",
+                  "O",
+                  "V",
                   "E",
-                  "A",
-                  "T",
-                  "R"
-                ],
-                [
-                  "H",
-                  "F",
-                  "L",
                   "R",
-                  "T",
-                  "Q",
-                  "P",
-                  "G",
-                  "M",
                   "Y"
                 ],
                 [
-                  "O",
-                  "Z",
-                  "D",
                   "C",
-                  "D",
-                  "E",
-                  "I",
-                  "Q",
-                  "Y",
-                  "U"
-                ],
-                [
-                  "R",
-                  "S",
-                  "Y",
-                  "D",
-                  "R",
                   "N",
-                  "P",
-                  "U",
-                  "F",
-                  "L"
-                ],
-                [
-                  "L",
-                  "E",
-                  "A",
+                  "O",
+                  "C",
                   "R",
-                  "N",
-                  "S",
-                  "B",
+                  "T",
+                  "K",
+                  "C",
+                  "T",
                   "M",
-                  "W",
-                  "C"
-                ],
-                [
-                  "P",
-                  "Y",
-                  "R",
-                  "O",
-                  "T",
-                  "S",
-                  "B",
-                  "F",
-                  "K",
-                  "B"
-                ],
-                [
-                  "C",
-                  "L",
-                  "Y",
-                  "S",
-                  "C",
-                  "Q",
-                  "H",
-                  "A",
-                  "G",
-                  "R"
-                ],
-                [
-                  "Q",
-                  "U",
-                  "I",
-                  "E",
-                  "T",
-                  "B",
-                  "Q",
-                  "K",
-                  "F",
-                  "N"
-                ]
-              ],
-              "words": [
-                "AUTHOR",
-                "TITLE",
-                "PAPER",
-                "LEARN",
-                "STORY",
-                "QUIET"
-              ]
-            },
-            "next": "reveal"
-          },
-          {
-            "id": "variant-3",
-            "type": "puzzle",
-            "prompt": "Find all six hidden words.",
-            "puzzle": {
-              "type": "word_search",
-              "grid": [
-                [
-                  "R",
-                  "E",
-                  "A",
-                  "D",
-                  "E",
-                  "R",
-                  "Z",
                   "N",
-                  "R",
-                  "L"
-                ],
-                [
-                  "X",
-                  "P",
-                  "Z",
-                  "K",
-                  "H",
-                  "N",
-                  "Z",
-                  "N",
-                  "T",
                   "I"
                 ],
                 [
-                  "U",
-                  "S",
-                  "A",
-                  "X",
-                  "T",
-                  "S",
-                  "S",
-                  "H",
-                  "F",
-                  "B"
-                ],
-                [
-                  "D",
-                  "O",
-                  "X",
-                  "G",
-                  "S",
-                  "T",
-                  "T",
-                  "Q",
-                  "Q",
-                  "R"
-                ],
-                [
-                  "A",
                   "O",
                   "N",
+                  "O",
+                  "I",
+                  "T",
+                  "A",
                   "R",
                   "E",
-                  "F",
-                  "S",
-                  "V",
-                  "E",
-                  "A"
-                ],
-                [
-                  "C",
-                  "H",
-                  "A",
                   "P",
-                  "T",
-                  "E",
-                  "R",
-                  "V",
-                  "D",
-                  "R"
-                ],
-                [
-                  "V",
-                  "Y",
-                  "C",
-                  "P",
-                  "A",
-                  "P",
-                  "L",
-                  "L",
-                  "F",
-                  "Y"
-                ],
-                [
-                  "M",
-                  "Q",
                   "O",
-                  "T",
-                  "E",
                   "O",
-                  "P",
-                  "G",
-                  "Q",
                   "C"
                 ],
                 [
+                  "M",
+                  "Q",
+                  "D",
+                  "I",
+                  "Z",
+                  "C",
+                  "A",
+                  "H",
+                  "I",
+                  "G",
+                  "R",
+                  "E"
+                ],
+                [
+                  "M",
                   "S",
+                  "U",
                   "N",
+                  "T",
+                  "M",
+                  "L",
+                  "S",
+                  "O",
                   "N",
+                  "E",
+                  "V"
+                ],
+                [
+                  "U",
+                  "P",
+                  "V",
+                  "E",
+                  "W",
+                  "A",
+                  "S",
+                  "C",
+                  "F",
+                  "I",
+                  "S",
+                  "I"
+                ],
+                [
+                  "N",
+                  "K",
+                  "L",
+                  "O",
+                  "S",
+                  "U",
+                  "V",
+                  "M",
+                  "U",
+                  "N",
+                  "P",
+                  "D"
+                ],
+                [
+                  "I",
+                  "N",
+                  "R",
+                  "P",
+                  "C",
+                  "T",
+                  "H",
+                  "R",
+                  "Z",
+                  "E",
+                  "E",
+                  "E"
+                ],
+                [
+                  "T",
+                  "K",
+                  "N",
+                  "S",
+                  "L",
+                  "U",
+                  "I",
+                  "E",
+                  "E",
+                  "T",
+                  "C",
+                  "N"
+                ],
+                [
+                  "Y",
+                  "R",
+                  "I",
+                  "U",
                   "Q",
                   "N",
+                  "I",
+                  "O",
+                  "G",
+                  "S",
+                  "T",
+                  "C"
+                ],
+                [
+                  "H",
+                  "D",
+                  "K",
+                  "X",
+                  "L",
+                  "M",
+                  "P",
+                  "R",
+                  "N",
+                  "I",
                   "B",
+                  "E"
+                ],
+                [
+                  "G",
+                  "N",
+                  "I",
+                  "N",
+                  "O",
+                  "S",
+                  "A",
+                  "E",
+                  "R",
+                  "L",
+                  "C",
+                  "O"
+                ]
+              ],
+              "type": "word_search",
+              "words": [
+                "OBSERVATION",
+                "COOPERATION",
+                "DISCUSSION",
+                "INQUIRY",
+                "LISTENING",
+                "RESPECT",
+                "TEAMWORK",
+                "COMMUNITY",
+                "REASONING",
+                "EVIDENCE",
+                "QUESTION",
+                "DISCOVERY"
+              ],
+              "minimumWords": 6,
+              "bonusPerExtraWord": 2
+            }
+          },
+          {
+            "id": "variant-2",
+            "next": "reveal",
+            "type": "puzzle",
+            "prompt": "Find all six hidden words.\n\n\n(Players may continue after the required number. Every additional hidden word can award the configured bonus.)",
+            "puzzle": {
+              "grid": [
+                [
+                  "W",
+                  "G",
+                  "H",
+                  "J",
+                  "Y",
+                  "R",
+                  "A",
+                  "R",
+                  "B",
+                  "I",
+                  "L",
+                  "A"
+                ],
+                [
+                  "H",
+                  "A",
+                  "A",
+                  "R",
+                  "E",
+                  "S",
+                  "E",
+                  "A",
+                  "R",
+                  "C",
+                  "H",
+                  "F"
+                ],
+                [
+                  "A",
+                  "O",
+                  "Y",
+                  "A",
+                  "L",
+                  "T",
+                  "P",
+                  "R",
+                  "F",
+                  "E",
+                  "H",
+                  "E"
+                ],
+                [
+                  "K",
+                  "H",
+                  "N",
+                  "R",
+                  "P",
+                  "A",
+                  "A",
+                  "K",
+                  "G",
+                  "C",
+                  "E",
+                  "C"
+                ],
+                [
+                  "F",
+                  "K",
+                  "C",
+                  "A",
+                  "E",
+                  "U",
+                  "N",
+                  "D",
+                  "X",
+                  "U",
+                  "C",
+                  "N"
+                ],
+                [
+                  "L",
+                  "R",
+                  "H",
+                  "Y",
+                  "T",
+                  "V",
+                  "E",
+                  "R",
+                  "D",
+                  "R",
+                  "O",
+                  "E"
+                ],
+                [
+                  "E",
+                  "C",
+                  "E",
+                  "H",
+                  "M",
+                  "L",
+                  "O",
+                  "C",
+                  "U",
+                  "I",
+                  "R",
+                  "D"
+                ],
+                [
+                  "H",
+                  "M",
+                  "O",
+                  "A",
+                  "W",
+                  "V",
+                  "L",
+                  "C",
+                  "T",
+                  "O",
+                  "L",
+                  "I"
+                ],
+                [
+                  "S",
+                  "R",
+                  "I",
+                  "O",
+                  "D",
+                  "Y",
+                  "E",
+                  "S",
+                  "S",
+                  "S",
+                  "J",
+                  "V"
+                ],
+                [
+                  "C",
+                  "R",
+                  "N",
+                  "Z",
+                  "D",
+                  "I",
+                  "E",
+                  "R",
+                  "L",
+                  "I",
+                  "U",
+                  "E"
+                ],
+                [
+                  "N",
+                  "K",
+                  "I",
+                  "U",
+                  "H",
+                  "U",
+                  "N",
+                  "Y",
+                  "Z",
+                  "T",
+                  "D",
+                  "A"
+                ],
+                [
+                  "T",
+                  "Y",
+                  "V",
+                  "X",
                   "Q",
+                  "T",
+                  "C",
+                  "G",
+                  "D",
+                  "Y",
+                  "T",
+                  "D"
+                ]
+              ],
+              "type": "word_search",
+              "words": [
+                "KNOWLEDGE",
+                "CURIOSITY",
+                "RESEARCH",
+                "DISCOVERY",
+                "CHAPTER",
+                "JOURNAL",
+                "AUTHOR",
+                "LIBRARY",
+                "QUESTION",
+                "EVIDENCE",
+                "READING",
+                "SHELF"
+              ],
+              "minimumWords": 6,
+              "bonusPerExtraWord": 2
+            }
+          },
+          {
+            "id": "variant-3",
+            "next": "reveal",
+            "type": "puzzle",
+            "prompt": "Find all six hidden words.\n\n(Players may continue after the required number. Every additional hidden word can award the configured bonus.)",
+            "puzzle": {
+              "grid": [
+                [
+                  "R",
+                  "F",
+                  "R",
+                  "I",
+                  "E",
+                  "N",
+                  "D",
+                  "S",
+                  "H",
+                  "I",
+                  "P",
+                  "I"
+                ],
+                [
+                  "R",
+                  "S",
+                  "S",
+                  "E",
+                  "N",
+                  "D",
+                  "N",
+                  "I",
+                  "K",
+                  "B",
+                  "H",
+                  "M"
+                ],
+                [
+                  "W",
+                  "X",
+                  "A",
+                  "S",
+                  "L",
+                  "S",
+                  "H",
                   "Z",
+                  "L",
+                  "T",
+                  "O",
+                  "O"
+                ],
+                [
+                  "F",
+                  "X",
+                  "K",
+                  "U",
+                  "L",
+                  "I",
+                  "B",
+                  "A",
+                  "K",
+                  "W",
+                  "M",
+                  "O"
+                ],
+                [
+                  "U",
+                  "A",
+                  "B",
+                  "O",
+                  "Q",
+                  "E",
+                  "C",
+                  "V",
+                  "J",
+                  "C",
+                  "E",
+                  "R"
+                ],
+                [
+                  "T",
+                  "P",
+                  "B",
+                  "H",
+                  "O",
+                  "K",
+                  "A",
+                  "T",
+                  "J",
+                  "T",
+                  "W",
+                  "S"
+                ],
+                [
+                  "U",
+                  "S",
+                  "G",
+                  "L",
+                  "B",
+                  "B",
+                  "E",
+                  "R",
+                  "N",
+                  "E",
+                  "O",
+                  "S"
+                ],
+                [
+                  "R",
+                  "F",
+                  "I",
+                  "O",
                   "Z",
+                  "A",
+                  "T",
+                  "E",
+                  "N",
+                  "N",
+                  "R",
+                  "A"
+                ],
+                [
+                  "E",
+                  "T",
+                  "A",
+                  "O",
+                  "C",
+                  "Q",
+                  "D",
+                  "X",
+                  "F",
+                  "I",
+                  "K",
                   "L"
                 ],
                 [
-                  "B",
-                  "O",
-                  "O",
+                  "N",
+                  "R",
                   "K",
-                  "V",
-                  "M",
-                  "F",
                   "H",
+                  "B",
+                  "U",
                   "S",
-                  "Y"
+                  "T",
+                  "E",
+                  "Y",
+                  "N",
+                  "C"
+                ],
+                [
+                  "D",
+                  "H",
+                  "E",
+                  "C",
+                  "T",
+                  "P",
+                  "N",
+                  "J",
+                  "J",
+                  "T",
+                  "Y",
+                  "G"
+                ],
+                [
+                  "R",
+                  "R",
+                  "Z",
+                  "S",
+                  "K",
+                  "E",
+                  "G",
+                  "A",
+                  "R",
+                  "U",
+                  "O",
+                  "C"
                 ]
               ],
+              "type": "word_search",
               "words": [
-                "READER",
-                "LIBRARY",
-                "CHAPTER",
-                "PAGE",
-                "POET",
-                "BOOK"
-              ]
-            },
-            "next": "reveal"
+                "SCHOOLHOUSE",
+                "CLASSROOM",
+                "TEACHER",
+                "STUDENT",
+                "LEARNING",
+                "TEXTBOOK",
+                "BLACKBOARD",
+                "HOMEWORK",
+                "FRIENDSHIP",
+                "KINDNESS",
+                "COURAGE",
+                "FUTURE"
+              ],
+              "minimumWords": 6,
+              "bonusPerExtraWord": 2
+            }
           },
           {
             "id": "reveal",
-            "type": "show_text",
+            "next": "done",
             "text": "Books, pages, quiet corners, and curious minds point you toward the Satyamev Jayate Public Library area.",
-            "next": "done"
+            "type": "show_text"
           },
           {
             "id": "done",
             "type": "complete"
           }
-        ]
+        ],
+        "startNodeId": "intro"
       },
       "hints": [
         {
           "id": "word-search-help",
-          "title": "Reveal one word",
-          "cost": 3,
+          "cost": 0,
+          "title": "Help ME!!!",
           "content": {
-            "type": "text",
-            "text": "Start with the shortest word in your list and scan across each row."
+            "text": "Start with the shortest word in your list and scan across each row.",
+            "type": "text"
           }
         }
-      ]
+      ],
+      "title": "2 · The Thinking Hunt",
+      "basePoints": 10
     },
     {
       "id": "truth-in-action",
-      "title": "3 · Truth in Action",
-      "basePoints": 10,
       "flow": {
-        "startNodeId": "quiz",
         "nodes": [
           {
             "id": "quiz",
-            "type": "puzzle",
             "clue": "“Satyamev Jayate” means “Truth alone triumphs.” Work together and choose the fairest, most evidence-based response.",
+            "next": "done",
+            "type": "puzzle",
             "prompt": "Answer any three questions correctly to continue. You may skip the others without losing points.",
             "puzzle": {
               "type": "quiz",
-              "minimumCorrect": 3,
-              "bonusPerAdditionalCorrect": 2,
               "questions": [
                 {
                   "id": "vote",
@@ -884,126 +1102,128 @@
                   ],
                   "correctOptionId": "team-0"
                 }
-              ]
-            },
-            "next": "done"
+              ],
+              "minimumCorrect": 3,
+              "bonusPerAdditionalCorrect": 2
+            }
           },
           {
             "id": "done",
             "type": "complete"
           }
-        ]
+        ],
+        "startNodeId": "quiz"
       },
       "hints": [
         {
           "id": "truth-nudge",
-          "title": "A gentle nudge",
           "cost": 2,
+          "title": "A gentle nudge",
           "content": {
-            "type": "text",
-            "text": "Choose the answer that is fair, evidence-based, and considerate of others."
+            "text": "Choose the answer that is fair, evidence-based, and considerate of others.",
+            "type": "text"
           }
         }
-      ]
+      ],
+      "title": "3 · Truth in Action",
+      "basePoints": 10
     },
     {
       "id": "satyamev-library",
-      "title": "4 · The Quiet Corner",
-      "basePoints": 10,
       "flow": {
-        "startNodeId": "arrival",
         "nodes": [
           {
             "id": "arrival",
-            "type": "verify_gps",
             "clue": "I am full of chapters, tales, and facts, yet I am not a single book. I ask you to keep your voice down while you explore worlds without leaving your chair. You are looking for a place where pages turn, questions are welcome, and a neighbourhood can learn together.",
+            "next": "done",
+            "type": "verify_gps",
             "prompt": "When you are at the public approach, tap “I’m here — check location”.",
             "latitude": 19.226288449138696,
             "longitude": 73.12952504158153,
             "radiusMeters": 120,
-            "maxAccuracyMeters": 100,
-            "next": "done"
+            "maxAccuracyMeters": 100
           },
           {
             "id": "done",
             "type": "complete"
           }
-        ]
+        ],
+        "startNodeId": "arrival"
       },
       "hints": [
         {
           "id": "library-nudge",
-          "title": "A location nudge",
           "cost": 4,
+          "title": "A location nudge",
           "content": {
-            "type": "text",
-            "text": "Use the broad map area and look for the public library reference in the event briefing."
+            "text": "Use the broad map area and look for the public library reference in the event briefing.",
+            "type": "text"
           }
         }
-      ]
+      ],
+      "title": "4 · The Quiet Corner",
+      "basePoints": 10
     },
     {
       "id": "picture-next-place",
-      "title": "5 · Picture the Next Place",
-      "basePoints": 10,
       "flow": {
-        "startNodeId": "jigsaw",
         "nodes": [
           {
             "id": "jigsaw",
+            "next": "reveal",
             "type": "puzzle",
             "prompt": "Assemble the artwork to discover the next landmark. Tap two tiles to swap them.",
             "puzzle": {
-              "type": "jigsaw",
               "rows": 3,
-              "columns": 3,
+              "type": "jigsaw",
               "pieces": [
                 {
                   "id": "tile-1",
-                  "imageUrl": "/v2/lokgram/jigsaw-1.png",
-                  "alt": "Top-left section of the blue and gold artwork"
+                  "alt": "Top-left section of the blue and gold artwork",
+                  "imageUrl": "/v2/lokgram/jigsaw-1.png"
                 },
                 {
                   "id": "tile-2",
-                  "imageUrl": "/v2/lokgram/jigsaw-2.png",
-                  "alt": "Top-center section of the blue and gold artwork"
+                  "alt": "Top-center section of the blue and gold artwork",
+                  "imageUrl": "/v2/lokgram/jigsaw-2.png"
                 },
                 {
                   "id": "tile-3",
-                  "imageUrl": "/v2/lokgram/jigsaw-3.png",
-                  "alt": "Top-right section of the blue and gold artwork"
+                  "alt": "Top-right section of the blue and gold artwork",
+                  "imageUrl": "/v2/lokgram/jigsaw-3.png"
                 },
                 {
                   "id": "tile-4",
-                  "imageUrl": "/v2/lokgram/jigsaw-4.png",
-                  "alt": "Middle-left section of the blue and gold artwork"
+                  "alt": "Middle-left section of the blue and gold artwork",
+                  "imageUrl": "/v2/lokgram/jigsaw-4.png"
                 },
                 {
                   "id": "tile-5",
-                  "imageUrl": "/v2/lokgram/jigsaw-5.png",
-                  "alt": "Middle-center section of the blue and gold artwork"
+                  "alt": "Middle-center section of the blue and gold artwork",
+                  "imageUrl": "/v2/lokgram/jigsaw-5.png"
                 },
                 {
                   "id": "tile-6",
-                  "imageUrl": "/v2/lokgram/jigsaw-6.png",
-                  "alt": "Middle-right section of the blue and gold artwork"
+                  "alt": "Middle-right section of the blue and gold artwork",
+                  "imageUrl": "/v2/lokgram/jigsaw-6.png"
                 },
                 {
                   "id": "tile-7",
-                  "imageUrl": "/v2/lokgram/jigsaw-7.png",
-                  "alt": "Bottom-left section of the blue and gold artwork"
+                  "alt": "Bottom-left section of the blue and gold artwork",
+                  "imageUrl": "/v2/lokgram/jigsaw-7.png"
                 },
                 {
                   "id": "tile-8",
-                  "imageUrl": "/v2/lokgram/jigsaw-8.png",
-                  "alt": "Bottom-center section of the blue and gold artwork"
+                  "alt": "Bottom-center section of the blue and gold artwork",
+                  "imageUrl": "/v2/lokgram/jigsaw-8.png"
                 },
                 {
                   "id": "tile-9",
-                  "imageUrl": "/v2/lokgram/jigsaw-9.png",
-                  "alt": "Bottom-right section of the blue and gold artwork"
+                  "alt": "Bottom-right section of the blue and gold artwork",
+                  "imageUrl": "/v2/lokgram/jigsaw-9.png"
                 }
               ],
+              "columns": 3,
               "solution": [
                 "tile-1",
                 "tile-2",
@@ -1015,46 +1235,45 @@
                 "tile-8",
                 "tile-9"
               ]
-            },
-            "next": "reveal"
+            }
           },
           {
             "id": "reveal",
-            "type": "show_text",
+            "next": "done",
             "text": "The picture is complete. Look for the place of bells, books, and bright minds.",
-            "next": "done"
+            "type": "show_text"
           },
           {
             "id": "done",
             "type": "complete"
           }
-        ]
+        ],
+        "startNodeId": "jigsaw"
       },
       "hints": [
         {
           "id": "picture-help",
-          "title": "See the reference",
           "cost": 4,
+          "title": "See the reference",
           "content": {
-            "type": "image",
+            "alt": "The complete blue and gold artwork.",
             "url": "/v2/lokgram/jigsaw-source.png",
-            "alt": "The complete blue and gold artwork."
+            "type": "image"
           }
         }
-      ]
+      ],
+      "title": "5 · Picture the Next Place",
+      "basePoints": 10
     },
     {
       "id": "school-crossword",
-      "title": "6 · Bells, Books, Belonging",
-      "basePoints": 10,
       "flow": {
-        "startNodeId": "intro",
         "nodes": [
           {
             "id": "intro",
-            "type": "show_text",
-            "text": "Complete this small crossword. Every answer is connected to learning, friendship, or the sounds of a school day. Your team receives one of four fixed variants.",
-            "next": "variant-route"
+            "next": "variant-route",
+            "text": "Complete this small crossword. ",
+            "type": "show_text"
           },
           {
             "id": "variant-route",
@@ -1080,1268 +1299,1274 @@
           },
           {
             "id": "variant-a",
+            "next": "reveal",
             "type": "puzzle",
             "prompt": "Variant A — solve the learning-themed crossword.",
             "puzzle": {
-              "type": "crossword",
               "rows": 10,
+              "type": "crossword",
               "columns": 12,
               "entries": [
                 {
                   "id": "book",
+                  "row": 1,
                   "clue": "Something with pages",
                   "answer": "BOOK",
-                  "row": 1,
                   "column": 3,
                   "direction": "down"
                 },
                 {
                   "id": "class",
+                  "row": 0,
                   "clue": "A group learning together",
                   "answer": "CLASS",
-                  "row": 0,
                   "column": 6,
                   "direction": "down"
                 },
                 {
                   "id": "bell",
+                  "row": 1,
                   "clue": "A sound that can begin a school day",
                   "answer": "BELL",
-                  "row": 1,
                   "column": 3,
                   "direction": "across"
                 },
                 {
                   "id": "teach",
+                  "row": 2,
                   "clue": "Help someone learn",
                   "answer": "TEACH",
-                  "row": 2,
                   "column": 4,
                   "direction": "across"
                 },
                 {
                   "id": "learn",
+                  "row": 1,
                   "clue": "Gain knowledge",
                   "answer": "LEARN",
-                  "row": 1,
                   "column": 5,
                   "direction": "down"
                 },
                 {
                   "id": "friend",
+                  "row": 0,
                   "clue": "A person who stands by you",
                   "answer": "FRIEND",
-                  "row": 0,
                   "column": 0,
                   "direction": "across"
                 }
               ]
-            },
-            "next": "reveal"
+            }
           },
           {
             "id": "variant-b",
+            "next": "reveal",
             "type": "puzzle",
             "prompt": "Variant B — solve the learning-themed crossword.",
             "puzzle": {
-              "type": "crossword",
               "rows": 10,
+              "type": "crossword",
               "columns": 12,
               "entries": [
                 {
                   "id": "page",
+                  "row": 0,
                   "clue": "One side of a book",
                   "answer": "PAGE",
-                  "row": 0,
                   "column": 0,
                   "direction": "down"
                 },
                 {
                   "id": "lesson",
+                  "row": 1,
                   "clue": "Something taught in class",
                   "answer": "LESSON",
-                  "row": 1,
                   "column": 4,
                   "direction": "down"
                 },
                 {
                   "id": "ring",
+                  "row": 1,
                   "clue": "A circular shape or a bell sound",
                   "answer": "RING",
-                  "row": 1,
                   "column": 2,
                   "direction": "down"
                 },
                 {
                   "id": "guide",
+                  "row": 2,
                   "clue": "A person or thing that shows the way",
                   "answer": "GUIDE",
-                  "row": 2,
                   "column": 0,
                   "direction": "across"
                 },
                 {
                   "id": "study",
+                  "row": 3,
                   "clue": "Spend time learning",
                   "answer": "STUDY",
-                  "row": 3,
                   "column": 4,
                   "direction": "across"
                 },
                 {
                   "id": "team",
+                  "row": 3,
                   "clue": "A group working together",
                   "answer": "TEAM",
-                  "row": 3,
                   "column": 5,
                   "direction": "down"
                 }
               ]
-            },
-            "next": "reveal"
+            }
           },
           {
             "id": "variant-c",
+            "next": "reveal",
             "type": "puzzle",
             "prompt": "Variant C — solve the learning-themed crossword.",
             "puzzle": {
-              "type": "crossword",
               "rows": 10,
+              "type": "crossword",
               "columns": 12,
               "entries": [
                 {
                   "id": "novel",
+                  "row": 4,
                   "clue": "A long fictional story",
                   "answer": "NOVEL",
-                  "row": 4,
                   "column": 6,
                   "direction": "across"
                 },
                 {
                   "id": "school",
+                  "row": 0,
                   "clue": "A place where people learn",
                   "answer": "SCHOOL",
-                  "row": 0,
                   "column": 7,
                   "direction": "down"
                 },
                 {
                   "id": "chime",
+                  "row": 3,
                   "clue": "A clear ringing sound",
                   "answer": "CHIME",
-                  "row": 3,
                   "column": 0,
                   "direction": "across"
                 },
                 {
                   "id": "mentor",
+                  "row": 3,
                   "clue": "An experienced person who guides you",
                   "answer": "MENTOR",
-                  "row": 3,
                   "column": 3,
                   "direction": "across"
                 },
                 {
                   "id": "read",
+                  "row": 3,
                   "clue": "Look at and understand written words",
                   "answer": "READ",
-                  "row": 3,
                   "column": 8,
                   "direction": "across"
                 },
                 {
                   "id": "ally",
+                  "row": 3,
                   "clue": "A helpful friend or supporter",
                   "answer": "ALLY",
-                  "row": 3,
                   "column": 10,
                   "direction": "down"
                 }
               ]
-            },
-            "next": "reveal"
+            }
           },
           {
             "id": "variant-d",
+            "next": "reveal",
             "type": "puzzle",
             "prompt": "Variant D — solve the learning-themed crossword.",
             "puzzle": {
-              "type": "crossword",
               "rows": 10,
+              "type": "crossword",
               "columns": 12,
               "entries": [
                 {
                   "id": "story",
+                  "row": 6,
                   "clue": "A tale that is told or written",
                   "answer": "STORY",
-                  "row": 6,
                   "column": 0,
                   "direction": "across"
                 },
                 {
                   "id": "pupil",
+                  "row": 0,
                   "clue": "A student",
                   "answer": "PUPIL",
-                  "row": 0,
                   "column": 1,
                   "direction": "across"
                 },
                 {
                   "id": "tone",
+                  "row": 5,
                   "clue": "The quality or character of a sound",
                   "answer": "TONE",
-                  "row": 5,
                   "column": 0,
                   "direction": "across"
                 },
                 {
                   "id": "coach",
+                  "row": 1,
                   "clue": "Someone who trains or guides a team",
                   "answer": "COACH",
-                  "row": 1,
                   "column": 1,
                   "direction": "across"
                 },
                 {
                   "id": "know",
+                  "row": 4,
                   "clue": "Understand or be aware of",
                   "answer": "KNOW",
-                  "row": 4,
                   "column": 2,
                   "direction": "down"
                 },
                 {
                   "id": "partner",
+                  "row": 0,
                   "clue": "A person who works with you",
                   "answer": "PARTNER",
-                  "row": 0,
                   "column": 3,
                   "direction": "down"
                 }
               ]
-            },
-            "next": "reveal"
+            }
           },
           {
             "id": "reveal",
-            "type": "show_text",
+            "next": "done",
             "text": "Bells, books, learning, and friendship point toward the Lok Kalyan Public School vicinity. Stay outside on the public road.",
-            "next": "done"
+            "type": "show_text"
           },
           {
             "id": "done",
             "type": "complete"
           }
-        ]
+        ],
+        "startNodeId": "intro"
       },
       "hints": [
         {
           "id": "crossword-a-strategy",
-          "title": "How to work this crossword",
           "cost": 1,
+          "title": "How to work this crossword",
           "content": {
-            "type": "text",
-            "text": "Start with the shortest clues, enter any letters you know, and use crossing letters to confirm longer answers. This hint is available as soon as this crossword opens."
-          },
-          "relevance": {
-            "nodeId": "variant-a",
-            "unlockAfterSeconds": 0,
-            "expireWhenSolved": false
+            "text": "Start with the shortest clues, enter any letters you know, and use crossing letters to confirm longer answers. This hint is available as soon as this crossword opens.",
+            "type": "text"
           },
           "enabled": true,
+          "relevance": {
+            "nodeId": "variant-a",
+            "expireWhenSolved": false,
+            "unlockAfterSeconds": 0
+          },
           "showWhenLocked": false
         },
         {
           "id": "crossword-a-book-gentle",
-          "title": "A gentle clue for this word",
           "cost": 2,
+          "title": "A gentle clue for this word",
           "content": {
-            "type": "text",
-            "text": "This is a 4-letter answer. Clue: Something with pages. The first letter is B."
+            "text": "This is a 4-letter answer. Clue: Something with pages. The first letter is B.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-a",
             "puzzleItemId": "book",
-            "unlockAfterSeconds": 0,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 0
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-a-book-direct",
-          "title": "A stronger clue for this word",
           "cost": 4,
+          "title": "A stronger clue for this word",
           "content": {
-            "type": "text",
-            "text": "The answer is BOOK. Enter it using the crossing squares, then continue with the remaining unsolved words."
+            "text": "The answer is BOOK. Enter it using the crossing squares, then continue with the remaining unsolved words.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-a",
             "puzzleItemId": "book",
-            "unlockAfterSeconds": 60,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 60
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-a-class-gentle",
-          "title": "A gentle clue for this word",
           "cost": 2,
+          "title": "A gentle clue for this word",
           "content": {
-            "type": "text",
-            "text": "This is a 5-letter answer. Clue: A group learning together. The first letter is C."
+            "text": "This is a 5-letter answer. Clue: A group learning together. The first letter is C.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-a",
             "puzzleItemId": "class",
-            "unlockAfterSeconds": 0,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 0
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-a-class-direct",
-          "title": "A stronger clue for this word",
           "cost": 4,
+          "title": "A stronger clue for this word",
           "content": {
-            "type": "text",
-            "text": "The answer is CLASS. Enter it using the crossing squares, then continue with the remaining unsolved words."
+            "text": "The answer is CLASS. Enter it using the crossing squares, then continue with the remaining unsolved words.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-a",
             "puzzleItemId": "class",
-            "unlockAfterSeconds": 60,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 60
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-a-bell-gentle",
-          "title": "A gentle clue for this word",
           "cost": 2,
+          "title": "A gentle clue for this word",
           "content": {
-            "type": "text",
-            "text": "This is a 4-letter answer. Clue: A sound that can begin a school day. The first letter is B."
+            "text": "This is a 4-letter answer. Clue: A sound that can begin a school day. The first letter is B.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-a",
             "puzzleItemId": "bell",
-            "unlockAfterSeconds": 0,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 0
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-a-bell-direct",
-          "title": "A stronger clue for this word",
           "cost": 4,
+          "title": "A stronger clue for this word",
           "content": {
-            "type": "text",
-            "text": "The answer is BELL. Enter it using the crossing squares, then continue with the remaining unsolved words."
+            "text": "The answer is BELL. Enter it using the crossing squares, then continue with the remaining unsolved words.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-a",
             "puzzleItemId": "bell",
-            "unlockAfterSeconds": 60,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 60
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-a-teach-gentle",
-          "title": "A gentle clue for this word",
           "cost": 2,
+          "title": "A gentle clue for this word",
           "content": {
-            "type": "text",
-            "text": "This is a 5-letter answer. Clue: Help someone learn. The first letter is T."
+            "text": "This is a 5-letter answer. Clue: Help someone learn. The first letter is T.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-a",
             "puzzleItemId": "teach",
-            "unlockAfterSeconds": 0,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 0
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-a-teach-direct",
-          "title": "A stronger clue for this word",
           "cost": 4,
+          "title": "A stronger clue for this word",
           "content": {
-            "type": "text",
-            "text": "The answer is TEACH. Enter it using the crossing squares, then continue with the remaining unsolved words."
+            "text": "The answer is TEACH. Enter it using the crossing squares, then continue with the remaining unsolved words.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-a",
             "puzzleItemId": "teach",
-            "unlockAfterSeconds": 60,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 60
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-a-learn-gentle",
-          "title": "A gentle clue for this word",
           "cost": 2,
+          "title": "A gentle clue for this word",
           "content": {
-            "type": "text",
-            "text": "This is a 5-letter answer. Clue: Gain knowledge. The first letter is L."
+            "text": "This is a 5-letter answer. Clue: Gain knowledge. The first letter is L.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-a",
             "puzzleItemId": "learn",
-            "unlockAfterSeconds": 0,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 0
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-a-learn-direct",
-          "title": "A stronger clue for this word",
           "cost": 4,
+          "title": "A stronger clue for this word",
           "content": {
-            "type": "text",
-            "text": "The answer is LEARN. Enter it using the crossing squares, then continue with the remaining unsolved words."
+            "text": "The answer is LEARN. Enter it using the crossing squares, then continue with the remaining unsolved words.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-a",
             "puzzleItemId": "learn",
-            "unlockAfterSeconds": 60,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 60
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-a-friend-gentle",
-          "title": "A gentle clue for this word",
           "cost": 2,
+          "title": "A gentle clue for this word",
           "content": {
-            "type": "text",
-            "text": "This is a 6-letter answer. Clue: A person who stands by you. The first letter is F."
+            "text": "This is a 6-letter answer. Clue: A person who stands by you. The first letter is F.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-a",
             "puzzleItemId": "friend",
-            "unlockAfterSeconds": 0,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 0
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-a-friend-direct",
-          "title": "A stronger clue for this word",
           "cost": 4,
+          "title": "A stronger clue for this word",
           "content": {
-            "type": "text",
-            "text": "The answer is FRIEND. Enter it using the crossing squares, then continue with the remaining unsolved words."
+            "text": "The answer is FRIEND. Enter it using the crossing squares, then continue with the remaining unsolved words.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-a",
             "puzzleItemId": "friend",
-            "unlockAfterSeconds": 60,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 60
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-b-strategy",
-          "title": "How to work this crossword",
           "cost": 1,
+          "title": "How to work this crossword",
           "content": {
-            "type": "text",
-            "text": "Start with the shortest clues, enter any letters you know, and use crossing letters to confirm longer answers. This hint is available as soon as this crossword opens."
-          },
-          "relevance": {
-            "nodeId": "variant-b",
-            "unlockAfterSeconds": 0,
-            "expireWhenSolved": false
+            "text": "Start with the shortest clues, enter any letters you know, and use crossing letters to confirm longer answers. This hint is available as soon as this crossword opens.",
+            "type": "text"
           },
           "enabled": true,
+          "relevance": {
+            "nodeId": "variant-b",
+            "expireWhenSolved": false,
+            "unlockAfterSeconds": 0
+          },
           "showWhenLocked": false
         },
         {
           "id": "crossword-b-page-gentle",
-          "title": "A gentle clue for this word",
           "cost": 2,
+          "title": "A gentle clue for this word",
           "content": {
-            "type": "text",
-            "text": "This is a 4-letter answer. Clue: One side of a book. The first letter is P."
+            "text": "This is a 4-letter answer. Clue: One side of a book. The first letter is P.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-b",
             "puzzleItemId": "page",
-            "unlockAfterSeconds": 0,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 0
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-b-page-direct",
-          "title": "A stronger clue for this word",
           "cost": 4,
+          "title": "A stronger clue for this word",
           "content": {
-            "type": "text",
-            "text": "The answer is PAGE. Enter it using the crossing squares, then continue with the remaining unsolved words."
+            "text": "The answer is PAGE. Enter it using the crossing squares, then continue with the remaining unsolved words.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-b",
             "puzzleItemId": "page",
-            "unlockAfterSeconds": 60,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 60
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-b-lesson-gentle",
-          "title": "A gentle clue for this word",
           "cost": 2,
+          "title": "A gentle clue for this word",
           "content": {
-            "type": "text",
-            "text": "This is a 6-letter answer. Clue: Something taught in class. The first letter is L."
+            "text": "This is a 6-letter answer. Clue: Something taught in class. The first letter is L.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-b",
             "puzzleItemId": "lesson",
-            "unlockAfterSeconds": 0,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 0
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-b-lesson-direct",
-          "title": "A stronger clue for this word",
           "cost": 4,
+          "title": "A stronger clue for this word",
           "content": {
-            "type": "text",
-            "text": "The answer is LESSON. Enter it using the crossing squares, then continue with the remaining unsolved words."
+            "text": "The answer is LESSON. Enter it using the crossing squares, then continue with the remaining unsolved words.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-b",
             "puzzleItemId": "lesson",
-            "unlockAfterSeconds": 60,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 60
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-b-ring-gentle",
-          "title": "A gentle clue for this word",
           "cost": 2,
+          "title": "A gentle clue for this word",
           "content": {
-            "type": "text",
-            "text": "This is a 4-letter answer. Clue: A circular shape or a bell sound. The first letter is R."
+            "text": "This is a 4-letter answer. Clue: A circular shape or a bell sound. The first letter is R.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-b",
             "puzzleItemId": "ring",
-            "unlockAfterSeconds": 0,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 0
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-b-ring-direct",
-          "title": "A stronger clue for this word",
           "cost": 4,
+          "title": "A stronger clue for this word",
           "content": {
-            "type": "text",
-            "text": "The answer is RING. Enter it using the crossing squares, then continue with the remaining unsolved words."
+            "text": "The answer is RING. Enter it using the crossing squares, then continue with the remaining unsolved words.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-b",
             "puzzleItemId": "ring",
-            "unlockAfterSeconds": 60,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 60
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-b-guide-gentle",
-          "title": "A gentle clue for this word",
           "cost": 2,
+          "title": "A gentle clue for this word",
           "content": {
-            "type": "text",
-            "text": "This is a 5-letter answer. Clue: A person or thing that shows the way. The first letter is G."
+            "text": "This is a 5-letter answer. Clue: A person or thing that shows the way. The first letter is G.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-b",
             "puzzleItemId": "guide",
-            "unlockAfterSeconds": 0,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 0
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-b-guide-direct",
-          "title": "A stronger clue for this word",
           "cost": 4,
+          "title": "A stronger clue for this word",
           "content": {
-            "type": "text",
-            "text": "The answer is GUIDE. Enter it using the crossing squares, then continue with the remaining unsolved words."
+            "text": "The answer is GUIDE. Enter it using the crossing squares, then continue with the remaining unsolved words.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-b",
             "puzzleItemId": "guide",
-            "unlockAfterSeconds": 60,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 60
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-b-study-gentle",
-          "title": "A gentle clue for this word",
           "cost": 2,
+          "title": "A gentle clue for this word",
           "content": {
-            "type": "text",
-            "text": "This is a 5-letter answer. Clue: Spend time learning. The first letter is S."
+            "text": "This is a 5-letter answer. Clue: Spend time learning. The first letter is S.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-b",
             "puzzleItemId": "study",
-            "unlockAfterSeconds": 0,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 0
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-b-study-direct",
-          "title": "A stronger clue for this word",
           "cost": 4,
+          "title": "A stronger clue for this word",
           "content": {
-            "type": "text",
-            "text": "The answer is STUDY. Enter it using the crossing squares, then continue with the remaining unsolved words."
+            "text": "The answer is STUDY. Enter it using the crossing squares, then continue with the remaining unsolved words.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-b",
             "puzzleItemId": "study",
-            "unlockAfterSeconds": 60,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 60
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-b-team-gentle",
-          "title": "A gentle clue for this word",
           "cost": 2,
+          "title": "A gentle clue for this word",
           "content": {
-            "type": "text",
-            "text": "This is a 4-letter answer. Clue: A group working together. The first letter is T."
+            "text": "This is a 4-letter answer. Clue: A group working together. The first letter is T.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-b",
             "puzzleItemId": "team",
-            "unlockAfterSeconds": 0,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 0
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-b-team-direct",
-          "title": "A stronger clue for this word",
           "cost": 4,
+          "title": "A stronger clue for this word",
           "content": {
-            "type": "text",
-            "text": "The answer is TEAM. Enter it using the crossing squares, then continue with the remaining unsolved words."
+            "text": "The answer is TEAM. Enter it using the crossing squares, then continue with the remaining unsolved words.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-b",
             "puzzleItemId": "team",
-            "unlockAfterSeconds": 60,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 60
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-c-strategy",
-          "title": "How to work this crossword",
           "cost": 1,
+          "title": "How to work this crossword",
           "content": {
-            "type": "text",
-            "text": "Start with the shortest clues, enter any letters you know, and use crossing letters to confirm longer answers. This hint is available as soon as this crossword opens."
-          },
-          "relevance": {
-            "nodeId": "variant-c",
-            "unlockAfterSeconds": 0,
-            "expireWhenSolved": false
+            "text": "Start with the shortest clues, enter any letters you know, and use crossing letters to confirm longer answers. This hint is available as soon as this crossword opens.",
+            "type": "text"
           },
           "enabled": true,
+          "relevance": {
+            "nodeId": "variant-c",
+            "expireWhenSolved": false,
+            "unlockAfterSeconds": 0
+          },
           "showWhenLocked": false
         },
         {
           "id": "crossword-c-novel-gentle",
-          "title": "A gentle clue for this word",
           "cost": 2,
+          "title": "A gentle clue for this word",
           "content": {
-            "type": "text",
-            "text": "This is a 5-letter answer. Clue: A long fictional story. The first letter is N."
+            "text": "This is a 5-letter answer. Clue: A long fictional story. The first letter is N.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-c",
             "puzzleItemId": "novel",
-            "unlockAfterSeconds": 0,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 0
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-c-novel-direct",
-          "title": "A stronger clue for this word",
           "cost": 4,
+          "title": "A stronger clue for this word",
           "content": {
-            "type": "text",
-            "text": "The answer is NOVEL. Enter it using the crossing squares, then continue with the remaining unsolved words."
+            "text": "The answer is NOVEL. Enter it using the crossing squares, then continue with the remaining unsolved words.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-c",
             "puzzleItemId": "novel",
-            "unlockAfterSeconds": 60,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 60
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-c-school-gentle",
-          "title": "A gentle clue for this word",
           "cost": 2,
+          "title": "A gentle clue for this word",
           "content": {
-            "type": "text",
-            "text": "This is a 6-letter answer. Clue: A place where people learn. The first letter is S."
+            "text": "This is a 6-letter answer. Clue: A place where people learn. The first letter is S.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-c",
             "puzzleItemId": "school",
-            "unlockAfterSeconds": 0,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 0
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-c-school-direct",
-          "title": "A stronger clue for this word",
           "cost": 4,
+          "title": "A stronger clue for this word",
           "content": {
-            "type": "text",
-            "text": "The answer is SCHOOL. Enter it using the crossing squares, then continue with the remaining unsolved words."
+            "text": "The answer is SCHOOL. Enter it using the crossing squares, then continue with the remaining unsolved words.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-c",
             "puzzleItemId": "school",
-            "unlockAfterSeconds": 60,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 60
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-c-chime-gentle",
-          "title": "A gentle clue for this word",
           "cost": 2,
+          "title": "A gentle clue for this word",
           "content": {
-            "type": "text",
-            "text": "This is a 5-letter answer. Clue: A clear ringing sound. The first letter is C."
+            "text": "This is a 5-letter answer. Clue: A clear ringing sound. The first letter is C.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-c",
             "puzzleItemId": "chime",
-            "unlockAfterSeconds": 0,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 0
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-c-chime-direct",
-          "title": "A stronger clue for this word",
           "cost": 4,
+          "title": "A stronger clue for this word",
           "content": {
-            "type": "text",
-            "text": "The answer is CHIME. Enter it using the crossing squares, then continue with the remaining unsolved words."
+            "text": "The answer is CHIME. Enter it using the crossing squares, then continue with the remaining unsolved words.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-c",
             "puzzleItemId": "chime",
-            "unlockAfterSeconds": 60,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 60
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-c-mentor-gentle",
-          "title": "A gentle clue for this word",
           "cost": 2,
+          "title": "A gentle clue for this word",
           "content": {
-            "type": "text",
-            "text": "This is a 6-letter answer. Clue: An experienced person who guides you. The first letter is M."
+            "text": "This is a 6-letter answer. Clue: An experienced person who guides you. The first letter is M.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-c",
             "puzzleItemId": "mentor",
-            "unlockAfterSeconds": 0,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 0
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-c-mentor-direct",
-          "title": "A stronger clue for this word",
           "cost": 4,
+          "title": "A stronger clue for this word",
           "content": {
-            "type": "text",
-            "text": "The answer is MENTOR. Enter it using the crossing squares, then continue with the remaining unsolved words."
+            "text": "The answer is MENTOR. Enter it using the crossing squares, then continue with the remaining unsolved words.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-c",
             "puzzleItemId": "mentor",
-            "unlockAfterSeconds": 60,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 60
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-c-read-gentle",
-          "title": "A gentle clue for this word",
           "cost": 2,
+          "title": "A gentle clue for this word",
           "content": {
-            "type": "text",
-            "text": "This is a 4-letter answer. Clue: Look at and understand written words. The first letter is R."
+            "text": "This is a 4-letter answer. Clue: Look at and understand written words. The first letter is R.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-c",
             "puzzleItemId": "read",
-            "unlockAfterSeconds": 0,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 0
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-c-read-direct",
-          "title": "A stronger clue for this word",
           "cost": 4,
+          "title": "A stronger clue for this word",
           "content": {
-            "type": "text",
-            "text": "The answer is READ. Enter it using the crossing squares, then continue with the remaining unsolved words."
+            "text": "The answer is READ. Enter it using the crossing squares, then continue with the remaining unsolved words.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-c",
             "puzzleItemId": "read",
-            "unlockAfterSeconds": 60,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 60
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-c-ally-gentle",
-          "title": "A gentle clue for this word",
           "cost": 2,
+          "title": "A gentle clue for this word",
           "content": {
-            "type": "text",
-            "text": "This is a 4-letter answer. Clue: A helpful friend or supporter. The first letter is A."
+            "text": "This is a 4-letter answer. Clue: A helpful friend or supporter. The first letter is A.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-c",
             "puzzleItemId": "ally",
-            "unlockAfterSeconds": 0,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 0
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-c-ally-direct",
-          "title": "A stronger clue for this word",
           "cost": 4,
+          "title": "A stronger clue for this word",
           "content": {
-            "type": "text",
-            "text": "The answer is ALLY. Enter it using the crossing squares, then continue with the remaining unsolved words."
+            "text": "The answer is ALLY. Enter it using the crossing squares, then continue with the remaining unsolved words.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-c",
             "puzzleItemId": "ally",
-            "unlockAfterSeconds": 60,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 60
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-d-strategy",
-          "title": "How to work this crossword",
           "cost": 1,
+          "title": "How to work this crossword",
           "content": {
-            "type": "text",
-            "text": "Start with the shortest clues, enter any letters you know, and use crossing letters to confirm longer answers. This hint is available as soon as this crossword opens."
-          },
-          "relevance": {
-            "nodeId": "variant-d",
-            "unlockAfterSeconds": 0,
-            "expireWhenSolved": false
+            "text": "Start with the shortest clues, enter any letters you know, and use crossing letters to confirm longer answers. This hint is available as soon as this crossword opens.",
+            "type": "text"
           },
           "enabled": true,
+          "relevance": {
+            "nodeId": "variant-d",
+            "expireWhenSolved": false,
+            "unlockAfterSeconds": 0
+          },
           "showWhenLocked": false
         },
         {
           "id": "crossword-d-story-gentle",
-          "title": "A gentle clue for this word",
           "cost": 2,
+          "title": "A gentle clue for this word",
           "content": {
-            "type": "text",
-            "text": "This is a 5-letter answer. Clue: A tale that is told or written. The first letter is S."
+            "text": "This is a 5-letter answer. Clue: A tale that is told or written. The first letter is S.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-d",
             "puzzleItemId": "story",
-            "unlockAfterSeconds": 0,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 0
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-d-story-direct",
-          "title": "A stronger clue for this word",
           "cost": 4,
+          "title": "A stronger clue for this word",
           "content": {
-            "type": "text",
-            "text": "The answer is STORY. Enter it using the crossing squares, then continue with the remaining unsolved words."
+            "text": "The answer is STORY. Enter it using the crossing squares, then continue with the remaining unsolved words.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-d",
             "puzzleItemId": "story",
-            "unlockAfterSeconds": 60,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 60
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-d-pupil-gentle",
-          "title": "A gentle clue for this word",
           "cost": 2,
+          "title": "A gentle clue for this word",
           "content": {
-            "type": "text",
-            "text": "This is a 5-letter answer. Clue: A student. The first letter is P."
+            "text": "This is a 5-letter answer. Clue: A student. The first letter is P.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-d",
             "puzzleItemId": "pupil",
-            "unlockAfterSeconds": 0,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 0
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-d-pupil-direct",
-          "title": "A stronger clue for this word",
           "cost": 4,
+          "title": "A stronger clue for this word",
           "content": {
-            "type": "text",
-            "text": "The answer is PUPIL. Enter it using the crossing squares, then continue with the remaining unsolved words."
+            "text": "The answer is PUPIL. Enter it using the crossing squares, then continue with the remaining unsolved words.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-d",
             "puzzleItemId": "pupil",
-            "unlockAfterSeconds": 60,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 60
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-d-tone-gentle",
-          "title": "A gentle clue for this word",
           "cost": 2,
+          "title": "A gentle clue for this word",
           "content": {
-            "type": "text",
-            "text": "This is a 4-letter answer. Clue: The quality or character of a sound. The first letter is T."
+            "text": "This is a 4-letter answer. Clue: The quality or character of a sound. The first letter is T.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-d",
             "puzzleItemId": "tone",
-            "unlockAfterSeconds": 0,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 0
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-d-tone-direct",
-          "title": "A stronger clue for this word",
           "cost": 4,
+          "title": "A stronger clue for this word",
           "content": {
-            "type": "text",
-            "text": "The answer is TONE. Enter it using the crossing squares, then continue with the remaining unsolved words."
+            "text": "The answer is TONE. Enter it using the crossing squares, then continue with the remaining unsolved words.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-d",
             "puzzleItemId": "tone",
-            "unlockAfterSeconds": 60,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 60
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-d-coach-gentle",
-          "title": "A gentle clue for this word",
           "cost": 2,
+          "title": "A gentle clue for this word",
           "content": {
-            "type": "text",
-            "text": "This is a 5-letter answer. Clue: Someone who trains or guides a team. The first letter is C."
+            "text": "This is a 5-letter answer. Clue: Someone who trains or guides a team. The first letter is C.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-d",
             "puzzleItemId": "coach",
-            "unlockAfterSeconds": 0,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 0
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-d-coach-direct",
-          "title": "A stronger clue for this word",
           "cost": 4,
+          "title": "A stronger clue for this word",
           "content": {
-            "type": "text",
-            "text": "The answer is COACH. Enter it using the crossing squares, then continue with the remaining unsolved words."
+            "text": "The answer is COACH. Enter it using the crossing squares, then continue with the remaining unsolved words.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-d",
             "puzzleItemId": "coach",
-            "unlockAfterSeconds": 60,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 60
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-d-know-gentle",
-          "title": "A gentle clue for this word",
           "cost": 2,
+          "title": "A gentle clue for this word",
           "content": {
-            "type": "text",
-            "text": "This is a 4-letter answer. Clue: Understand or be aware of. The first letter is K."
+            "text": "This is a 4-letter answer. Clue: Understand or be aware of. The first letter is K.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-d",
             "puzzleItemId": "know",
-            "unlockAfterSeconds": 0,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 0
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-d-know-direct",
-          "title": "A stronger clue for this word",
           "cost": 4,
+          "title": "A stronger clue for this word",
           "content": {
-            "type": "text",
-            "text": "The answer is KNOW. Enter it using the crossing squares, then continue with the remaining unsolved words."
+            "text": "The answer is KNOW. Enter it using the crossing squares, then continue with the remaining unsolved words.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-d",
             "puzzleItemId": "know",
-            "unlockAfterSeconds": 60,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 60
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-d-partner-gentle",
-          "title": "A gentle clue for this word",
           "cost": 2,
+          "title": "A gentle clue for this word",
           "content": {
-            "type": "text",
-            "text": "This is a 7-letter answer. Clue: A person who works with you. The first letter is P."
+            "text": "This is a 7-letter answer. Clue: A person who works with you. The first letter is P.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-d",
             "puzzleItemId": "partner",
-            "unlockAfterSeconds": 0,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 0
           },
-          "enabled": true,
           "showWhenLocked": false
         },
         {
           "id": "crossword-d-partner-direct",
-          "title": "A stronger clue for this word",
           "cost": 4,
+          "title": "A stronger clue for this word",
           "content": {
-            "type": "text",
-            "text": "The answer is PARTNER. Enter it using the crossing squares, then continue with the remaining unsolved words."
+            "text": "The answer is PARTNER. Enter it using the crossing squares, then continue with the remaining unsolved words.",
+            "type": "text"
           },
+          "enabled": true,
           "relevance": {
             "nodeId": "variant-d",
             "puzzleItemId": "partner",
-            "unlockAfterSeconds": 60,
-            "expireWhenSolved": true
+            "expireWhenSolved": true,
+            "unlockAfterSeconds": 60
           },
-          "enabled": true,
           "showWhenLocked": false
         }
-      ]
+      ],
+      "title": "6 · Bells, Books, Belonging",
+      "basePoints": 10
     },
     {
       "id": "lok-kalyan-school",
-      "title": "7 · Where Learning Begins",
-      "basePoints": 10,
       "flow": {
-        "startNodeId": "arrival",
         "nodes": [
-          {
-            "id": "arrival",
-            "type": "verify_answer",
-            "clue": "Your next destination is where mornings begin with bells, backpacks, and bright minds heading toward new lessons. Look for the place where learning brings the neighbourhood together. Stay on the public road outside. The exact safe public-road GPS pin is still a field-test setting.",
-            "prompt": "Field-test placeholder: enter the organizer confirmation code after confirming the school-area pin.",
-            "answers": [
-              "FIELDTEST"
-            ],
-            "next": "done"
-          },
           {
             "id": "done",
             "type": "complete"
+          },
+          {
+            "id": "verify-gps-1",
+            "clue": "Your next destination is where mornings begin with bells, backpacks, and bright minds heading toward new lessons. Look for the place where learning brings the neighbourhood together. Stay on the public road outside. The exact safe public-road GPS pin is still a field-test setting.",
+            "next": "done",
+            "type": "verify_gps",
+            "prompt": "Check your location when you have arrived.\n\n19.229773042896714, 73.12943794958892",
+            "latitude": 19.229773042896714,
+            "longitude": 73.12943794958892,
+            "radiusMeters": 100,
+            "maxAccuracyMeters": 100
           }
-        ]
+        ],
+        "startNodeId": "verify-gps-1"
       },
       "hints": [
         {
           "id": "school-nudge",
-          "title": "A stronger nudge",
           "cost": 6,
+          "title": "A stronger nudge",
           "content": {
-            "type": "text",
-            "text": "You are looking for a school whose name begins with “Lok.”"
+            "text": "You are looking for a school whose name begins with “Lok.”",
+            "type": "text"
           }
         }
-      ]
+      ],
+      "title": "7 · Where Learning Begins",
+      "basePoints": 10
     },
     {
       "id": "one-last-thought",
-      "title": "8 · One Last Thought",
-      "basePoints": 10,
       "flow": {
-        "startNodeId": "sudoku",
         "nodes": [
           {
             "id": "sudoku",
+            "next": "done",
             "type": "puzzle",
             "prompt": "Fill the one missing number.",
             "puzzle": {
-              "type": "sudoku",
               "size": 4,
+              "type": "sudoku",
               "givens": [
                 [
+                  0,
+                  0,
                   1,
-                  2,
-                  3,
-                  4
-                ],
-                [
-                  3,
-                  4,
-                  1,
-                  2
-                ],
-                [
-                  2,
-                  1,
-                  4,
                   0
                 ],
                 [
-                  4,
-                  3,
+                  0,
                   2,
-                  1
+                  4,
+                  3
+                ],
+                [
+                  0,
+                  4,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  1,
+                  3,
+                  0
                 ]
               ]
-            },
-            "next": "done"
+            }
           },
           {
             "id": "done",
             "type": "complete"
           }
-        ]
+        ],
+        "startNodeId": "sudoku"
       },
       "hints": [
         {
           "id": "sudoku-help",
-          "title": "Check the row",
           "cost": 2,
+          "title": "Check the row",
           "content": {
-            "type": "text",
-            "text": "The missing row already contains 2, 1, and 4."
+            "text": "The missing row already contains 2, 1, and 4.",
+            "type": "text"
           }
         }
-      ]
+      ],
+      "title": "8 · One Last Thought",
+      "basePoints": 10
     },
     {
       "id": "prize-stop",
-      "title": "9 · The Prize Stop",
-      "basePoints": 10,
       "flow": {
-        "startNodeId": "arrival",
         "nodes": [
           {
             "id": "arrival",
-            "type": "show_text",
+            "next": "confirm",
             "text": "You made it through the trail. Field-test placeholder: show this screen to the organizer at the confirmed public prize stop.",
-            "next": "confirm"
+            "type": "show_text"
           },
           {
             "id": "confirm",
+            "next": "done",
             "type": "verify_answer",
             "prompt": "Enter the final handoff code from the organizer.",
             "answers": [
               "FIELDTEST"
-            ],
-            "next": "done"
+            ]
           },
           {
             "id": "done",
             "type": "complete"
           }
-        ]
+        ],
+        "startNodeId": "arrival"
       },
-      "hints": []
+      "hints": [],
+      "title": "9 · The Prize Stop",
+      "basePoints": 10
     }
-  ]
+  ],
+  "description": "A nine-checkpoint family treasure hunt through Lokgram, combining outdoor discovery with friendly puzzles.",
+  "schemaVersion": 1
 }

@@ -13,7 +13,8 @@ test('Lokgram word-search variants remain equivalent and valid', () => {
   const wordSearchNodes = lokgramPilotHunt.checkpoints[1].flow.nodes.filter(node => node.type === 'puzzle')
   assert.equal(wordSearchNodes.length, 4)
   assert.deepEqual(wordSearchNodes.map(node => node.puzzle.type), ['word_search', 'word_search', 'word_search', 'word_search'])
-  assert.deepEqual(wordSearchNodes.map(node => node.puzzle.type === 'word_search' ? node.puzzle.words.length : 0), [6, 6, 6, 6])
+  assert.deepEqual(wordSearchNodes.map(node => node.puzzle.type === 'word_search' ? node.puzzle.words.length : 0), [12, 12, 12, 12])
+  assert.ok(wordSearchNodes.every(node => node.type === 'puzzle' && node.puzzle.type === 'word_search' && node.puzzle.minimumWords === 6 && node.puzzle.bonusPerExtraWord === 2))
 })
 
 test('Lokgram uses unified clue-plus-verification tasks and the threshold quiz', () => {
@@ -35,9 +36,7 @@ test('Lokgram uses unified clue-plus-verification tasks and the threshold quiz',
 test('Lokgram export stays importable with its public settings and visual routes', () => {
   const exported = JSON.parse(fs.readFileSync(new URL('../Hunts_V2/lokgram-pilot.json', import.meta.url), 'utf8'))
   assert.deepEqual(validateHunt(exported), [])
-  assert.deepEqual(exported.settings, lokgramPilotHunt.settings)
-  assert.deepEqual(exported.theme, lokgramPilotHunt.theme)
-  assert.deepEqual(exported.checkpoints.map((checkpoint: { id: string }) => checkpoint.id), lokgramPilotHunt.checkpoints.map(checkpoint => checkpoint.id))
+  assert.deepEqual(exported, lokgramPilotHunt)
 })
 
 test('Lokgram has four balanced crossword variants with targeted clue hints', () => {

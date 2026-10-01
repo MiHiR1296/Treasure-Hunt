@@ -3,10 +3,13 @@ export interface ImagePiece { id: string; imageUrl: string; alt?: string }
 export interface MatchingPair { leftId: string; rightId: string }
 export interface Cell { row: number; column: number }
 export type QuarterTurn = 0 | 90 | 180 | 270
+/** Supported standard/rectangular Sudoku boards. The box geometry is derived
+ * from the size so existing 4×4 and 9×9 definitions stay compatible. */
+export type SudokuSize = 4 | 6 | 9
 
 export type PuzzleDefinition =
   | { type: 'jigsaw'; rows: number; columns: number; pieces: ImagePiece[]; solution: string[] }
-  | { type: 'sudoku'; size: 4 | 9; givens: number[][] }
+  | { type: 'sudoku'; size: SudokuSize; givens: number[][] }
   | { type: 'word_search'; grid: string[][]; words: string[]; minimumWords?: number; bonusPerExtraWord?: number }
   | { type: 'crossword'; rows: number; columns: number; entries: { id: string; clue: string; answer: string; row: number; column: number; direction: 'across' | 'down' }[] }
   | { type: 'rotation'; columns: number; tiles: (ImagePiece & { correctRotation: QuarterTurn })[] }
@@ -18,7 +21,7 @@ export type PuzzleDefinition =
 
 export type PuzzlePublicDefinition =
   | { type: 'jigsaw'; rows: number; columns: number; pieces: ImagePiece[] }
-  | { type: 'sudoku'; size: 4 | 9; givens: number[][] }
+  | { type: 'sudoku'; size: SudokuSize; givens: number[][] }
   | { type: 'word_search'; grid: string[][]; words: string[]; minimumWords?: number; bonusPerExtraWord?: number }
   | { type: 'crossword'; rows: number; columns: number; entries: { id: string; clue: string; length: number; row: number; column: number; direction: 'across' | 'down' }[] }
   | { type: 'rotation'; columns: number; tiles: ImagePiece[] }
