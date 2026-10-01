@@ -183,7 +183,7 @@ test('dense crosswords keep full-size pannable cells and can fit the viewport', 
   expect(fittedBox!.x + fittedBox!.width).toBeLessThanOrEqual(320)
 })
 
-test('word search supports drag selection, highlights found letters, and replaces checking text only after confirmation', async ({ page }, testInfo) => {
+test('word search draws coloured word markers, moves found words below remaining targets, and replaces checking text only after confirmation', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 320, height: 700 })
   const game = await installMockGame(page, denseWordSearchDefinition, 'word-team')
   await openGame(page, denseWordSearchDefinition)
@@ -216,10 +216,13 @@ test('word search supports drag selection, highlights found letters, and replace
   await page.mouse.up()
   await expect(page.getByRole('status').filter({ hasText: 'Checking CAT…' })).toBeVisible()
   await expect(page.getByText('✓ CAT found', { exact: true })).toBeVisible()
-  await expect(page.getByRole('status').filter({ hasText: 'CAT found!' })).toBeVisible()
+  await expect(page.getByRole('status').filter({ hasText: 'CAT found! It is now marked in the grid.' })).toBeVisible()
   await expect(page.getByText('Checking CAT…', { exact: true })).toHaveCount(0)
   await expect(grid.getByRole('button', { name: 'C, row 1, column 1, found word', exact: true })).toHaveAttribute('aria-pressed', 'true')
-  await expect(grid.getByRole('button', { name: 'A, row 1, column 2, found word', exact: true })).toHaveCSS('background-color', 'rgb(110, 231, 183)')
+  await expect(grid.locator('[data-word-search-markers] line')).toHaveCount(1)
+  await expect(grid.locator('[data-word-search-markers] line')).toHaveAttribute('stroke', '#0f766e')
+  await expect(grid.getByRole('button', { name: 'A, row 1, column 2, found word', exact: true })).toHaveCSS('background-color', 'rgb(255, 255, 255)')
+  await expect(page.getByRole('list', { name: 'Words to find', exact: true }).getByRole('listitem')).toHaveText(['DOG', '✓ CAT found'])
 
   await page.getByRole('button', { name: 'Fit whole grid', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Enlarge letters', exact: true })).toBeVisible()

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import type { Cell } from '@/lib/engine/puzzles/types'
 import { PuzzleSaveMessage, usePuzzleSubmission, type PuzzlePlayerProps } from './shared'
-import { cellKey, findWordPath, lineBetween, wordForPath } from './word-search-paths'
+import { cellKey, displayWordOrder, findWordPath, lineBetween, wordForPath, wordSearchMarkerColors } from './word-search-paths'
 
 export default function WordSearch({ definition, state, disabled, onChange }: PuzzlePlayerProps) {
   const [start, setStart] = useState<Cell | null>(null)
@@ -22,7 +22,13 @@ export default function WordSearch({ definition, state, disabled, onChange }: Pu
   const minimumWords = definition.minimumWords ?? definition.words.length
   const bonus = definition.bonusPerExtraWord ?? 0
   const foundCells = new Set<string>()
-  state.foundWords.forEach(word => (selectedPaths.current.get(word) ?? findWordPath(definition.grid, word)).forEach(cell => foundCells.add(cellKey(cell))))
+  const foundPaths = definition.words.flatMap((word, index) => {
+    if (!state.foundWords.includes(word)) return []
+    const path = selectedPaths.current.get(word) ?? findWordPath(definition.grid, word)
+    path.forEach(cell => foundCells.add(cellKey(cell)))
+    return path.length ? [{ word, index, path }] : []
+  })
+  const orderedWords = displayWordOrder(definition.words, state.foundWords)
   const submitPath = (path: Cell[]) => {
     if (disabled || busy || path.length < 2) return
     const letters = path.map(cell => definition.grid[cell.row]?.[cell.column] ?? '').join('')
@@ -33,7 +39,7 @@ export default function WordSearch({ definition, state, disabled, onChange }: Pu
     void submit({ path }).then(saved => {
       if (saved && matchedWord) selectedPaths.current.set(matchedWord, path)
       setMessage(saved
-        ? matchedWord ? `${matchedWord} found! It is now highlighted in the grid.` : `${letters} is not a listed word. Keep looking.`
+        ? matchedWord ? `${matchedWord} found! It is now marked in the grid.` : `${letters} is not a listed word. Keep looking.`
         : `We could not confirm ${letters}. Try selecting it again.`)
     })
   }
@@ -87,7 +93,11 @@ export default function WordSearch({ definition, state, disabled, onChange }: Pu
     <p className="mb-1 text-sm font-semibold text-stone-800">Find at least {minimumWords} of {definition.words.length} ingredients.</p>
     <p className="mb-3 text-sm text-stone-600">Words may run forward, backward, up, down, or diagonally.{bonus > 0 && minimumWords < definition.words.length ? ` Each extra ingredient is worth +${bonus} points.` : ''}</p>
     <p id="word-search-instructions" role="note" className="mb-4 rounded-xl border-2 border-amber-300 bg-amber-50 px-4 py-3 text-sm font-semibold leading-relaxed text-amber-950 shadow-sm"><span className="font-extrabold">How to play:</span> Press the first letter, drag a straight line across the word, then release. You can also tap its first and last letters.</p>
-    <ul aria-label="Words to find" className="mb-4 flex flex-wrap gap-2">{definition.words.map(word => <li key={word} className={`rounded-lg px-3 py-2 text-sm font-semibold ${state.foundWords.includes(word) ? 'bg-emerald-100 text-emerald-900' : 'bg-stone-100 text-stone-700'}`}>{state.foundWords.includes(word) ? `✓ ${word} found` : word}</li>)}</ul>
+    <ul aria-label="Words to find" className="mb-4 flex flex-wrap gap-2">{orderedWords.map(word => {
+      const found = state.foundWords.includes(word)
+      const colour = wordSearchMarkerColors[definition.words.indexOf(word) % wordSearchMarkerColors.length]
+      return <li key={word} className={`rounded-lg px-3 py-2 text-sm font-semibold ${found ? 'border-l-4 bg-white text-stone-700 line-through' : 'bg-stone-100 text-stone-700'}`} style={found ? { borderLeftColor: colour } : undefined}>{found ? `✓ ${word} found` : word}</li>
+    })}</ul>
     {dense && <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-950">
       <p className="min-w-0 flex-1">Large grid mode: {enlarged ? panMode ? 'Move mode is on. Swipe to reach another part of the grid.' : 'Select mode is on. Drag across letters to mark a word.' : 'the whole grid is fitted to the screen, so letters are smaller.'}</p>
       <div className="flex flex-wrap gap-2">
@@ -96,13 +106,17 @@ export default function WordSearch({ definition, state, disabled, onChange }: Pu
       </div>
     </div>}
     <div role={enlarged ? 'region' : undefined} aria-label={enlarged ? 'Scrollable word search' : undefined} tabIndex={enlarged ? 0 : undefined} className={enlarged ? 'max-h-[70vh] overflow-auto overscroll-contain rounded border border-stone-300' : ''}>
-      <div data-word-search-grid role="group" aria-label="Word search puzzle grid" aria-describedby="word-search-instructions" aria-busy={busy} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={cancelDrag} className={`grid gap-0.5 ${panMode ? 'touch-pan-x touch-pan-y' : 'touch-none select-none'} ${enlarged ? '' : 'mx-auto w-full max-w-lg'}`} style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`, ...(enlarged ? { width: `${expandedWidth}px` } : {}) }}>
+      <div data-word-search-grid role="group" aria-label="Word search puzzle grid" aria-describedby="word-search-instructions" aria-busy={busy} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={cancelDrag} className={`relative grid gap-0.5 ${panMode ? 'touch-pan-x touch-pan-y' : 'touch-none select-none'} ${enlarged ? '' : 'mx-auto w-full max-w-lg'}`} style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`, ...(enlarged ? { width: `${expandedWidth}px` } : {}) }}>
+      <svg data-word-search-markers aria-hidden="true" viewBox={`0 0 ${columns} ${definition.grid.length}`} preserveAspectRatio="none" className="pointer-events-none absolute inset-0 z-10 h-full w-full overflow-visible">
+        {foundPaths.map(({ word, index, path }) => <line key={word} x1={path[0].column + 0.5} y1={path[0].row + 0.5} x2={path[path.length - 1].column + 0.5} y2={path[path.length - 1].row + 0.5} stroke={wordSearchMarkerColors[index % wordSearchMarkerColors.length]} strokeWidth="0.3" strokeLinecap="round" opacity="0.55" />)}
+        {preview.length > 1 && <line x1={preview[0].column + 0.5} y1={preview[0].row + 0.5} x2={preview[preview.length - 1].column + 0.5} y2={preview[preview.length - 1].row + 0.5} stroke="#d97706" strokeWidth="0.3" strokeLinecap="round" strokeDasharray="0.45 0.18" opacity="0.75" />}
+      </svg>
       {definition.grid.flatMap((row, r) => row.map((letter, c) => {
         const cell = { row: r, column: c }
         const key = cellKey(cell)
         const found = foundCells.has(key)
         const active = previewCells.has(key)
-        return <button key={key} data-word-cell data-row={r} data-column={c} type="button" disabled={disabled || busy || panMode} aria-label={`${letter}, row ${r + 1}, column ${c + 1}${found ? ', found word' : ''}`} aria-pressed={found || active} onPointerDown={event => beginDrag(cell, event)} onClick={() => { if (suppressClick.current) { suppressClick.current = false; return } select(cell) }} className={`aspect-square min-h-0 min-w-0 appearance-none overflow-hidden rounded-[clamp(0.2rem,1.5vw,0.5rem)] border p-0 ${enlarged ? 'text-base' : 'text-[clamp(0.5rem,3.5vw,1rem)]'} font-bold leading-none disabled:opacity-60 ${active ? 'relative z-10 border-amber-700 bg-amber-300 text-amber-950 ring-2 ring-inset ring-amber-600' : found ? 'border-emerald-700 bg-emerald-300 text-emerald-950 ring-1 ring-inset ring-emerald-700' : 'border-stone-300 bg-white text-stone-900'}`}>{letter}</button>
+        return <button key={key} data-word-cell data-row={r} data-column={c} type="button" disabled={disabled || busy || panMode} aria-label={`${letter}, row ${r + 1}, column ${c + 1}${found ? ', found word' : ''}`} aria-pressed={found || active} onPointerDown={event => beginDrag(cell, event)} onClick={() => { if (suppressClick.current) { suppressClick.current = false; return } select(cell) }} className={`aspect-square min-h-0 min-w-0 appearance-none overflow-hidden rounded-[clamp(0.2rem,1.5vw,0.5rem)] border bg-white p-0 ${enlarged ? 'text-base' : 'text-[clamp(0.5rem,3.5vw,1rem)]'} font-bold leading-none text-stone-900 disabled:opacity-60 ${active ? 'border-amber-700 ring-2 ring-inset ring-amber-600' : 'border-stone-300'}`}>{letter}</button>
       }))}
       </div>
     </div>

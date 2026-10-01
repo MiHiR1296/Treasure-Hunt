@@ -1,4 +1,4 @@
-import { PuzzleError, type Cell } from './types'
+import { PuzzleError, type Cell, type SudokuSize } from './types'
 
 export const record = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
 export const integer = (value: unknown, min: number, max: number): value is number => typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max
@@ -31,47 +31,61 @@ export function shuffled(ids: string[], avoid?: string[]): string[] {
   return result
 }
 
-export function sudokuConsistent(grid: number[][], size: number): boolean {
-  const box = Math.sqrt(size)
+export function sudokuBoxDimensions(size: SudokuSize): { rows: number; columns: number } {
+  switch (size) {
+    case 4: return { rows: 2, columns: 2 }
+    case 6: return { rows: 2, columns: 3 }
+    case 9: return { rows: 3, columns: 3 }
+  }
+}
+
+export function sudokuConsistent(grid: number[][], size: SudokuSize): boolean {
+  const box = sudokuBoxDimensions(size)
   const unique = (values: number[]) => new Set(values.filter(Boolean)).size === values.filter(Boolean).length
   for (let index = 0; index < size; index++) {
     if (!unique(grid[index]) || !unique(grid.map(row => row[index]))) return false
-    const startRow = Math.floor(index / box) * box
-    const startColumn = index % box * box
+  }
+  for (let startRow = 0; startRow < size; startRow += box.rows) for (let startColumn = 0; startColumn < size; startColumn += box.columns) {
     const values: number[] = []
-    for (let row = startRow; row < startRow + box; row++) for (let column = startColumn; column < startColumn + box; column++) values.push(grid[row][column])
+    for (let row = startRow; row < startRow + box.rows; row++) for (let column = startColumn; column < startColumn + box.columns; column++) values.push(grid[row][column])
     if (!unique(values)) return false
   }
   return true
 }
 
-/** Bounded publish-time solvability check, choosing the most constrained cell first. */
-export function sudokuSolvable(givens: number[][], size: number): boolean {
+/** Count solutions up to a small limit, choosing the most constrained cell first. */
+export function sudokuSolutionCount(givens: number[][], size: SudokuSize, limit = 2, budgetLimit = 200_000): number {
   const grid = copy(givens)
-  const box = Math.sqrt(size)
-  let budget = 200000
-  const solve = (): boolean => {
-    if (--budget < 0) return false
+  const box = sudokuBoxDimensions(size)
+  let budget = budgetLimit
+  let count = 0
+  const solve = (): void => {
+    if (--budget < 0 || count >= limit) return
     let best: { row: number; column: number; candidates: number[] } | null = null
     for (let row = 0; row < size; row++) for (let column = 0; column < size; column++) {
       if (grid[row][column]) continue
       const used = new Set([...grid[row], ...grid.map(line => line[column])])
-      const startRow = Math.floor(row / box) * box
-      const startColumn = Math.floor(column / box) * box
-      for (let r = startRow; r < startRow + box; r++) for (let c = startColumn; c < startColumn + box; c++) used.add(grid[r][c])
+      const startRow = Math.floor(row / box.rows) * box.rows
+      const startColumn = Math.floor(column / box.columns) * box.columns
+      for (let r = startRow; r < startRow + box.rows; r++) for (let c = startColumn; c < startColumn + box.columns; c++) used.add(grid[r][c])
       const candidates = Array.from({ length: size }, (_, i) => i + 1).filter(value => !used.has(value))
-      if (!candidates.length) return false
+      if (!candidates.length) return
       if (!best || candidates.length < best.candidates.length) best = { row, column, candidates }
     }
-    if (!best) return true
+    if (!best) { count++; return }
     for (const value of best.candidates) {
       grid[best.row][best.column] = value
-      if (solve()) return true
+      solve()
       grid[best.row][best.column] = 0
     }
-    return false
   }
-  return sudokuConsistent(grid, size) && solve()
+  if (sudokuConsistent(grid, size)) solve()
+  return count
+}
+
+/** Bounded publish-time solvability check, choosing the most constrained cell first. */
+export function sudokuSolvable(givens: number[][], size: SudokuSize): boolean {
+  return sudokuSolutionCount(givens, size, 1) === 1
 }
 
 export function straightPath(path: unknown, rows: number, columns: number): path is Cell[] {

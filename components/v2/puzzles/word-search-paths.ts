@@ -4,6 +4,15 @@ const directions = [-1, 0, 1].flatMap(row => [-1, 0, 1].map(column => ({ row, co
 
 export const cellKey = (cell: Cell) => `${cell.row}:${cell.column}`
 
+/** High-contrast marker colours, assigned by the stable authored word order. */
+export const wordSearchMarkerColors = ['#0f766e', '#2563eb', '#9333ea', '#c2410c', '#be123c', '#4d7c0f', '#0369a1']
+
+/** Keep unsolved targets at the front while retaining a stable found-word history below. */
+export function displayWordOrder(words: string[], foundWords: string[]) {
+  const found = new Set(foundWords)
+  return [...words.filter(word => !found.has(word)), ...words.filter(word => found.has(word))]
+}
+
 export function lineBetween(start: Cell, target: Cell, snap = false): Cell[] {
   let rowDistance = target.row - start.row
   let columnDistance = target.column - start.column

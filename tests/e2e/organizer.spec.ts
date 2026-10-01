@@ -182,6 +182,115 @@ test('saving disables canvas route mutations until the response completes', asyn
   await page.unroute('**/api/v2/admin/drafts');
 });
 
+test('word-search generator discards candidates when puzzle inputs change before or after a response', async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.goto('/v2/admin');
+  await page.getByLabel('Password', { exact: true }).fill('browser-test-password-only');
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await page.getByRole('button', { name: 'Design', exact: true }).click();
+  await page.getByRole('button', { name: 'New hunt', exact: true }).click();
+  await page.getByRole('button', { name: 'Advanced JSON', exact: true }).click();
+  await page.getByLabel('Advanced configuration', { exact: true }).fill(JSON.stringify({
+    schemaVersion: 1, id: `candidate-${randomUUID()}`, version: 1, title: 'Candidate safety check', checkpoints: [{
+      id: 'words', title: 'Word search', basePoints: 10, hints: [], flow: { startNodeId: 'puzzle', nodes: [
+        { id: 'puzzle', type: 'puzzle', prompt: 'Find the words.', puzzle: { type: 'word_search', grid: ['CATXXXXX', 'DOGXXXXX', 'BIRDXXXX', 'FISHXXXX', 'XXXXXXXX', 'XXXXXXXX', 'XXXXXXXX', 'XXXXXXXX'].map(row => [...row]), words: ['CAT', 'DOG', 'BIRD', 'FISH'], minimumWords: 4, bonusPerExtraWord: 2 }, next: 'done' },
+        { id: 'done', type: 'complete' },
+      ] },
+    }],
+  }));
+  await page.getByRole('button', { name: 'Apply JSON to draft', exact: true }).click();
+
+  const words = page.getByLabel('Words to find — one per line', { exact: true });
+  const required = page.getByLabel('Words required to continue', { exact: true });
+  const generate = page.getByRole('button', { name: 'Generate 4 versions', exact: true });
+  let releaseGeneration!: () => void;
+  let markGenerationStarted!: () => void;
+  const generationStarted = new Promise<void>(resolve => { markGenerationStarted = resolve; });
+  const generationGate = new Promise<void>(resolve => { releaseGeneration = resolve; });
+  await page.route('**/api/v2/admin/puzzles/generate', async route => {
+    markGenerationStarted();
+    await generationGate;
+    await route.continue();
+  });
+  const delayedResponse = page.waitForResponse(response => response.url().endsWith('/api/v2/admin/puzzles/generate') && response.request().method() === 'POST');
+  await generate.click();
+  await generationStarted;
+  await words.fill('CAT\nDOG\nBIRD\nFISH\nANT');
+  await required.fill('5');
+  releaseGeneration();
+  await delayedResponse;
+  await page.unroute('**/api/v2/admin/puzzles/generate');
+  await expect(page.getByRole('status').filter({ hasText: 'setup changed while versions were being generated' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Use this version', exact: true })).toHaveCount(0);
+
+  await words.fill('CAT\nDOG\nBIRD\nFISH');
+  await required.fill('4');
+  await generate.click();
+  await expect(page.getByRole('button', { name: 'Use this version', exact: true }).first()).toBeVisible();
+  await words.fill('CAT\nDOG\nBIRD\nFISH\nANT');
+  await required.fill('5');
+  await expect(page.getByRole('status').filter({ hasText: 'setup changed after these versions were generated' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Use this version', exact: true })).toHaveCount(0);
+});
+
+test('a crowded generation request yields to a concurrent player-facing request', async ({ page }) => {
+  test.setTimeout(30_000);
+  await page.goto('/v2/admin');
+  const signedIn = await page.evaluate(async () => {
+    const response = await fetch('/api/v2/admin/session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'browser-test-password-only' }) });
+    return response.ok;
+  });
+  expect(signedIn).toBeTruthy();
+  const input = {
+    type: 'word_search', rows: 8, columns: 8, difficulty: 'hard', seed: 'deep-natural',
+    words: 'PLANET TIGER FOREST RIVER SCHOOL CLASS BOOK PAPER PENCIL LEARN FRIEND TEAM BRAIN LOGIC STUDY LESSON MENTOR READER WORD STORY POETRY AUTHOR NOVEL MUSIC TRAVEL PUZZLE SECRET HIDDEN CLUE PRIZE'.split(' '),
+  };
+  const generation = page.evaluate(async body => {
+    const response = await fetch('/api/v2/admin/puzzles/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    return { status: response.status, body: await response.json() };
+  }, input);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  const started = performance.now();
+  const playerRequest = await page.evaluate(async () => {
+    const response = await fetch('/api/v2/hunts');
+    return response.ok;
+  });
+  expect(playerRequest).toBeTruthy();
+  expect(performance.now() - started).toBeLessThan(750);
+  const response = await generation;
+  expect(response.status).toBe(400);
+  expect(response.body).toMatchObject({ error: expect.stringContaining('taking too long to generate safely') });
+});
+
+test('a crowded crossword generation request yields to a concurrent player-facing request', async ({ page }) => {
+  test.setTimeout(30_000);
+  await page.goto('/v2/admin');
+  const signedIn = await page.evaluate(async () => {
+    const response = await fetch('/api/v2/admin/session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'browser-test-password-only' }) });
+    return response.ok;
+  });
+  expect(signedIn).toBeTruthy();
+  const input = {
+    type: 'crossword', rows: 10, columns: 10, seed: 'review-crowded-crossword',
+    entries: 'BCDEFGHIJKLMNOPQRST'.split('').map((letter, index) => ({ id: `entry-${index}`, clue: `Clue ${index}`, answer: `AAA${letter}` })),
+  };
+  const generation = page.evaluate(async body => {
+    const response = await fetch('/api/v2/admin/puzzles/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    return { status: response.status, body: await response.json() };
+  }, input);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  const started = performance.now();
+  const playerRequest = await page.evaluate(async () => {
+    const response = await fetch('/api/v2/hunts');
+    return response.ok;
+  });
+  expect(playerRequest).toBeTruthy();
+  expect(performance.now() - started).toBeLessThan(750);
+  const response = await generation;
+  expect(response.status).toBe(400);
+  expect(response.body).toMatchObject({ error: expect.stringContaining('taking too long to generate safely') });
+});
+
 test('unsupported imported steps open safely in Advanced JSON and survive local recovery', async ({ page }) => {
   await page.goto('/v2/admin');
   await page.getByLabel('Password', { exact: true }).fill('browser-test-password-only');

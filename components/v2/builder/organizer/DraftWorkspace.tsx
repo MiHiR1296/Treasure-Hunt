@@ -8,6 +8,7 @@ import HuntBuilder from '../HuntBuilder';
 import { actionClass, buttonClass, Field, inputClass } from '../Fields';
 import { createCheckpoint } from '../model';
 import { BuilderMediaProvider } from '../AssetField';
+import type { GeneratedPuzzle, PuzzleGenerationInput } from '@/lib/engine/puzzles/generator';
 import { isSupportedNodeType } from '../catalog';
 import { adminRequest, AdminRequestError, type Asset, type Draft, type OperationProps, requestId } from './client';
 
@@ -52,6 +53,7 @@ export default function DraftWorkspace({ dashboard, pending, run, refresh, notif
     list: async () => (await adminRequest<{ media: Asset[] }>('/api/v2/admin/media')).media,
     upload: async (file: File) => { const form = new FormData(); form.set('file', file); form.set('requestId', requestId()); return (await adminRequest<{ media: Asset }>('/api/v2/admin/media', 'POST', form)).media; },
     makeJigsaw: async (mediaId: string, rows: number, columns: number) => (await adminRequest<{ puzzle: PuzzleDefinition }>('/api/v2/admin/media', 'POST', { mediaId, rows, columns })).puzzle,
+    generatePuzzles: async (input: PuzzleGenerationInput) => (await adminRequest<{ generated: GeneratedPuzzle[] }>('/api/v2/admin/puzzles/generate', 'POST', input)).generated,
   }), []);
 
   useEffect(() => {
