@@ -7,16 +7,16 @@ The organiser builder can generate and verify word searches, Sudoku boards, and 
 1. Add a Word search, Sudoku, or Crossword puzzle node.
 2. Enter the word list, or the crossword clues and answers. For Sudoku, select a board size and difficulty.
 3. Choose one to four alternatives and generate. An optional seed reproduces the same set later.
-4. Inspect the organiser-only answer key and use the preferred version. Selecting it replaces only that puzzle’s ordinary definition, so it can still be edited manually.
+4. Inspect the organiser-only answer key and use the preferred version. Selecting it replaces only that puzzle’s ordinary definition, so it can still be edited manually. Versions belong to the exact word/clue, size, difficulty and scoring setup that generated them; changing that setup hides existing versions until you generate again.
 5. Place different selected versions in existing random-branch nodes when a checkpoint needs route variants. In Draft → “Route choices for the next preview,” force each route to test it.
 
 The temporary answer key is never put into the saved/exported player definition. Sudoku and crossword verification remains private on the server; word-search targets and their grid are intentionally visible to players.
 
 ## Quality guarantees and limits
 
-- Word search: 4–25 rows and columns, up to 50 letter-only target words, and easy/medium/hard direction sets. The placement search succeeds only when it can place every requested word; it does not silently drop words.
+- Word search: 4–25 rows and columns, up to 50 letter-only target words, and easy/medium/hard direction sets. The placement search succeeds only when it can place every requested word; it does not silently drop words. Generation shares short event-loop slices with player traffic and has a small request-wide work/time budget, returning recovery guidance instead of allowing a crowded request to monopolise the server.
 - Sudoku: 4×4 (2×2 boxes), 6×6 (2×3 boxes), and 9×9 (3×3 boxes). Every generated board is checked to have exactly one solution. Difficulty controls the target count of given numbers; it is deliberately a practical clue-density setting, not a claim that every human solver experiences the same difficulty.
-- Crossword: 3–25 rows and columns, up to 30 clue/answer pairs. The auto-layout requires every entry to be in one connected crossing layout and refuses incompatible sets instead of omitting answers. Choose answers with shared letters or increase the board size when it reports that no connected layout exists.
+- Crossword: 3–25 rows and columns, up to 30 clue/answer pairs. The auto-layout requires every entry to be in one connected crossing layout and refuses incompatible sets instead of omitting answers. It tries legal edge as well as central starts, so a valid compact layout is not excluded by a central placement assumption. Choose answers with shared letters or increase the board size when it reports that no connected layout exists.
 
 All three factories use a bounded, deterministic search when given a seed, validate their result through the same `validatePuzzle` contract used at publication, and return clear recovery guidance if constraints cannot be satisfied.
 

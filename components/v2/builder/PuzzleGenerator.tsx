@@ -1,11 +1,11 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { GeneratedPuzzle, PuzzleDifficulty } from '@/lib/engine/puzzles/generator'
 import type { PuzzleDefinition, SudokuSize } from '@/lib/engine/puzzles/types'
 import { useBuilderMedia } from './AssetField'
 import { actionClass, buttonClass, Field, inputClass, NumberField } from './Fields'
-import { selectGeneratedPuzzle } from './puzzleGeneratorModel'
+import { puzzleGenerationInput, puzzleGenerationKey, selectGeneratedPuzzle } from './puzzleGeneratorModel'
 
 type GeneratedType = Extract<PuzzleDefinition, { type: 'word_search' | 'sudoku' | 'crossword' }>
 
@@ -28,9 +28,18 @@ export default function PuzzleGenerator({ value, onChange }: { value: GeneratedT
   const [columns, setColumns] = useState(value.type === 'word_search' || value.type === 'crossword' ? value.type === 'word_search' ? Math.max(4, value.grid[0]?.length || 0) : Math.max(3, value.columns) : 12)
   const [size, setSize] = useState<SudokuSize>(value.type === 'sudoku' ? value.size : 9)
   const [seed, setSeed] = useState('')
-  const [generated, setGenerated] = useState<GeneratedPuzzle[]>([])
+  const [generated, setGenerated] = useState<{ key: string; candidates: GeneratedPuzzle[] } | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const generationRequest = useRef(0)
+
+  const input = puzzleGenerationInput(value, { rows, columns, size, difficulty, variants, seed })
+  const inputKey = puzzleGenerationKey(input)
+  const latestInputKey = useRef(inputKey)
+  latestInputKey.current = inputKey
+  const candidates = generated?.key === inputKey ? generated.candidates : []
+  const staleCandidates = generated !== null && generated.key !== inputKey
 
   useEffect(() => {
     if (editorSize !== null) setSize(editorSize)
@@ -39,17 +48,28 @@ export default function PuzzleGenerator({ value, onChange }: { value: GeneratedT
 
   async function generate() {
     if (!media?.generatePuzzles || busy) return
-    setBusy(true); setError(''); setGenerated([])
+    const request = ++generationRequest.current
+    const requestKey = inputKey
+    setBusy(true); setError(''); setNotice(''); setGenerated(null)
     try {
-      const repeat = seed.trim() ? { seed: seed.trim() } : {}
-      const input = value.type === 'word_search'
-        ? { type: 'word_search' as const, rows, columns, words: value.words, minimumWords: value.minimumWords, bonusPerExtraWord: value.bonusPerExtraWord, difficulty, variants, ...repeat }
-        : value.type === 'sudoku'
-          ? { type: 'sudoku' as const, size, difficulty, variants, ...repeat }
-          : { type: 'crossword' as const, rows, columns, entries: value.entries.map(({ id, clue, answer }) => ({ id, clue, answer })), variants, ...repeat }
-      setGenerated(await media.generatePuzzles(input))
+      const result = await media.generatePuzzles(input)
+      if (request !== generationRequest.current || requestKey !== latestInputKey.current) {
+        setNotice('The puzzle setup changed while versions were being generated, so those versions were discarded. Generate a new version for the current setup.')
+        return
+      }
+      setGenerated({ key: requestKey, candidates: result })
     } catch (failure) { setError(failure instanceof Error ? failure.message : 'The puzzle generator could not create a layout. Please try again.') }
     finally { setBusy(false) }
+  }
+
+  function selectCandidate(candidate: GeneratedPuzzle) {
+    const selected = selectGeneratedPuzzle(value, candidate.puzzle)
+    if (!selected) {
+      setGenerated(null)
+      setError('This version no longer matches the current puzzle rules. Generate a new version before using it.')
+      return
+    }
+    onChange(selected)
   }
 
   const title = value.type === 'word_search' ? 'Word-search generator' : value.type === 'sudoku' ? 'Sudoku generator' : 'Crossword generator'
@@ -71,6 +91,7 @@ export default function PuzzleGenerator({ value, onChange }: { value: GeneratedT
     {!media?.generatePuzzles && <p className="text-sm text-amber-800">Puzzle generation is available in the organiser workspace.</p>}
     <button type="button" className={actionClass} disabled={!media?.generatePuzzles || busy} onClick={() => void generate()}>{busy ? 'Generating and verifying…' : `Generate ${variants} ${variants === 1 ? 'version' : 'versions'}`}</button>
     {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
-    {generated.length > 0 && <div className="space-y-3 border-t border-teal-200 pt-3"><p className="text-sm leading-6 text-teal-950">Every candidate was validated server-side. Choose one to replace the manual layout; its answer key is not saved into the hunt export.</p>{generated.map((candidate, index) => <article key={candidate.seed} className="rounded-lg border border-teal-200 bg-white p-3"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-slate-900">Version {index + 1} · {candidate.metrics.label}</p><button type="button" className={buttonClass} onClick={() => onChange(selectGeneratedPuzzle(value, candidate.puzzle))}>Use this version</button></div><p className="mt-1 text-xs text-slate-600">{candidate.metrics.detail} · seed {candidate.seed}</p><details className="mt-3"><summary className="cursor-pointer text-sm font-semibold text-teal-900">Organizer answer key</summary><div className="mt-2"><AnswerKey generated={candidate} /></div></details></article>)}</div>}
+    {(notice || staleCandidates) && <p role="status" className="text-sm text-amber-800">{notice || 'The puzzle setup changed after these versions were generated. They are hidden so an incompatible layout cannot be selected; generate new versions for the current setup.'}</p>}
+    {candidates.length > 0 && <div className="space-y-3 border-t border-teal-200 pt-3"><p className="text-sm leading-6 text-teal-950">Every candidate was validated server-side. Choose one to replace the manual layout; its answer key is not saved into the hunt export.</p>{candidates.map((candidate, index) => <article key={candidate.seed} className="rounded-lg border border-teal-200 bg-white p-3"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-slate-900">Version {index + 1} · {candidate.metrics.label}</p><button type="button" className={buttonClass} onClick={() => selectCandidate(candidate)}>Use this version</button></div><p className="mt-1 text-xs text-slate-600">{candidate.metrics.detail} · seed {candidate.seed}</p><details className="mt-3"><summary className="cursor-pointer text-sm font-semibold text-teal-900">Organizer answer key</summary><div className="mt-2"><AnswerKey generated={candidate} /></div></details></article>)}</div>}
   </section>
 }
