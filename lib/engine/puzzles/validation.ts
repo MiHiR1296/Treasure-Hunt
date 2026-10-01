@@ -39,7 +39,7 @@ export function validatePuzzle(value: unknown): string[] {
     case 'word_search': {
       const grid = value.grid
       if (!list(grid, 2, 25) || !Array.isArray(grid[0]) || !integer(grid[0].length, 2, 25) || !matrix(grid, grid.length, grid[0].length, letter => typeof letter === 'string' && /^[a-zA-Z]$/.test(letter))) fail('Word search needs a rectangular letter grid between 2×2 and 25×25.')
-      if (!list(value.words, 1, 50) || !value.words.every(word)) fail('Word search needs 1 to 50 words using letters only.')
+      if (!list(value.words, 1, 50) || !value.words.every(item => word(item) && item.length >= 2)) fail('Word search needs 1 to 50 unique targets using at least two letters each.')
       else if (!errors.length) {
         const words = (value.words as string[]).map(item => item.toUpperCase())
         if (new Set(words).size !== words.length) fail('Word search words must be unique.')

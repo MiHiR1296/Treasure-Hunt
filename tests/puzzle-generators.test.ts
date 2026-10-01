@@ -162,6 +162,19 @@ test('crowded word searches fail within a shared generation budget and yield to 
   assert.ok(performance.now() - started < 2_500)
 })
 
+test('crowded crosswords fail within the shared generation budget and yield to concurrent work', async () => {
+  const input = {
+    type: 'crossword' as const, rows: 10, columns: 10, seed: 'review-crowded-crossword',
+    entries: 'BCDEFGHIJKLMNOPQRST'.split('').map((letter, index) => ({ id: `entry-${index}`, clue: `Clue ${index}`, answer: `AAA${letter}` })),
+  }
+  const started = performance.now()
+  const generation = generatePuzzles(input)
+  const playerRequest = new Promise(resolve => setTimeout(() => resolve('player request'), 0))
+  assert.equal(await Promise.race([generation.then(() => 'generation', () => 'generation'), playerRequest]), 'player request')
+  await assert.rejects(generation, /taking too long to generate safely/)
+  assert.ok(performance.now() - started < 2_500)
+})
+
 test('maximal crowded word-search input rejects before the organiser timeout', async () => {
   const started = performance.now()
   await assert.rejects(generatePuzzles({
@@ -175,6 +188,7 @@ test('generators reject layouts that cannot meet their stated constraints', asyn
   await assert.rejects(generatePuzzles({ type: 'word_search', rows: 4, columns: 4, words: ['TOOLONG'], difficulty: 'easy', seed: 'no-fit' }))
   await assert.rejects(generatePuzzles({ type: 'word_search', rows: 8, columns: 8, words: ['VALID'], minimumWords: 2, difficulty: 'easy', seed: 'invalid-threshold' }))
   await assert.rejects(generatePuzzles({ type: 'word_search', rows: 8, columns: 8, words: ['VALID'], bonusPerExtraWord: 101, difficulty: 'easy', seed: 'invalid-bonus' }))
+  await assert.rejects(generatePuzzles({ type: 'word_search', rows: 4, columns: 4, words: ['A', 'CAT'], difficulty: 'easy', seed: 'single-letter-review' }), /at least two letters/)
   await assert.rejects(generatePuzzles({ type: 'crossword', rows: 8, columns: 8, entries: [
     { id: 'one', clue: 'First', answer: 'ABC' }, { id: 'two', clue: 'Second', answer: 'DEF' },
   ], seed: 'no-crossing' }))

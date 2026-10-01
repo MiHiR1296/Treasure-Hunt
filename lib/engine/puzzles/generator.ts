@@ -34,7 +34,7 @@ function fail(message: string): never { throw new EngineError('invalid_definitio
 const GENERATION_TIME_LIMIT_MS = 2_000
 const GENERATION_WORK_LIMIT = 300_000
 const YIELD_AFTER_WORK = 1_024
-const generationLimitMessage = 'This puzzle is taking too long to generate safely. Use fewer words, a larger grid, or an easier layout and try again.'
+const generationLimitMessage = 'This puzzle is taking too long to generate safely. Use fewer entries, a larger grid, or an easier layout and try again.'
 
 /** Shares short CPU slices with player requests and caps one organiser generation request. */
 class GenerationBudget {
@@ -80,6 +80,7 @@ function cleanWords(words: unknown, max = 30): string[] {
   if (!Array.isArray(words) || words.length < 1 || words.length > max) fail(`Enter between 1 and ${max} words.`)
   const result = words.map(value => typeof value === 'string' ? value.trim().toUpperCase() : '')
   if (result.some(value => !word(value))) fail('Words must contain only letters and be at most 40 characters long.')
+  if (result.some(value => value.length < 2)) fail('Word-search targets must be at least two letters long.')
   if (new Set(result).size !== result.length) fail('Each word must be unique.')
   return result
 }
@@ -233,7 +234,8 @@ function crosswordBounds(placement: CrosswordPlacement) {
     ? { endRow: placement.row, endColumn: placement.column + length - 1 }
     : { endRow: placement.row + length - 1, endColumn: placement.column }
 }
-function canPlaceCrossword(grid: Map<string, CrosswordCell>, rows: number, columns: number, placement: CrosswordPlacement, first: boolean) {
+async function canPlaceCrossword(grid: Map<string, CrosswordCell>, rows: number, columns: number, placement: CrosswordPlacement, first: boolean, budget: GenerationBudget) {
+  await checkpoint(budget)
   const { endRow, endColumn } = crosswordBounds(placement)
   if (placement.row < 0 || placement.column < 0 || endRow >= rows || endColumn >= columns) return false
   const rowStep = placement.direction === 'down' ? 1 : 0, columnStep = placement.direction === 'across' ? 1 : 0
@@ -242,6 +244,7 @@ function canPlaceCrossword(grid: Map<string, CrosswordCell>, rows: number, colum
   if (before || after) return false
   let crossings = 0
   for (let index = 0; index < placement.answer.length; index++) {
+    await checkpoint(budget)
     const row = placement.row + rowStep * index, column = placement.column + columnStep * index
     const current = grid.get(crosswordKey(row, column))
     if (current) {
@@ -264,18 +267,23 @@ function placeCrossword(grid: Map<string, CrosswordCell>, placement: CrosswordPl
   }
   return result
 }
-function crosswordCandidates(entry: CrosswordInput, grid: Map<string, CrosswordCell>, rows: number, columns: number) {
+async function crosswordCandidates(entry: CrosswordInput, grid: Map<string, CrosswordCell>, rows: number, columns: number, budget: GenerationBudget) {
   const candidates: CrosswordPlacement[] = []
   for (const [key, cell] of grid) for (const [index, letter] of [...entry.answer].entries()) {
+    await checkpoint(budget)
     if (letter !== cell.letter) continue
     const [row, column] = key.split(':').map(Number)
     for (const direction of ['across', 'down'] as const) {
+      await checkpoint(budget)
       if (cell.directions.has(direction)) continue
       const placement: CrosswordPlacement = { ...entry, row: row - (direction === 'down' ? index : 0), column: column - (direction === 'across' ? index : 0), direction, crossings: 0 }
-      if (canPlaceCrossword(grid, rows, columns, placement, false)) {
+      if (await canPlaceCrossword(grid, rows, columns, placement, false, budget)) {
         let crossings = 0
         const rowStep = direction === 'down' ? 1 : 0, columnStep = direction === 'across' ? 1 : 0
-        for (let offset = 0; offset < entry.answer.length; offset++) if (grid.has(crosswordKey(placement.row + rowStep * offset, placement.column + columnStep * offset))) crossings++
+        for (let offset = 0; offset < entry.answer.length; offset++) {
+          await checkpoint(budget)
+          if (grid.has(crosswordKey(placement.row + rowStep * offset, placement.column + columnStep * offset))) crossings++
+        }
         candidates.push({ ...placement, crossings })
       }
     }
@@ -292,46 +300,53 @@ function crosswordEntryInput(entries: unknown): CrosswordInput[] {
   return result
 }
 
-function initialCrosswordPlacements(entry: CrosswordInput, rows: number, columns: number, random: Random) {
+async function initialCrosswordPlacements(entry: CrosswordInput, rows: number, columns: number, random: Random, budget: GenerationBudget) {
   const placements: CrosswordPlacement[] = []
   for (const direction of ['across', 'down'] as const) {
     const maxRow = direction === 'down' ? rows - entry.answer.length : rows - 1
     const maxColumn = direction === 'across' ? columns - entry.answer.length : columns - 1
     for (let row = 0; row <= maxRow; row++) for (let column = 0; column <= maxColumn; column++) {
+      await checkpoint(budget)
       placements.push({ ...entry, row, column, direction, crossings: 0 })
     }
   }
   return shuffled(placements, random)
 }
 
-function generateCrosswordOne(input: Extract<PuzzleGenerationInput, { type: 'crossword' }>, seed: string): GeneratedPuzzle {
+async function generateCrosswordOne(input: Extract<PuzzleGenerationInput, { type: 'crossword' }>, seed: string, budget: GenerationBudget): Promise<GeneratedPuzzle> {
   const rows = assertInteger(input.rows, 3, 25, 'Crossword rows must be between 3 and 25.'), columns = assertInteger(input.columns, 3, 25, 'Crossword columns must be between 3 and 25.')
   const entries = crosswordEntryInput(input.entries), random = randomFor(seed)
   if (entries.some(entry => entry.answer.length > Math.max(rows, columns))) fail('Increase the crossword size or remove an answer that does not fit.')
   let best: CrosswordPlacement[] | null = null
   for (let restart = 0; restart < 100 && !best; restart++) {
+    await checkpoint(budget)
     const ordered = shuffled(entries, random).sort((left, right) => right.answer.length - left.answer.length)
     const first = ordered[0]
-    const initialPlacements = initialCrosswordPlacements(first, rows, columns, random)
+    const initialPlacements = await initialCrosswordPlacements(first, rows, columns, random, budget)
     const initial = initialPlacements[restart % initialPlacements.length]
-    const solve = (grid: Map<string, CrosswordCell>, pending: CrosswordInput[], placed: CrosswordPlacement[], budget: { remaining: number }): CrosswordPlacement[] | null => {
-      if (--budget.remaining < 0) return null
+    const solve = async (grid: Map<string, CrosswordCell>, pending: CrosswordInput[], placed: CrosswordPlacement[], searchBudget: { remaining: number }): Promise<CrosswordPlacement[] | null> => {
+      await checkpoint(budget)
+      if (--searchBudget.remaining < 0) return null
       if (!pending.length) return placed
       // An entry may have no crossing *yet* but become placeable after a bridge word.
       // Only fail when no remaining entry can extend the connected layout at all.
-      const options = pending.map(entry => ({ entry, candidates: crosswordCandidates(entry, grid, rows, columns) }))
-        .filter(option => option.candidates.length > 0)
-        .sort((left, right) => left.candidates.length - right.candidates.length || right.entry.answer.length - left.entry.answer.length)
+      const options: { entry: CrosswordInput; candidates: CrosswordPlacement[] }[] = []
+      for (const entry of pending) {
+        const candidates = await crosswordCandidates(entry, grid, rows, columns, budget)
+        if (candidates.length) options.push({ entry, candidates })
+      }
+      options.sort((left, right) => left.candidates.length - right.candidates.length || right.entry.answer.length - left.entry.answer.length)
       if (!options.length) return null
       const selected = options[0]
       const candidates = selected.candidates.map(candidate => ({ ...candidate, rank: candidate.crossings * 100 + random() * 10 })).sort((left, right) => right.rank - left.rank).slice(0, 48)
       for (const candidate of candidates) {
-        const solved = solve(placeCrossword(grid, candidate), pending.filter(entry => entry.id !== selected.entry.id), [...placed, candidate], budget)
+        await checkpoint(budget, candidate.answer.length)
+        const solved = await solve(placeCrossword(grid, candidate), pending.filter(entry => entry.id !== selected.entry.id), [...placed, candidate], searchBudget)
         if (solved) return solved
       }
       return null
     }
-    if (initial && canPlaceCrossword(new Map(), rows, columns, initial, true)) best = solve(placeCrossword(new Map(), initial), ordered.slice(1), [initial], { remaining: 30_000 })
+    if (initial && await canPlaceCrossword(new Map(), rows, columns, initial, true, budget)) best = await solve(placeCrossword(new Map(), initial), ordered.slice(1), [initial], { remaining: 30_000 })
   }
   if (!best) fail('These answers could not form one connected crossword. Try a larger grid or choose words with more shared letters.')
   const puzzle = { type: 'crossword' as const, rows, columns, entries: best.map(({ id, clue, answer, row, column, direction }) => ({ id, clue, answer, row, column, direction })) }
@@ -356,7 +371,7 @@ export async function generatePuzzles(input: PuzzleGenerationInput): Promise<Gen
     switch (input.type) {
       case 'word_search': generated.push(await generateWordSearchOne(input, seed, budget)); break
       case 'sudoku': generated.push(generateSudokuOne(input, seed)); break
-      case 'crossword': generated.push(generateCrosswordOne(input, seed)); break
+      case 'crossword': generated.push(await generateCrosswordOne(input, seed, budget)); break
     }
   }
   return generated

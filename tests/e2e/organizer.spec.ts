@@ -262,6 +262,35 @@ test('a crowded generation request yields to a concurrent player-facing request'
   expect(response.body).toMatchObject({ error: expect.stringContaining('taking too long to generate safely') });
 });
 
+test('a crowded crossword generation request yields to a concurrent player-facing request', async ({ page }) => {
+  test.setTimeout(30_000);
+  await page.goto('/v2/admin');
+  const signedIn = await page.evaluate(async () => {
+    const response = await fetch('/api/v2/admin/session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'browser-test-password-only' }) });
+    return response.ok;
+  });
+  expect(signedIn).toBeTruthy();
+  const input = {
+    type: 'crossword', rows: 10, columns: 10, seed: 'review-crowded-crossword',
+    entries: 'BCDEFGHIJKLMNOPQRST'.split('').map((letter, index) => ({ id: `entry-${index}`, clue: `Clue ${index}`, answer: `AAA${letter}` })),
+  };
+  const generation = page.evaluate(async body => {
+    const response = await fetch('/api/v2/admin/puzzles/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    return { status: response.status, body: await response.json() };
+  }, input);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  const started = performance.now();
+  const playerRequest = await page.evaluate(async () => {
+    const response = await fetch('/api/v2/hunts');
+    return response.ok;
+  });
+  expect(playerRequest).toBeTruthy();
+  expect(performance.now() - started).toBeLessThan(750);
+  const response = await generation;
+  expect(response.status).toBe(400);
+  expect(response.body).toMatchObject({ error: expect.stringContaining('taking too long to generate safely') });
+});
+
 test('unsupported imported steps open safely in Advanced JSON and survive local recovery', async ({ page }) => {
   await page.goto('/v2/admin');
   await page.getByLabel('Password', { exact: true }).fill('browser-test-password-only');

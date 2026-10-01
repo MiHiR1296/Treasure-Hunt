@@ -60,7 +60,7 @@ export default function PuzzleEditor({ value, onChange }: { value: PuzzleDefinit
     {value.type === 'word_search' && <>
       <PuzzleGenerator key={value.type} value={value} onChange={onChange} />
       <TextField label="Letter grid — one row per line" value={value.grid.map(row => row.join('')).join('\n')} multiline onChange={text => onChange({ ...value, grid: text.split('\n').map(row => Array.from(row.toUpperCase())) })} hint="Each row must have the same number of letters. Place each target word in the grid." />
-      <TextField label="Words to find — one per line" value={value.words.join('\n')} multiline onChange={text => onChange({ ...value, words: text.split('\n').map(word => word.toUpperCase()) })} />
+      <TextField label="Words to find — one per line" value={value.words.join('\n')} multiline onChange={text => onChange({ ...value, words: text.split('\n').map(word => word.toUpperCase()) })} hint="Use at least two letters per target word." />
       <div className="grid gap-3 sm:grid-cols-2">
         <NumberField label="Words required to continue" value={value.minimumWords ?? value.words.length} min={1} max={Math.max(1, value.words.length)} onChange={minimumWords => onChange({ ...value, minimumWords })} />
         <NumberField label="Bonus per extra word" value={value.bonusPerExtraWord ?? 0} min={0} max={100} onChange={bonusPerExtraWord => onChange({ ...value, bonusPerExtraWord })} />

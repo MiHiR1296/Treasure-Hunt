@@ -236,6 +236,7 @@ test('malformed configurations, impossible boards, unsafe assets, and unsupporte
     { type: 'sudoku', size: 4, givens: sudokuSolution },
     { type: 'word_search', grid: [['A', 'B'], ['C', 'D']], words: ['MISSING'] },
     { type: 'word_search', grid: [['A', 'B'], ['C']], words: ['AB'] },
+    { type: 'word_search', grid: [['A', 'B'], ['C', 'D']], words: ['A'] },
     { type: 'word_search', grid: [['A', 'B'], ['C', 'D']], words: ['AB', 'ab'] },
     { type: 'word_search', grid: [['A', 'B'], ['C', 'D']], words: ['AB'], minimumWords: 2 },
     { type: 'word_search', grid: [['A', 'B'], ['C', 'D']], words: ['AB'], bonusPerExtraWord: 101 },

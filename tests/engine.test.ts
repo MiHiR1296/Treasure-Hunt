@@ -291,6 +291,18 @@ test('publishing rejects missing targets, cycles, unreachable nodes, unsupported
   assert.throws(() => parseHuntDefinition({ ...definition(), unknownFeature: true }), errorCode('invalid_definition'))
 })
 
+test('publication rejects one-letter word-search targets before a player can receive an unfinishable puzzle', () => {
+  const hunt = definition()
+  hunt.checkpoints[0].flow = {
+    startNodeId: 'puzzle', nodes: [
+      { id: 'puzzle', type: 'puzzle', prompt: 'Find the hidden targets.', puzzle: { type: 'word_search', grid: [['A', 'B'], ['C', 'D']], words: ['A'] }, next: 'done' },
+      { id: 'done', type: 'complete' },
+    ],
+  }
+  assert.ok(validateHunt(hunt).some(issue => issue.message.includes('at least two letters')))
+  assert.throws(() => parseHuntDefinition(hunt), errorCode('invalid_definition'))
+})
+
 test('configuration parser returns a detached published snapshot', () => {
   const input = definition()
   const published = parseHuntDefinition(input)
