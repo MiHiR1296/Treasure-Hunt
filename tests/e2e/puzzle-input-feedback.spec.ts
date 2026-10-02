@@ -96,8 +96,9 @@ async function openGame(page: Page, definition: HuntDefinition) {
 
 async function fillCell(cell: Locator, value: string, grid: Locator) {
   await cell.fill(value)
-  await expect(grid).toHaveAttribute('aria-busy', 'false')
   await expect(cell).toHaveValue(value)
+  await grid.evaluate(() => new Promise(resolve => window.setTimeout(resolve, 550)))
+  await expect(grid).toHaveAttribute('aria-busy', 'false')
 }
 
 test('main and hint crosswords use simple individual cells and preserve saved positions', async ({ page }, testInfo) => {
@@ -113,8 +114,10 @@ test('main and hint crosswords use simple individual cells and preserve saved po
   await expect(hintGrid).toBeVisible()
   await expect(page.getByRole('textbox', { name: /Answer for/ })).toHaveCount(0)
   await expect(page.getByRole('button', { name: /Place .* in grid/ })).toHaveCount(0)
-  await expect(main.getByText(/A pet that purrs \(3\)/)).toBeVisible()
-  await expect(hints.getByText(/US city written without a space \(7\)/)).toBeVisible()
+  await expect(main.getByRole('button', { name: 'A pet that purrs', exact: false })).toBeVisible()
+  await expect(hints.getByRole('button', { name: 'US city written without a space', exact: false })).toBeVisible()
+  await expect(main.getByText('A pet that purrs (3)', { exact: true })).toHaveCount(0)
+  await expect(hints.getByText('US city written without a space (7)', { exact: true })).toHaveCount(0)
   await expect(mainGrid.getByRole('textbox', { name: 'Row 1, column 1, clue 1', exact: true })).toHaveValue('C')
   await expect(mainGrid.getByRole('textbox', { name: 'Row 2, column 1', exact: true })).toHaveValue('')
   await expect(mainGrid.getByRole('textbox', { name: 'Row 3, column 1', exact: true })).toHaveValue('R')
@@ -125,7 +128,7 @@ test('main and hint crosswords use simple individual cells and preserve saved po
   await testInfo.attach('Simple crossword cell entry', { body: await page.screenshot({ fullPage: true, animations: 'disabled' }), contentType: 'image/png' })
 })
 
-test('incorrect crossword letters save cell by cell, retain focus, survive reload, and can be corrected', async ({ page }) => {
+test('crossword letters queue while focus stays in the active clue, survive reload, and can be corrected', async ({ page }) => {
   const game = await installMockGame(page, crosswordDefinition, 'wrong-answer-team', state => preparedCrossword(state))
   await openGame(page, crosswordDefinition)
   const main = page.locator('section[aria-labelledby="current-question"]')
@@ -140,9 +143,9 @@ test('incorrect crossword letters save cell by cell, retain focus, survive reloa
   await third.focus()
   await third.fill('G')
   await expect(grid).toHaveAttribute('aria-busy', 'true')
-  await expect(grid.getByRole('textbox', { name: 'Row 2, column 1', exact: true })).toBeFocused()
+  await expect(third).toBeFocused()
   await expect(third).not.toBeDisabled()
-  await expect(third).toHaveAttribute('readonly', '')
+  await expect(third).not.toHaveAttribute('readonly')
   await expect(grid).toHaveAttribute('aria-busy', 'false')
   await expect(third).toHaveValue('G')
   await expect(page.getByRole('heading', { name: 'Shared crosswords', exact: true })).toBeVisible()
@@ -158,6 +161,25 @@ test('incorrect crossword letters save cell by cell, retain focus, survive reloa
   await fillCell(grid.getByRole('textbox', { name: 'Row 2, column 1', exact: true }), 'A', grid)
   await grid.getByRole('textbox', { name: 'Row 3, column 1', exact: true }).fill('R')
   await expect(page.getByRole('heading', { name: 'You found your finish.', exact: true })).toBeVisible()
+})
+
+test('crossword follows the chosen down clue at an intersection and clue buttons restore across', async ({ page }) => {
+  await installMockGame(page, crosswordDefinition, 'direction-team')
+  await openGame(page, crosswordDefinition)
+  const main = page.locator('section[aria-labelledby="current-question"]')
+  const grid = main.getByRole('group', { name: 'Crossword puzzle grid', exact: true })
+  const start = grid.getByRole('textbox', { name: /Row 1, column 1/ })
+  const downSecond = grid.getByRole('textbox', { name: 'Row 2, column 1', exact: true })
+  const acrossSecond = grid.getByRole('textbox', { name: /Row 1, column 2/ })
+
+  await start.click()
+  await expect(main.getByText(/1 down · A road vehicle/)).toBeVisible()
+  await start.fill('C')
+  await expect(downSecond).toBeFocused()
+  await main.getByRole('button', { name: 'A pet that purrs', exact: false }).click()
+  await expect(start).toBeFocused()
+  await start.fill('X')
+  await expect(acrossSecond).toBeFocused()
 })
 
 test('dense crosswords keep full-size pannable cells and can fit the viewport', async ({ page }) => {
