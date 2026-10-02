@@ -35,15 +35,28 @@ function useQueuedCrosswordSave(grid: string[][], revisionKey: string | undefine
   const onChangeRef = useRef(onChange)
   const revision = useRef(revisionKey)
   const awaitingRevision = useRef<string | null>(null)
+  const acknowledgedSnapshot = useRef<string[][] | null>(null)
   const needsAuthoritativeSync = useRef(false)
   const [syncGeneration, setSyncGeneration] = useState(0)
   const flushRef = useRef<() => Promise<void>>(async () => {})
+  const authoritative = useRef(grid)
 
   // Parent callbacks capture the server puzzle revision. Update the ref during
   // render, but wait for a changed revision key before sending a queued draft.
   onChangeRef.current = onChange
+  authoritative.current = grid
 
   const clearTimer = () => { if (timer.current !== null) { window.clearTimeout(timer.current); timer.current = null } }
+  const discardDirtyDraft = useCallback(() => {
+    clearTimer()
+    dirty.current = false
+    awaitingRevision.current = null
+    acknowledgedSnapshot.current = null
+    const next = cloneGrid(authoritative.current)
+    latest.current = next
+    setDraft(next)
+    setError('A teammate updated this crossword before your letters were saved. Their latest grid is shown; re-enter your letter if needed.')
+  }, [])
   const schedule = useCallback((delay = 450) => {
     clearTimer()
     timer.current = window.setTimeout(() => { void flushRef.current() }, delay)
@@ -58,11 +71,18 @@ function useQueuedCrosswordSave(grid: string[][], revisionKey: string | undefine
     try {
       await onChangeRef.current({ grid: snapshot })
       if (sameGrid(snapshot, latest.current)) dirty.current = false
-      else if (revision.current !== requestRevision) schedule(0)
-      else awaitingRevision.current = requestRevision ?? ''
+      else {
+        awaitingRevision.current = requestRevision ?? ''
+        acknowledgedSnapshot.current = snapshot
+        if (revision.current !== requestRevision) {
+          if (sameGrid(authoritative.current, snapshot)) { awaitingRevision.current = null; acknowledgedSnapshot.current = null; schedule(0) }
+          else discardDirtyDraft()
+        }
+      }
     } catch {
       dirty.current = false
       awaitingRevision.current = null
+      acknowledgedSnapshot.current = null
       needsAuthoritativeSync.current = true
       setSyncGeneration(generation => generation + 1)
       setError('The latest letters could not be saved. The shared crossword has been refreshed; re-enter any missing letters.')
@@ -70,7 +90,7 @@ function useQueuedCrosswordSave(grid: string[][], revisionKey: string | undefine
       sending.current = false
       setSaving(false)
     }
-  }, [schedule])
+  }, [discardDirtyDraft, schedule])
   flushRef.current = flush
   const change = useCallback((row: number, column: number, value: string) => {
     const next = cloneGrid(latest.current)
@@ -92,10 +112,15 @@ function useQueuedCrosswordSave(grid: string[][], revisionKey: string | undefine
   useEffect(() => {
     const changed = revision.current !== revisionKey
     revision.current = revisionKey
-    if (!changed || awaitingRevision.current === null) return
-    awaitingRevision.current = null
-    if (dirty.current) schedule(0)
-  }, [revisionKey, schedule])
+    if (!changed) return
+    if (awaitingRevision.current !== null) {
+      const saved = acknowledgedSnapshot.current
+      awaitingRevision.current = null
+      acknowledgedSnapshot.current = null
+      if (saved && sameGrid(grid, saved)) { if (dirty.current) schedule(0); return }
+    }
+    if (dirty.current && !sending.current) discardDirtyDraft()
+  }, [discardDirtyDraft, grid, revisionKey, schedule])
   useEffect(() => {
     const onVisibilityChange = () => { if (document.visibilityState === 'hidden') void flushRef.current() }
     document.addEventListener('visibilitychange', onVisibilityChange)
@@ -223,7 +248,7 @@ export default function GridPuzzles({ definition, state, disabled, onChange, dra
           const isActiveCell = activeCell === key
           return <label key={key} className={`relative aspect-square min-h-0 min-w-0 ${isActiveCell ? 'z-10 bg-amber-100 ring-2 ring-amber-500' : inActiveEntry ? 'bg-sky-100' : 'bg-white'}`}>
             {starts.has(key) && <span aria-hidden="true" className="pointer-events-none absolute left-0.5 top-0 text-[clamp(0.35rem,1.7vw,0.625rem)] font-semibold leading-none">{starts.get(key)}</span>}
-            <input data-row={r} data-column={c} value={cell} maxLength={1} autoCapitalize="characters" autoComplete="off" readOnly={crosswordLocked} onFocus={event => { selectCell(r, c); event.currentTarget.select() }} onClick={() => selectCell(r, c, activeCell === key)} onBlur={() => { void save.flush() }} onKeyDown={event => {
+            <input data-row={r} data-column={c} value={cell} maxLength={1} autoCapitalize="characters" autoComplete="off" readOnly={crosswordLocked} onFocus={event => { selectCell(r, c); event.currentTarget.select() }} onClick={() => selectCell(r, c, activeCell === key)} onKeyDown={event => {
               if (event.key === 'Backspace' && !cell && activeEntry) { event.preventDefault(); moveWithinEntry(activeEntry.id, r, c, -1); return }
               const direction: Record<string, [number, number]> = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] }
               const step = direction[event.key]

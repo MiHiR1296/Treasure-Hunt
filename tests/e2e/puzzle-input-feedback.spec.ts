@@ -202,6 +202,27 @@ test('crossword replaces an unsaved local draft with the authoritative grid afte
   await expect(first).toHaveValue('Z')
 })
 
+test('crossword never lets an unsent debounced draft overwrite a teammate update', async ({ page }) => {
+  const game = await installMockGame(page, crosswordDefinition, 'teammate-debounce-team')
+  await openGame(page, crosswordDefinition)
+  const main = page.locator('section[aria-labelledby="current-question"]')
+  const grid = main.getByRole('group', { name: 'Crossword puzzle grid', exact: true })
+  const first = grid.getByRole('textbox', { name: 'Row 1, column 1, clue 1', exact: true })
+  const second = grid.getByRole('textbox', { name: 'Row 1, column 2', exact: true })
+
+  await first.fill('C')
+  game.apply({ type: 'submit_puzzle', checkpointId: 'crosswords', nodeId: 'main', expectedRevision: 0, value: { grid: [['', 'T', ''], ['', '', ''], ['', '', '']] } })
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(main.getByText('A teammate updated this crossword before your letters were saved. Their latest grid is shown; re-enter your letter if needed.')).toBeVisible()
+  await expect(first).toHaveValue('')
+  await expect(second).toHaveValue('T')
+  await grid.evaluate(() => new Promise(resolve => window.setTimeout(resolve, 550)))
+
+  await page.reload()
+  await expect(first).toHaveValue('')
+  await expect(second).toHaveValue('T')
+})
+
 test('crossword follows the chosen down clue at an intersection and clue buttons restore across', async ({ page }) => {
   await installMockGame(page, crosswordDefinition, 'direction-team')
   await openGame(page, crosswordDefinition)
