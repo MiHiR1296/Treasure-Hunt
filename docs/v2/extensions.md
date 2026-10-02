@@ -41,7 +41,7 @@ sum: createPuzzleModule('sum', {
 
 This is an extension example, not an additional shipped puzzle. Bound the configured operands and total, avoid ambiguous numeric formats if the puzzle needs exact integers, and test malformed values before adding its UI.
 
-A renderer receives `definition`, `state`, `disabled` and `onChange(submission)`. It sends only its validated input shape. The current adapter wraps that input in `submit_puzzle` with checkpoint/action and per-puzzle `expectedRevision`; puzzle hints use `submit_hint_puzzle` with hint ID. `save_puzzle`/`save_hint_puzzle` persist without advancing if the interaction requires a separate Check button.
+A renderer receives `definition`, `state`, `disabled` and `onChange(submission)`. It sends only its validated input shape. The current adapter wraps that input in `submit_puzzle` with checkpoint/action and per-puzzle `expectedRevision`; puzzle hints use `submit_hint_puzzle` with hint ID. `save_puzzle`/`save_hint_puzzle` persist without advancing if the interaction requires a separate Check button. A high-frequency interaction such as crossword typing may maintain an optimistic local draft and serialize debounced snapshots, but it must keep the server's revision conflict response authoritative; do not invent a local revision or silently overwrite a teammate.
 
 Do not invent a revision locally after a request fails. Accept the next authoritative view. A conflict means a teammate changed the puzzle; refresh and explicitly reapply the intended move. The engine's reset/reopen generation prevents pre-reset queued writes from being accepted again.
 
