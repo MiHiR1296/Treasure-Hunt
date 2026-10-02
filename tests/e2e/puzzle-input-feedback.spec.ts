@@ -79,7 +79,10 @@ async function installMockGame(page: Page, definition: HuntDefinition, teamId: s
     }
   })
 
-  return { delayNext(milliseconds: number) { delay = milliseconds } }
+  return {
+    delayNext(milliseconds: number) { delay = milliseconds },
+    apply(command: GameCommand) { state = executeCommand(definition, state, command, now()).state },
+  }
 }
 
 function preparedCrossword(state: GameState, partial = false): GameState {
@@ -161,6 +164,42 @@ test('crossword letters queue while focus stays in the active clue, survive relo
   await fillCell(grid.getByRole('textbox', { name: 'Row 2, column 1', exact: true }), 'A', grid)
   await grid.getByRole('textbox', { name: 'Row 3, column 1', exact: true }).fill('R')
   await expect(page.getByRole('heading', { name: 'You found your finish.', exact: true })).toBeVisible()
+})
+
+test('crossword queues letters typed while the prior save is in flight using the next puzzle revision', async ({ page }) => {
+  const game = await installMockGame(page, crosswordDefinition, 'revision-queue-team')
+  await openGame(page, crosswordDefinition)
+  const main = page.locator('section[aria-labelledby="current-question"]')
+  const grid = main.getByRole('group', { name: 'Crossword puzzle grid', exact: true })
+  const first = grid.getByRole('textbox', { name: 'Row 1, column 1, clue 1', exact: true })
+  const second = grid.getByRole('textbox', { name: 'Row 1, column 2', exact: true })
+  const third = grid.getByRole('textbox', { name: 'Row 1, column 3', exact: true })
+
+  game.delayNext(400)
+  await first.fill('C')
+  await expect(grid).toHaveAttribute('aria-busy', 'true')
+  await second.fill('A')
+  await third.fill('T')
+  await expect(grid).toHaveAttribute('aria-busy', 'false')
+  await expect(main.getByRole('alert')).toHaveCount(0)
+
+  await page.reload()
+  await expect(first).toHaveValue('C')
+  await expect(second).toHaveValue('A')
+  await expect(third).toHaveValue('T')
+})
+
+test('crossword replaces an unsaved local draft with the authoritative grid after a revision conflict', async ({ page }) => {
+  const game = await installMockGame(page, crosswordDefinition, 'conflict-recovery-team')
+  await openGame(page, crosswordDefinition)
+  const main = page.locator('section[aria-labelledby="current-question"]')
+  const grid = main.getByRole('group', { name: 'Crossword puzzle grid', exact: true })
+  const first = grid.getByRole('textbox', { name: 'Row 1, column 1, clue 1', exact: true })
+
+  game.apply({ type: 'submit_puzzle', checkpointId: 'crosswords', nodeId: 'main', expectedRevision: 0, value: { grid: [['Z', '', ''], ['', '', ''], ['', '', '']] } })
+  await first.fill('C')
+  await expect(main.getByText('The latest letters could not be saved. The shared crossword has been refreshed; re-enter any missing letters.')).toBeVisible()
+  await expect(first).toHaveValue('Z')
 })
 
 test('crossword follows the chosen down clue at an intersection and clue buttons restore across', async ({ page }) => {

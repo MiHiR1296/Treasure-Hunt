@@ -24,7 +24,7 @@ const sameGrid = (left: string[][], right: string[][]) => left.length === right.
  * Crossword entry is optimistic: a team can keep typing while one snapshot is
  * in flight, but snapshots never overtake one another at the server boundary.
  */
-function useQueuedCrosswordSave(grid: string[][], onChange: PuzzlePlayerProps['onChange']) {
+function useQueuedCrosswordSave(grid: string[][], revisionKey: string | undefined, onChange: PuzzlePlayerProps['onChange']) {
   const [draft, setDraft] = useState(() => cloneGrid(grid))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -32,30 +32,46 @@ function useQueuedCrosswordSave(grid: string[][], onChange: PuzzlePlayerProps['o
   const dirty = useRef(false)
   const sending = useRef(false)
   const timer = useRef<number | null>(null)
+  const onChangeRef = useRef(onChange)
+  const revision = useRef(revisionKey)
+  const awaitingRevision = useRef<string | null>(null)
+  const needsAuthoritativeSync = useRef(false)
+  const [syncGeneration, setSyncGeneration] = useState(0)
+  const flushRef = useRef<() => Promise<void>>(async () => {})
+
+  // Parent callbacks capture the server puzzle revision. Update the ref during
+  // render, but wait for a changed revision key before sending a queued draft.
+  onChangeRef.current = onChange
 
   const clearTimer = () => { if (timer.current !== null) { window.clearTimeout(timer.current); timer.current = null } }
+  const schedule = useCallback((delay = 450) => {
+    clearTimer()
+    timer.current = window.setTimeout(() => { void flushRef.current() }, delay)
+  }, [])
   const flush = useCallback(async () => {
     clearTimer()
-    if (sending.current || !dirty.current) return
+    if (sending.current || !dirty.current || awaitingRevision.current !== null) return
     const snapshot = cloneGrid(latest.current)
+    const requestRevision = revision.current
     sending.current = true
     setSaving(true)
     try {
-      await onChange({ grid: snapshot })
+      await onChangeRef.current({ grid: snapshot })
       if (sameGrid(snapshot, latest.current)) dirty.current = false
+      else if (revision.current !== requestRevision) schedule(0)
+      else awaitingRevision.current = requestRevision ?? ''
     } catch {
       dirty.current = false
+      awaitingRevision.current = null
+      needsAuthoritativeSync.current = true
+      setSyncGeneration(generation => generation + 1)
       setError('The latest letters could not be saved. The shared crossword has been refreshed; re-enter any missing letters.')
     } finally {
       sending.current = false
       setSaving(false)
-      if (dirty.current) timer.current = window.setTimeout(() => { void flush() }, 250)
     }
-  }, [onChange])
-  const schedule = useCallback(() => {
-    clearTimer()
-    timer.current = window.setTimeout(() => { void flush() }, 450)
-  }, [flush])
+  }, [schedule])
+  flushRef.current = flush
   const change = useCallback((row: number, column: number, value: string) => {
     const next = cloneGrid(latest.current)
     next[row][column] = value
@@ -67,20 +83,28 @@ function useQueuedCrosswordSave(grid: string[][], onChange: PuzzlePlayerProps['o
   }, [schedule])
 
   useEffect(() => {
-    if (dirty.current || sending.current || sameGrid(latest.current, grid)) return
+    if (dirty.current || (!needsAuthoritativeSync.current && sameGrid(latest.current, grid))) return
     const next = cloneGrid(grid)
     latest.current = next
     setDraft(next)
-  }, [grid])
+    needsAuthoritativeSync.current = false
+  }, [grid, syncGeneration])
   useEffect(() => {
-    const onVisibilityChange = () => { if (document.visibilityState === 'hidden') void flush() }
+    const changed = revision.current !== revisionKey
+    revision.current = revisionKey
+    if (!changed || awaitingRevision.current === null) return
+    awaitingRevision.current = null
+    if (dirty.current) schedule(0)
+  }, [revisionKey, schedule])
+  useEffect(() => {
+    const onVisibilityChange = () => { if (document.visibilityState === 'hidden') void flushRef.current() }
     document.addEventListener('visibilitychange', onVisibilityChange)
     return () => { document.removeEventListener('visibilitychange', onVisibilityChange); clearTimer() }
-  }, [flush])
-  return { draft, change, flush, saving, error, pending: saving || dirty.current }
+  }, [])
+  return { draft, change, flush: flushRef.current, saving, error, pending: saving || dirty.current }
 }
 
-export default function GridPuzzles({ definition, state, disabled, onChange }: PuzzlePlayerProps) {
+export default function GridPuzzles({ definition, state, disabled, onChange, draftKey }: PuzzlePlayerProps) {
   const instanceId = useId().replace(/:/g, '')
   const crosswordColumns = definition.type === 'crossword' ? definition.columns : 0
   const [enlarged, setEnlarged] = useState(crosswordColumns > 10)
@@ -88,7 +112,7 @@ export default function GridPuzzles({ definition, state, disabled, onChange }: P
   const crosswordEntries = useMemo(() => definition.type === 'crossword' ? definition.entries : [], [definition])
   const crosswordGrid = definition.type === 'crossword' && state.type === 'crossword' ? state.grid : []
   const gridRef = useRef<HTMLDivElement>(null)
-  const save = useQueuedCrosswordSave(crosswordGrid, onChange)
+  const save = useQueuedCrosswordSave(crosswordGrid, draftKey, onChange)
   const [activeEntryId, setActiveEntryId] = useState(crosswordEntries[0]?.id || '')
   const [activeCell, setActiveCell] = useState(`${crosswordEntries[0]?.row ?? 0}:${crosswordEntries[0]?.column ?? 0}`)
   const locked = disabled || busy
