@@ -2,9 +2,27 @@ import type { CheckpointDefinition, GameState, HuntDefinition, PlayerView, Route
 import { getPlayerView } from '../../engine';
 import { elapsedMilliseconds, playability } from '../../engine/session';
 import { deterministicWeightedIndex } from '../../v3/seed';
-import type { ParallelMechanic, ResolvedRunPlan, V3Definition } from '../../v3/types';
+import { resolveIntegrityPolicy, type ParallelMechanic, type ResolvedRunPlan, type V3Definition } from '../../v3/types';
 import { publicParallelMechanics } from '../../v3/planning';
 import { renderVariableTemplate } from '../../v3/variables';
+import { HttpError } from '../security';
+
+export function hasCompleteIntegrityPolicy(settings: { integrityPolicy?: unknown } | null | undefined) {
+  if (!Object.prototype.hasOwnProperty.call(settings ?? {}, 'integrityPolicy')) return false;
+  const raw = settings?.integrityPolicy;
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return false;
+  const resolved = resolveIntegrityPolicy(settings);
+  return (raw as Record<string, unknown>).locationVerification === resolved.locationVerification &&
+    (raw as Record<string, unknown>).selfServeApproval === resolved.selfServeApproval &&
+    (raw as Record<string, unknown>).rosterParticipation === resolved.rosterParticipation;
+}
+
+/** Fail closed if a runtime path encounters pre-cutover or malformed published content. */
+export function assertPublishedIntegrityPolicy(settings: { integrityPolicy?: unknown } | null | undefined) {
+  if (!hasCompleteIntegrityPolicy(settings)) {
+    throw new HttpError(409, 'This adventure needs an organizer update before play can begin.');
+  }
+}
 
 const structuralKeys = new Set([
   'id', 'type', 'next', 'ifTrue', 'ifFalse', 'startNodeId', 'checkpointId', 'nodeId',

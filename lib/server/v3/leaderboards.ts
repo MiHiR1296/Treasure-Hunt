@@ -97,6 +97,7 @@ async function leaderboardProjection(
       round(current.progress*current.progress_total)::integer as current_progress_completed,
       current.progress_total as current_progress_total
     from hunt_v3.teams t
+    join hunt_v3.hunts h on h.id=t.hunt_id
     left join eligible_counts c on c.team_id=t.id
     left join lateral (
       select r.id,r.run_number,r.score,r.elapsed_ms,r.completed_at,r.progress,
@@ -130,7 +131,11 @@ async function leaderboardProjection(
       order by r.run_number desc,r.created_at desc,r.id asc
       limit 1
     ) current on true
-    where t.hunt_id=$1 and t.status='active' and t.approval_status='approved'
+    where t.hunt_id=$1 and t.status='active' and (
+      t.registration_source<>'self_serve'
+      or coalesce(h.settings #>> '{integrityPolicy,selfServeApproval}','organizer')='automatic'
+      or (t.approval_status='approved' and t.approval_method='organizer')
+    )
     order by t.canonical_code asc`,
     [huntId],
   );
@@ -296,24 +301,32 @@ export async function teamLeaderboards(huntId: string, viewerTeamId: string, sup
         enabled: false,
         visible: false,
         unlocked: false,
-        unlockMessage: 'Complete a second eligible run to unlock replay times and improvement.',
+        unlockMessage: 'Complete a second scored adventure to reveal your crew\'s best time and improvement.',
         entries: [],
       },
     };
   }
   const projection = await leaderboardProjection(huntId, database);
   const viewerRunCount = projection.official.find(selection => selection.teamId === viewerTeamId)?.eligibleCompletedRuns ?? 0;
+  const runPolicy = hunt.definition.settings.runPolicy;
+  const canReachSecondScoredRun = !runPolicy || runPolicy.mode === 'unlimited' ||
+    (runPolicy.mode === 'capped' && (runPolicy.maxOfficialRuns ?? 1) >= 2);
+  // Preserve an already-earned replay board if an organizer later tightens the
+  // run policy, but do not promise a permanently unreachable unlock.
+  const replayEnabled = policy.replayBoardEnabled && (viewerRunCount >= 2 || canReachSecondScoredRun);
   const main = buildOperationalMainEntries(projection.operational, policy);
-  const replayUnlocked = policy.replayBoardEnabled && viewerRunCount >= 2;
+  const replayUnlocked = replayEnabled && viewerRunCount >= 2;
   const replay = replayUnlocked ? buildReplayLeaderboardFromSelections(projection.official, policy) : [];
   return {
     hunt: { id: hunt.id, title: hunt.title },
     main: { visible: policy.mainBoardEnabled, entries: privateRows(main, viewerTeamId) },
     replay: {
-      enabled: policy.replayBoardEnabled,
+      enabled: replayEnabled,
       visible: replayUnlocked,
       unlocked: replayUnlocked,
-      unlockMessage: policy.replayBoardEnabled && !replayUnlocked ? 'Complete a second eligible run to unlock replay times and improvement.' : undefined,
+      unlockMessage: replayEnabled && !replayUnlocked
+        ? 'Complete a second scored adventure to reveal your crew\'s best time and improvement.'
+        : undefined,
       entries: privateRows(replay, viewerTeamId),
     },
   };

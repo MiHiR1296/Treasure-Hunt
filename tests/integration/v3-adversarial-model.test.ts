@@ -65,6 +65,7 @@ function definition(id: string): V3Definition {
       completionMessage: 'Model run complete.',
       photoRetention: 'after_verification',
       registrationMode: 'organizer-assigned',
+      integrityPolicy: { locationVerification: 'strict', selfServeApproval: 'organizer', rosterParticipation: 'freeze_at_run_start' },
       runPolicy: { mode: 'unlimited' },
       leaderboardPolicy: {
         bestRunRule: 'score_then_time_then_completion',
@@ -431,20 +432,23 @@ test('PostgreSQL V3 deterministic adversarial command model preserves authority 
     });
 
     const lateMemberId = randomUUID();
-    await step('late identities cannot join or mutate the frozen Alpha roster', async () => {
-      await assert.rejects(
-        registerV3Team({
-          requestId: fixedUuid('alpha-late-api-join'),
-          huntId,
-          intent: 'join',
-          playerName: 'Alpha late member',
-          teamCode: alpha.created.code,
-          pin: '410001',
-          memberPin: '510003',
-          requestSource: `model-${huntId}-alpha-late`,
-        }),
-        /roster was locked when its first run started/i,
-      );
+    await step('late identities join the team but cannot mutate the frozen Alpha run roster', async () => {
+      const late = await registerV3Team({
+        requestId: fixedUuid('alpha-late-api-join'),
+        huntId,
+        intent: 'join',
+        playerName: 'Alpha late member',
+        teamCode: alpha.created.code,
+        pin: '410001',
+        memberPin: '510003',
+        requestSource: `model-${huntId}-alpha-late`,
+      });
+      assert.equal(late.summary.activeRun, null);
+      assert.equal(late.summary.waitingForNextRun, true);
+      assert.equal((await getPool().query(
+        'select 1 from hunt_v3.run_members where run_id=$1 and member_id=$2',
+        [alphaRun.runId, late.summary.member.id],
+      )).rowCount, 0);
       await getPool().query(
         `insert into hunt_v3.team_members(id,team_id,name,name_key,status,checked_in_at)
           values($1,$2,'Injected late member',$3,'active',clock_timestamp())`,
@@ -462,7 +466,7 @@ test('PostgreSQL V3 deterministic adversarial command model preserves authority 
         applyRunCommand(alpha.created.teamId, lateMemberId, alphaRun.runId, fixedUuid('late-member-command'), {
           type: 'verify', checkpointId: 'start', nodeId: 'answer', value: alphaAnswer,
         }),
-        /starting roster/i,
+        /already underway.*(?:aren't|not) part of this run/i,
       );
     });
 
@@ -597,8 +601,8 @@ test('PostgreSQL V3 deterministic adversarial command model preserves authority 
       action: 'disqualify' as const,
       reason: 'Deterministic adversarial ordering check',
       // Organizer-assigned member joins each advance the competition revision;
-      // the team began at 1 and its captain/scout check-ins advanced it to 3.
-      expectedRevision: 3,
+      // captain/scout check-ins and the waiting late member advance 1 to 4.
+      expectedRevision: 4,
       requestId: fixedUuid('alpha-disqualify'),
       actor: 'Adversarial test organizer',
       sessionHash: 'e'.repeat(64),
@@ -663,6 +667,7 @@ test('PostgreSQL V3 generated command sequences preserve run, receipt, roster, s
     const huntId = `v3-generated-${scenarioSeed.toString(16)}-${randomUUID().slice(0, 8)}`;
     const trace: string[] = [];
     const immutableRuns = new Map<string, ImmutableRun>();
+    const immutableRosters = new Map<string, string[]>();
     const immutableEvents = new Map<string, string>();
     const immutableLedger = new Map<string, string>();
     const answerCodes = new Set<string>();
@@ -754,12 +759,11 @@ test('PostgreSQL V3 generated command sequences preserve run, receipt, roster, s
             where run.hunt_id=$1 group by run.id,run.team_id`,
           [huntId],
         )).rows;
-        const expectedRosters = new Map([
-          [alpha.created.teamId, [alpha.captain.memberId, alpha.scout.memberId].sort()],
-          [beta.created.teamId, [beta.captain.memberId, beta.scout.memberId].sort()],
-        ]);
         for (const roster of rosters) {
-          assert.deepEqual(roster.member_ids, expectedRosters.get(roster.team_id), `${label}: run roster changed`);
+          const memberIds = (roster.member_ids as string[]).map(String);
+          const original = immutableRosters.get(String(roster.id));
+          if (original) assert.deepEqual(memberIds, original, `${label}: run roster changed`);
+          else immutableRosters.set(String(roster.id), memberIds);
         }
 
         const invalidActors = await getPool().query(
@@ -988,29 +992,33 @@ test('PostgreSQL V3 generated command sequences preserve run, receipt, roster, s
         } else if (action === 8) {
           const lateRequestId = fixedUuid(`generated-${scenarioSeed}-${step}-late-join`);
           const lateName = `Late ${scenarioSeed} ${step}`;
-          await assert.rejects(registerV3Team({
-            requestId: lateRequestId,
-            huntId,
-            intent: 'join',
-            playerName: lateName,
-            teamCode: alpha.created.code,
-            pin: '430001',
-            memberPin: '539999',
-            requestSource: `generated-${scenarioSeed}-${step}-late-source`,
-          }), /roster was locked when its first run started/i);
-          assert.equal(Number((await getPool().query(
-            'select count(*)::int as count from hunt_v3.team_members where team_id=$1 and name=$2',
-            [alpha.created.teamId, lateName],
-          )).rows[0].count), 0, 'a rejected late join must not create a member');
-          assert.equal(Number((await getPool().query(
-            `select count(*)::int as count from (
-              select request_id from hunt_v3.command_receipts where request_id=$1
-              union all select request_id from hunt_v3.run_attempt_reservations where request_id=$1
-              union all select request_id from hunt_v3.run_events where request_id=$1
-            ) artifact`,
-            [lateRequestId],
-          )).rows[0].count), 0, 'a rejected late join must not persist a receipt, attempt reservation, or event');
-          coverage.add('late-member-rejection');
+          try {
+            const late = await registerV3Team({
+              requestId: lateRequestId,
+              huntId,
+              intent: 'join',
+              playerName: lateName,
+              teamCode: alpha.created.code,
+              pin: '430001',
+              memberPin: '539999',
+              requestSource: `generated-${scenarioSeed}-${step}-late-source`,
+            });
+            const activeRun = (await getPool().query(
+              `select id from hunt_v3.runs where team_id=$1 and status in ('waiting','active')`,
+              [alpha.created.teamId],
+            )).rows[0] as { id: string } | undefined;
+            if (activeRun) {
+              assert.equal(late.summary.activeRun, null);
+              assert.equal(late.summary.waitingForNextRun, true);
+              assert.equal((await getPool().query(
+                'select 1 from hunt_v3.run_members where run_id=$1 and member_id=$2',
+                [activeRun.id, late.summary.member.id],
+              )).rowCount, 0, 'a frozen late joiner must not enter the current run snapshot');
+            }
+            coverage.add('late-member-waits-for-next-run');
+          } catch (error) {
+            assert.match(error instanceof Error ? error.message : String(error), /team is full/i);
+          }
         } else if (currentRunId) {
           const projection = await currentRunView(alpha.created.teamId, alpha.scout.memberId, currentRunId);
           assertPlayerRedacted(`generated step ${step}`, projection);
@@ -1145,7 +1153,7 @@ test('PostgreSQL V3 generated command sequences preserve run, receipt, roster, s
   const requiredCoverage = [
     'concurrent-create', 'create-or-resume', 'create-receipt-replay-and-conflict',
     'wrong-verifier', 'correct-verifier', 'completion-command', 'command-receipt-replay',
-    'command-receipt-conflict', 'cross-team-rejection', 'late-member-rejection',
+    'command-receipt-conflict', 'cross-team-rejection', 'late-member-waits-for-next-run',
     'player-projection-redaction', 'plan-deck-exhaustion', 'both-teams-complete',
   ];
   assert.deepEqual(requiredCoverage.filter(item => !coverage.has(item)), [],

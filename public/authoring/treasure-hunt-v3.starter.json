@@ -15,6 +15,11 @@
     "completionMessage": "Great run. Check your crew contribution board, then decide whether to try again.",
     "photoRetention": "after_verification",
     "registrationMode": "self-serve",
+    "integrityPolicy": {
+      "locationVerification": "gps_only",
+      "selfServeApproval": "automatic",
+      "rosterParticipation": "flexible_fixed_scoring"
+    },
     "runPolicy": {
       "mode": "unlimited"
     },

@@ -13,6 +13,7 @@ import FinishExperience from '@/components/v3/FinishExperience';
 import CurrentTask from '@/components/v3/CurrentTask';
 import Leaderboards, { useTeamLeaderboards } from '@/components/v3/Leaderboards';
 import Registration from '@/components/v3/Registration';
+import { sessionRunTarget } from '@/components/v3/sessionTarget';
 import SupportPanel from '@/components/v3/SupportPanel';
 import TeamIdentity from '@/components/v3/TeamIdentity';
 import type { PendingRunCommand, RunCommandResponse, TeamSessionSummary, V3PlayerView } from '@/components/v3/types';
@@ -58,18 +59,19 @@ function useTimer(view: V3PlayerView | null) {
 
 function RunLobby({ summary, busy, onStart }: { summary: TeamSessionSummary; busy: boolean; onStart: (practice: boolean) => Promise<void> }) {
   const policy = summary.settings.runPolicy;
+  const waitingForNextRun = summary.waitingForNextRun;
   const firstRun = summary.officialAttemptCount === 0;
   const officialSlotAvailable = summary.remainingOfficialRuns === null || summary.remainingOfficialRuns > 0;
   const capped = policy.mode === 'capped' && !officialSlotAvailable;
   const approvalPending = summary.team.approvalStatus !== 'approved';
   const practice = !firstRun && (summary.hasPracticeRun || (policy.mode === 'practice-only' && summary.officialAttemptSlotsUsed > 0) || capped);
-  const disabled = approvalPending || (!practice && policy.mode === 'disabled' && !officialSlotAvailable);
+  const disabled = waitingForNextRun || approvalPending || (!practice && policy.mode === 'disabled' && !officialSlotAvailable);
   return <section className={`${cardStyle} mt-2`}>
-    <p className="text-xs font-extrabold uppercase tracking-[0.18em] text-emerald-800">{approvalPending ? 'Registration received' : firstRun ? 'Crew ready' : 'Your run history is safe'}</p>
-    <h2 className="mt-2 text-3xl font-black tracking-tight">{approvalPending ? 'Your team is waiting for approval.' : firstRun ? 'Start when everyone is ready.' : 'Ready for another route?'}</h2>
-    <p className="mt-3 text-sm leading-relaxed text-stone-600">{approvalPending ? `Your crew is registered as ${summary.team.code}. The organizer must approve it before an official run can start. You can keep this page open; status refreshes automatically.` : firstRun ? 'The timer and your private seeded route begin when you tap below.' : practice ? summary.hasPracticeRun ? 'This team identity has entered practice, so every later replay stays practice-only. Ask the organizer if your registration needs correction; players cannot create an official restart.' : 'This replay is practice-only and reuses a structural route your crew already received. Fresh generated values keep it fun without revealing another competition route.' : 'A replay creates a separate run. It never resets or overwrites an earlier result.'}</p>
+    <p className="text-xs font-extrabold uppercase tracking-[0.18em] text-emerald-800">{waitingForNextRun ? 'Crew in action' : approvalPending ? 'Crew check-in' : firstRun ? 'Crew ready' : 'Your best is waiting'}</p>
+    <h2 className="mt-2 text-3xl font-black tracking-tight">{waitingForNextRun ? 'Your crew is already adventuring.' : approvalPending ? 'Almost ready to play.' : firstRun ? 'Start when everyone is ready.' : 'Fancy another go?'}</h2>
+    <p className="mt-3 text-sm leading-relaxed text-stone-600">{waitingForNextRun ? 'You joined after this run began. If your crew plays again, you’ll join them. Keep this page open and it will refresh automatically.' : approvalPending ? `Your crew is checked in as ${summary.team.code}. You can begin as soon as the organizer gives the go-ahead. Keep this page open and it will refresh automatically.` : firstRun ? 'The clock begins when you tap below, so gather the crew first.' : practice ? summary.hasPracticeRun ? 'Keep exploring and playing for fun. Your crew record stays right where it is.' : 'This round is just for fun and gives your crew another challenge without changing the event standings.' : 'Your last result is safe. Another go gives the crew a fresh challenge.'}</p>
     {summary.bestRun && <div className="mt-5 rounded-2xl bg-emerald-50 p-4"><span className="text-xs font-bold uppercase tracking-wide text-emerald-700">Current best</span><p className="mt-1 text-2xl font-black text-emerald-950">{summary.bestRun.score} points</p></div>}
-    {!disabled ? <button type="button" disabled={busy} onClick={() => void onStart(practice)} className={`${primaryButton} mt-5`}>{busy ? 'Building your route…' : firstRun ? 'Start Run 1' : practice ? 'Start practice run' : 'Start a new run'}</button> : <p className="mt-5 rounded-2xl bg-stone-100 p-4 text-sm text-stone-600">{approvalPending ? 'Waiting for the organizer. This team cannot enter the competition yet.' : 'The organizer has limited this hunt to one run.'}</p>}
+    {!disabled ? <button type="button" disabled={busy} onClick={() => void onStart(practice)} className={`${primaryButton} mt-5`}>{busy ? 'Getting the next run ready…' : firstRun ? 'Start Run 1' : practice ? 'Play again for fun' : 'Try again'}</button> : <p className="mt-5 rounded-2xl bg-stone-100 p-4 text-sm text-stone-600">{waitingForNextRun ? 'You’ll be ready if your crew begins another run.' : approvalPending ? 'The organizer will give your crew the go-ahead shortly.' : 'This hunt is set to one scored run per crew.'}</p>}
   </section>;
 }
 
@@ -114,7 +116,7 @@ export default function V3PlayerPage() {
       const nextSummary = normalizeSummary(result.summary);
       if (!mounted.current || sequence !== refreshSequence.current) return;
       setSummary(nextSummary);
-      const target = nextSummary.activeRun ?? (nextSummary.latestRun?.status === 'completed' ? nextSummary.latestRun : null);
+      const target = sessionRunTarget(nextSummary);
       if (target) {
         const run = await v3Request<{ view: V3PlayerView }>(`/api/v3/runs?runId=${encodeURIComponent(target.id)}`);
         if (!mounted.current || sequence !== refreshSequence.current) return;
@@ -252,7 +254,7 @@ export default function V3PlayerPage() {
           {theme?.coverUrl && <img src={theme.coverUrl} alt="" className="max-h-56 w-full rounded-[1.75rem] object-cover" />}
           <section className={cardStyle} aria-label="Current run summary">
             <div className="flex items-start justify-between gap-4">
-              <div><p className="text-xs font-extrabold uppercase tracking-[0.18em] text-emerald-800">Run {view.runNumber}{view.practice ? ' · Practice' : ''}</p><h2 className="mt-1 text-xl font-black">{view.checkpoint?.title || 'Getting the next clue…'}</h2></div>
+              <div><p className="text-xs font-extrabold uppercase tracking-[0.18em] text-emerald-800">Run {view.runNumber}{view.practice ? ' · Just for fun' : ''}</p><h2 className="mt-1 text-xl font-black">{view.checkpoint?.title || 'Getting the next clue…'}</h2></div>
               <div className="text-right"><p className="text-2xl font-black tabular-nums text-emerald-950">{view.score}</p><p className="text-xs font-bold uppercase tracking-wide text-stone-500">ranking points</p>{view.bonusScore !== 0 && <p className="mt-1 text-xs font-bold text-violet-700">{view.bonusScore > 0 ? '+' : ''}{view.bonusScore} extra</p>}</div>
             </div>
             <RunProgress view={view} />

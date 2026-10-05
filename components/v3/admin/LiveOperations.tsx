@@ -87,11 +87,11 @@ function AlertChips({ alerts }: { alerts: LiveAlert[] }) {
   </span>)}</div>{details.map((alert, index) => <p key={`detail-${alert.id || index}`} className="max-w-72 text-xs leading-5 text-amber-100/80">{alert.detail}</p>)}</div>;
 }
 
-function TeamIdentity({ team }: { team: LiveTeam }) {
+function TeamIdentity({ team, requiresOrganizerApproval }: { team: LiveTeam; requiresOrganizerApproval: boolean }) {
   return <div className="min-w-0">
     <div className="flex flex-wrap items-center gap-2"><p className="truncate text-base font-black tracking-tight text-white">
       <span className="text-amber-300">{team.code}</span>{team.displayName ? ` · ${team.displayName}` : ''}
-    </p>{team.status === 'disqualified' ? <StatusPill tone="danger">Disqualified</StatusPill> : team.approvalStatus === 'pending' ? <StatusPill tone="warning">Approval pending</StatusPill> : <StatusPill tone="good">Approved</StatusPill>}</div>
+    </p>{team.status === 'disqualified' ? <StatusPill tone="danger">Disqualified</StatusPill> : requiresOrganizerApproval && team.approvalMethod !== 'organizer' ? <StatusPill tone="warning">Check-in pending</StatusPill> : team.approvalMethod === 'organizer' ? <StatusPill tone="good">Organizer checked</StatusPill> : <StatusPill tone="good">Ready</StatusPill>}</div>
     <p className="mt-1 truncate text-xs text-slate-400" title={team.memberNames.join(', ')}>
       {team.memberNames.length ? team.memberNames.join(', ') : 'Roster names unavailable'}
     </p>
@@ -99,16 +99,16 @@ function TeamIdentity({ team }: { team: LiveTeam }) {
   </div>;
 }
 
-function TeamControlButtons({ team, onControl }: { team: LiveTeam; onControl: (team: LiveTeam, action: TeamControlAction) => void }) {
+function TeamControlButtons({ team, requiresOrganizerApproval, onControl }: { team: LiveTeam; requiresOrganizerApproval: boolean; onControl: (team: LiveTeam, action: TeamControlAction) => void }) {
   if (team.status === 'disqualified') return <button type="button" className={secondaryButton} onClick={() => onControl(team, 'restore')}>Restore</button>;
   if (team.status !== 'active') return null;
-  return <>{team.approvalStatus === 'pending' && <button type="button" className={primaryButton} onClick={() => onControl(team, 'approve')}>Approve</button>}<button type="button" className={dangerButton} onClick={() => onControl(team, 'disqualify')}>Disqualify</button></>;
+  return <>{requiresOrganizerApproval && team.approvalMethod !== 'organizer' && <button type="button" className={primaryButton} onClick={() => onControl(team, 'approve')}>{team.approvalStatus === 'pending' ? 'Give go-ahead' : 'Verify crew'}</button>}<button type="button" className={dangerButton} onClick={() => onControl(team, 'disqualify')}>Disqualify</button></>;
 }
 
-function TeamCards({ teams, onAudit, onRename, onControl, onRecovery }: { teams: LiveTeam[]; onAudit: (team: LiveTeam) => void; onRename: (team: LiveTeam) => void; onControl: (team: LiveTeam, action: TeamControlAction) => void; onRecovery: (team: LiveTeam) => void }) {
+function TeamCards({ teams, requiresOrganizerApproval, onAudit, onRename, onControl, onRecovery }: { teams: LiveTeam[]; requiresOrganizerApproval: boolean; onAudit: (team: LiveTeam) => void; onRename: (team: LiveTeam) => void; onControl: (team: LiveTeam, action: TeamControlAction) => void; onRecovery: (team: LiveTeam) => void }) {
   return <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{teams.map(team => <article key={team.teamId} className="rounded-2xl border border-white/10 bg-slate-950/55 p-4">
     <div className="flex items-start justify-between gap-3">
-      <TeamIdentity team={team} />
+      <TeamIdentity team={team} requiresOrganizerApproval={requiresOrganizerApproval} />
       <AlertChips alerts={team.alerts} />
     </div>
     <div className="mt-4 grid grid-cols-2 gap-3 border-y border-white/10 py-4">
@@ -118,14 +118,14 @@ function TeamCards({ teams, onAudit, onRename, onControl, onRecovery }: { teams:
     <div className="mt-3"><VariantSummary run={team.activeRun} /></div>
     <div className="mt-4 flex flex-wrap gap-2">
       <button type="button" className={secondaryButton} onClick={() => onRename(team)}>Rename</button>
-      <TeamControlButtons team={team} onControl={onControl} />
+      <TeamControlButtons team={team} requiresOrganizerApproval={requiresOrganizerApproval} onControl={onControl} />
       {team.activeRun?.status === 'active' && <button type="button" className={secondaryButton} onClick={() => onRecovery(team)}>Recover run</button>}
       {(team.bestRun || team.activeRun?.status === 'completed') && <button type="button" className={secondaryButton} onClick={() => onAudit(team)}>Recognition audit</button>}
     </div>
   </article>)}</div>;
 }
 
-function TeamTable({ teams, onAudit, onRename, onControl, onRecovery }: { teams: LiveTeam[]; onAudit: (team: LiveTeam) => void; onRename: (team: LiveTeam) => void; onControl: (team: LiveTeam, action: TeamControlAction) => void; onRecovery: (team: LiveTeam) => void }) {
+function TeamTable({ teams, requiresOrganizerApproval, onAudit, onRename, onControl, onRecovery }: { teams: LiveTeam[]; requiresOrganizerApproval: boolean; onAudit: (team: LiveTeam) => void; onRename: (team: LiveTeam) => void; onControl: (team: LiveTeam, action: TeamControlAction) => void; onRecovery: (team: LiveTeam) => void }) {
   return <div className="overflow-x-auto rounded-2xl border border-white/10">
     <table className="min-w-[1120px] w-full border-collapse text-left text-sm">
       <thead className="bg-white/[0.04] text-[0.68rem] uppercase tracking-widest text-slate-400"><tr>
@@ -134,14 +134,14 @@ function TeamTable({ teams, onAudit, onRename, onControl, onRecovery }: { teams:
         <th className="px-4 py-3">Alerts</th><th className="px-4 py-3"><span className="sr-only">Actions</span></th>
       </tr></thead>
       <tbody className="divide-y divide-white/10">{teams.map(team => <tr key={team.teamId} className="align-top hover:bg-white/[0.025]">
-        <td className="px-4 py-3"><TeamIdentity team={team} /></td>
+        <td className="px-4 py-3"><TeamIdentity team={team} requiresOrganizerApproval={requiresOrganizerApproval} /></td>
         <td className="whitespace-nowrap px-4 py-3 font-bold text-slate-200">{team.checkedInCount}/{team.memberCount}<span className="block text-xs font-normal text-slate-500">{team.runCount} run{team.runCount === 1 ? '' : 's'}</span></td>
         <td className="px-4 py-3"><RunSummary run={team.activeRun} kind="active" /></td>
         <td className="px-4 py-3"><RunSummary run={team.bestRun} kind="best" /></td>
         <td className="max-w-44 px-4 py-3 text-slate-300">{team.activeRun?.currentCheckpointLabel || team.activeRun?.currentCheckpointId || '—'}</td>
         <td className="px-4 py-3"><VariantSummary run={team.activeRun} /></td>
         <td className="px-4 py-3"><AlertChips alerts={team.alerts} /></td>
-        <td className="px-4 py-3"><div className="flex flex-wrap gap-2"><button type="button" className={secondaryButton} onClick={() => onRename(team)}>Rename</button><TeamControlButtons team={team} onControl={onControl} />{team.activeRun?.status === 'active' && <button type="button" className={secondaryButton} onClick={() => onRecovery(team)}>Recover</button>}{(team.bestRun || team.activeRun?.status === 'completed') && <button type="button" className={secondaryButton} onClick={() => onAudit(team)}>Audit</button>}</div></td>
+        <td className="px-4 py-3"><div className="flex flex-wrap gap-2"><button type="button" className={secondaryButton} onClick={() => onRename(team)}>Rename</button><TeamControlButtons team={team} requiresOrganizerApproval={requiresOrganizerApproval} onControl={onControl} />{team.activeRun?.status === 'active' && <button type="button" className={secondaryButton} onClick={() => onRecovery(team)}>Recover</button>}{(team.bestRun || team.activeRun?.status === 'completed') && <button type="button" className={secondaryButton} onClick={() => onAudit(team)}>Audit</button>}</div></td>
       </tr>)}</tbody>
     </table>
   </div>;
@@ -190,12 +190,14 @@ function TeamStatusDialog({ team, action, huntId, pending, run, onClose, notify 
   const [reason, setReason] = useState('');
   const pendingRequest = useRef<{ fingerprint: string; requestId: string } | null>(null);
   const labels = action === 'approve'
-    ? { title: 'Approve this team?', verb: 'Approve team', progress: 'Approving…', notice: 'approved for competition' }
+    ? { title: team.approvalStatus === 'pending' ? 'Give this crew the go-ahead?' : 'Verify this crew?', verb: team.approvalStatus === 'pending' ? 'Give go-ahead' : 'Verify crew', progress: 'Saving…', notice: 'checked by the organizer' }
     : action === 'disqualify'
       ? { title: 'Disqualify this team?', verb: 'Disqualify team', progress: 'Disqualifying…', notice: 'disqualified' }
       : { title: 'Restore this team?', verb: 'Restore team', progress: 'Restoring…', notice: 'restored' };
   const detail = action === 'approve'
-    ? 'Approval allows this self-serve crew to start official runs. Confirm the code, nickname, and every person at check-in first. A browser cannot prove that one person did not register under another name; use rostered registration with organizer-issued identities for prize events.'
+    ? team.approvalStatus === 'pending'
+      ? 'This lets the crew begin playing. Confirm the code, nickname, and people standing with the team first.'
+      : 'This crew started through the casual automatic flow. Confirm the code, nickname, and people standing with the team to mark it as organizer-checked.'
     : action === 'disqualify'
       ? 'Every team session will be revoked immediately. Open runs become disqualified and all existing results become permanently ineligible.'
       : 'Members must sign in again. Previously disqualified runs stay ineligible. If this team has already entered practice, restoration permits practice only. Any legitimate registration correction must be organizer-issued after the people involved are verified.';
@@ -229,7 +231,7 @@ function TeamStatusDialog({ team, action, huntId, pending, run, onClose, notify 
           onClose();
         });
       }}>
-        <label className="block text-sm font-bold text-slate-200">Required audit reason<textarea className={`${inputClass} mt-2`} required rows={3} maxLength={500} value={reason} onChange={event => setReason(event.target.value)} placeholder={action === 'approve' ? 'Roster and team identity verified at check-in' : action === 'disqualify' ? 'Describe the rule breach or incident evidence' : 'Describe why the team may return'} autoFocus /></label>
+        <label className="block text-sm font-bold text-slate-200">Required audit reason<textarea className={`${inputClass} mt-2`} required rows={3} maxLength={500} value={reason} onChange={event => setReason(event.target.value)} placeholder={action === 'approve' ? 'Crew and team name checked in person' : action === 'disqualify' ? 'Describe the rule breach or incident evidence' : 'Describe why the team may return'} autoFocus /></label>
         <div className="flex justify-end gap-2"><button type="button" className={secondaryButton} onClick={onClose}>Cancel</button><button className={action === 'disqualify' ? dangerButton : primaryButton} disabled={Boolean(pending) || !reason.trim()}>{pending === key ? labels.progress : labels.verb}</button></div>
       </form>
     </section>
@@ -390,29 +392,69 @@ function RecognitionAudit({ team, huntId, pending, run, onClose, reportError }: 
   </div>;
 }
 
-function LifecycleControls({ hunt, pending, run, notify }: {
+function LifecycleControls({ hunt, pending, run, notify, onRegistrationChanged }: {
   hunt: AdminHunt;
   pending: string;
   run: LiveOperationsProps['run'];
   notify: LiveOperationsProps['notify'];
+  onRegistrationChanged: (open: boolean, revision: number) => void;
 }) {
   const revision = hunt.lifecycleRevision;
   const status = hunt.status;
+  const registrationRequest = useRef<{ fingerprint: string; requestId: string } | null>(null);
+  const effectiveRevision = revision;
+  const registrationOpen = hunt.registrationOpen !== false;
+  const selfServeCreation = hunt.registrationMode === 'self-serve';
+  const creationLabel = selfServeCreation
+    ? 'New crew creation'
+    : hunt.registrationMode === 'rostered'
+      ? 'Roster team creation'
+      : 'Organizer team creation';
+  const creationDetail = registrationOpen
+    ? selfServeCreation
+      ? 'Players can create a crew or join one that already exists.'
+      : hunt.registrationMode === 'rostered'
+        ? 'Organizers can add another rostered team; listed players can claim their places.'
+        : 'Organizers can add another assigned team; players can join teams that already exist.'
+    : selfServeCreation
+      ? 'Players can still join an existing crew with its code.'
+      : 'Existing teams can still join and check in, but organizers cannot add another team.';
   const changeStatus = (next: 'live' | 'paused' | 'ended', label: string, confirmation?: string) => {
-    if (!Number.isSafeInteger(revision)) return;
+    if (!Number.isSafeInteger(effectiveRevision)) return;
     if (confirmation && !window.confirm(confirmation)) return;
     void run('hunt-lifecycle', async () => {
       await adminRequest('/api/v3/admin/control', 'POST', {
         action: 'set_hunt_status',
         huntId: hunt.id,
         status: next,
-        expectedRevision: revision,
+        expectedRevision: effectiveRevision,
       });
       notify(label);
     });
   };
-  const busy = pending === 'hunt-lifecycle';
-  const detail = status === 'ready' ? 'The event is published and accepting pre-event registration. Starting it permanently closes creation of new teams.'
+  const changeRegistration = (open: boolean) => {
+    if (!Number.isSafeInteger(effectiveRevision) || registrationOpen === open) return;
+    if (!open && !window.confirm(`Close ${creationLabel.toLocaleLowerCase()}? Existing teams can still join and check in, and you can reopen creation at any time.`)) return;
+    void run('hunt-registration', async () => {
+      const fingerprint = JSON.stringify({ huntId: hunt.id, open, expectedRevision: effectiveRevision });
+      const requestId = registrationRequest.current?.fingerprint === fingerprint
+        ? registrationRequest.current.requestId
+        : newRequestId();
+      registrationRequest.current = { fingerprint, requestId };
+      const response = await adminRequest<{ lifecycleRevision: number }>('/api/v3/admin/control', 'POST', {
+        action: 'set_registration_open',
+        huntId: hunt.id,
+        open,
+        expectedRevision: effectiveRevision,
+        requestId,
+      });
+      registrationRequest.current = null;
+      onRegistrationChanged(open, response.lifecycleRevision);
+      notify(open ? `${creationLabel} is open.` : `${creationLabel} closed. Existing teams can still join.`);
+    });
+  };
+  const busy = pending === 'hunt-lifecycle' || pending === 'hunt-registration';
+  const detail = status === 'ready' ? 'The event is published and ready for check-in. Choose whether new crews can still be created, then start whenever you are ready.'
     : status === 'live' ? 'Players can start runs and submit actions.'
       : status === 'paused' ? 'Active run clocks are paused and player actions are blocked.'
         : status === 'ended' ? 'The event is closed. Finalize the public board when results are ready.'
@@ -424,18 +466,28 @@ function LifecycleControls({ hunt, pending, run, notify }: {
         <p className="text-xs font-black uppercase tracking-widest text-cyan-300">Event lifecycle</p>
         <div className="mt-2 flex items-center gap-3"><h2 className="text-xl font-black text-white">{hunt.title}</h2><StatusPill tone={status === 'live' ? 'good' : status === 'paused' ? 'warning' : 'info'}>{labelize(status)}</StatusPill></div>
         <p className="mt-2 text-sm text-slate-400">{detail}</p>
+        {hunt.integrityPolicy && <div className="mt-3 flex flex-wrap gap-2" aria-label="Current play style">
+          <StatusPill tone="info">{hunt.integrityPolicy.locationVerification === 'gps_only' ? 'GPS only' : hunt.integrityPolicy.locationVerification === 'gps_photo' ? 'GPS + photo' : hunt.integrityPolicy.locationVerification === 'gps_organizer' ? 'GPS + organizer' : 'Strict location check'}</StatusPill>
+          <StatusPill tone="info">{hunt.integrityPolicy.selfServeApproval === 'automatic' ? 'Crews start automatically' : 'Organizer checks crews'}</StatusPill>
+          <StatusPill tone="info">{hunt.integrityPolicy.rosterParticipation === 'flexible' ? 'Flexible crew' : hunt.integrityPolicy.rosterParticipation === 'flexible_fixed_scoring' ? 'Flexible play · steady scoring' : 'Starting crew only'}</StatusPill>
+        </div>}
       </div>
       <div className="flex flex-wrap gap-2">
-        {status === 'ready' && <button type="button" className={primaryButton} disabled={busy || !Number.isSafeInteger(revision)} onClick={() => changeStatus('live', 'Event started. New team creation is closed.', `Start “${hunt.title}” now? New team creation will close immediately. Existing approved teams and members can still sign in and play.`)}>{busy ? 'Starting…' : 'Start event & close registration'}</button>}
-        {status === 'live' && <button type="button" className={secondaryButton} disabled={busy || !Number.isSafeInteger(revision)} onClick={() => changeStatus('paused', 'Event paused.')}>{busy ? 'Pausing…' : 'Pause event'}</button>}
-        {status === 'paused' && <button type="button" className={primaryButton} disabled={busy || !Number.isSafeInteger(revision)} onClick={() => changeStatus('live', 'Event resumed.')}>{busy ? 'Resuming…' : 'Resume event'}</button>}
-        {(status === 'live' || status === 'paused') && <button type="button" className="min-h-11 rounded-xl border border-rose-300/30 bg-rose-300/10 px-4 py-2 text-sm font-black text-rose-100 transition hover:bg-rose-300/20 disabled:cursor-not-allowed disabled:opacity-50" disabled={busy || !Number.isSafeInteger(revision)} onClick={() => changeStatus('ended', 'Event ended.', `End “${hunt.title}” now? Waiting and active runs will close as abandoned and become ineligible. Submitted photos must still be reviewed before the public board can be finalized. This action is recorded in the organizer audit.`)}>{busy ? 'Updating…' : 'End event'}</button>}
+        {status === 'ready' && <button type="button" className={primaryButton} disabled={busy || !Number.isSafeInteger(effectiveRevision)} onClick={() => changeStatus('live', 'Event started.', `Start “${hunt.title}” now? Players can begin, and ${creationLabel.toLocaleLowerCase()} will stay ${registrationOpen ? 'open' : 'closed'}.`)}>{pending === 'hunt-lifecycle' ? 'Starting…' : 'Start event'}</button>}
+        {status === 'live' && <button type="button" className={secondaryButton} disabled={busy || !Number.isSafeInteger(effectiveRevision)} onClick={() => changeStatus('paused', 'Event paused.')}>{pending === 'hunt-lifecycle' ? 'Pausing…' : 'Pause event'}</button>}
+        {status === 'paused' && <button type="button" className={primaryButton} disabled={busy || !Number.isSafeInteger(effectiveRevision)} onClick={() => changeStatus('live', 'Event resumed.')}>{pending === 'hunt-lifecycle' ? 'Resuming…' : 'Resume event'}</button>}
+        {(status === 'live' || status === 'paused') && <button type="button" className="min-h-11 rounded-xl border border-rose-300/30 bg-rose-300/10 px-4 py-2 text-sm font-black text-rose-100 transition hover:bg-rose-300/20 disabled:cursor-not-allowed disabled:opacity-50" disabled={busy || !Number.isSafeInteger(effectiveRevision)} onClick={() => changeStatus('ended', 'Event ended.', `End “${hunt.title}” now? Waiting and active runs will close as abandoned and no longer count in event results. Submitted photos must still be reviewed before the public board can be finalized. This action is recorded in the organizer audit.`)}>{pending === 'hunt-lifecycle' ? 'Updating…' : 'End event'}</button>}
       </div>
     </div>
-    {hunt.registrationMode === 'self-serve' && <p className="mt-4 rounded-xl border border-amber-300/25 bg-amber-300/10 p-3 text-sm leading-6 text-amber-100">
-      <strong>Identity check required:</strong> self-serve registration proves a team PIN, not one human per team. Review every pending roster at check-in before approval. Use rostered or organizer-assigned identities for prize events.
-    </p>}
-    {!Number.isSafeInteger(revision) && <p className="mt-3 text-xs text-amber-200">Refresh the live event state before changing its lifecycle.</p>}
+    {['ready', 'live', 'paused'].includes(status) && <div className="mt-4 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-cyan-300/20 bg-cyan-300/[0.06] p-4">
+      <div>
+        <div className="flex flex-wrap items-center gap-2"><p className="font-black text-white">{creationLabel}</p><StatusPill tone={registrationOpen ? 'good' : 'warning'}>{registrationOpen ? 'Open' : 'Closed'}</StatusPill></div>
+        <p className="mt-1 text-sm leading-6 text-slate-400">{creationDetail}</p>
+      </div>
+      <button type="button" className={registrationOpen ? secondaryButton : primaryButton} disabled={Boolean(pending) || !Number.isSafeInteger(effectiveRevision)} onClick={() => changeRegistration(!registrationOpen)}>{pending === 'hunt-registration' ? 'Saving…' : selfServeCreation ? registrationOpen ? 'Close new crews' : 'Open new crews' : registrationOpen ? 'Close team creation' : 'Open team creation'}</button>
+    </div>}
+    {hunt.registrationMode === 'self-serve' && <p className="mt-3 text-xs leading-5 text-slate-500">Self-serve keeps casual events quick. Organizer-assigned mode controls who creates teams; for prize events where each person must be confirmed, use a rostered event with organizer-issued identities and check-in.</p>}
+    {!Number.isSafeInteger(effectiveRevision) && <p className="mt-3 text-xs text-amber-200">Refresh the live event state before changing its lifecycle.</p>}
   </section>;
 }
 
@@ -541,7 +593,21 @@ export default function LiveOperations({ hunt, data, loading, pending, problem, 
   const [auditTeam, setAuditTeam] = useState<LiveTeam | null>(null);
   const [teamControl, setTeamControl] = useState<{ team: LiveTeam; action: TeamControlAction } | null>(null);
   const [recoveryTeam, setRecoveryTeam] = useState<LiveTeam | null>(null);
-  const currentHunt = data?.hunt?.id === hunt.id ? { ...hunt, ...data.hunt } : hunt;
+  const [registrationOverride, setRegistrationOverride] = useState<{ huntId: string; open: boolean; revision: number } | null>(null);
+  const serverHunt = data?.hunt?.id === hunt.id ? { ...hunt, ...data.hunt } : hunt;
+  useEffect(() => {
+    if (!registrationOverride) return;
+    if (registrationOverride.huntId !== serverHunt.id ||
+      (Number.isSafeInteger(serverHunt.lifecycleRevision) && Number(serverHunt.lifecycleRevision) >= registrationOverride.revision)) {
+      setRegistrationOverride(null);
+    }
+  }, [registrationOverride, serverHunt.id, serverHunt.lifecycleRevision]);
+  const currentHunt = registrationOverride?.huntId === serverHunt.id &&
+    (!Number.isSafeInteger(serverHunt.lifecycleRevision) || Number(serverHunt.lifecycleRevision) < registrationOverride.revision)
+    ? { ...serverHunt, registrationOpen: registrationOverride.open, lifecycleRevision: registrationOverride.revision }
+    : serverHunt;
+  const requiresOrganizerApproval = currentHunt.integrityPolicy?.selfServeApproval === 'organizer'
+    || (!currentHunt.integrityPolicy && Boolean(data?.teams.some(team => team.approvalStatus === 'pending')));
   const teams = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
     return (data?.teams || []).filter(team => {
@@ -561,7 +627,7 @@ export default function LiveOperations({ hunt, data, loading, pending, problem, 
   }), [data?.alerts, data?.teams]);
 
   return <div className="space-y-5">
-    <LifecycleControls hunt={currentHunt} pending={pending} run={run} notify={notify} />
+    <LifecycleControls hunt={currentHunt} pending={pending} run={run} notify={notify} onRegistrationChanged={(open, revision) => setRegistrationOverride({ huntId: currentHunt.id, open, revision })} />
     <section className={`${panelClass} p-5 sm:p-6`}>
       <SectionHeading eyebrow="Event control" title="Live operations" detail="Five-second updates run only while this tab is visible. Search a canonical code, display name, or any rostered member." actions={<button type="button" className={secondaryButton} disabled={loading || Boolean(pending)} onClick={() => void onRefresh()}>{loading ? 'Refreshing…' : 'Refresh now'}</button>} />
       <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
@@ -580,8 +646,8 @@ export default function LiveOperations({ hunt, data, loading, pending, problem, 
         {loading && !data && <p role="status" className="py-10 text-center text-slate-400">Loading live teams…</p>}
         {!loading && data && teams.length === 0 && <EmptyState title="No teams match this view">Try another name or code, or turn off “Alerts only.”</EmptyState>}
         {teams.length > 0 && (mode === 'table'
-          ? <TeamTable teams={teams} onAudit={setAuditTeam} onRename={setRenameTeam} onControl={(team, action) => setTeamControl({ team, action })} onRecovery={setRecoveryTeam} />
-          : <TeamCards teams={teams} onAudit={setAuditTeam} onRename={setRenameTeam} onControl={(team, action) => setTeamControl({ team, action })} onRecovery={setRecoveryTeam} />)}
+          ? <TeamTable teams={teams} requiresOrganizerApproval={requiresOrganizerApproval} onAudit={setAuditTeam} onRename={setRenameTeam} onControl={(team, action) => setTeamControl({ team, action })} onRecovery={setRecoveryTeam} />
+          : <TeamCards teams={teams} requiresOrganizerApproval={requiresOrganizerApproval} onAudit={setAuditTeam} onRename={setRenameTeam} onControl={(team, action) => setTeamControl({ team, action })} onRecovery={setRecoveryTeam} />)}
       </div>
     </section>
     <RosterPanel hunt={currentHunt} pending={pending} run={run} onRefresh={onRefresh} notify={notify} />

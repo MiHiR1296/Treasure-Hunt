@@ -11,6 +11,7 @@ import {
   createOrganizerTeam,
   freezePublicBoard,
   reviewPhoto,
+  setRegistrationOpen,
   setHuntLifecycle,
 } from '../../lib/server/v3/operations';
 import { registerV3Team } from '../../lib/server/v3/registration';
@@ -39,6 +40,7 @@ function definition(id: string, registrationMode: V3Definition['settings']['regi
       completionMessage: 'Finished.',
       photoRetention: 'after_verification',
       registrationMode,
+      integrityPolicy: { locationVerification: 'strict', selfServeApproval: 'organizer', rosterParticipation: 'freeze_at_run_start' },
       runPolicy: { mode: 'unlimited' },
       leaderboardPolicy: {
         bestRunRule: 'score_then_time_then_completion',
@@ -184,7 +186,7 @@ test('self-serve approval, registration close, disqualification and restoration 
   const memberId = registration.summary.member.id;
   assert.equal(registration.summary.team.approvalStatus, 'pending');
   assert.equal(registration.summary.team.competitionRevision, 1);
-  await assert.rejects(createRun(teamId, memberId, randomUUID()), /awaiting organizer approval/i);
+  await assert.rejects(createRun(teamId, memberId, randomUUID()), /organizer's go-ahead/i);
   assert.equal((await publicLeaderboard(boardSlug) as { main: unknown[] }).main.length, 0);
 
   const approveRequest = {
@@ -218,19 +220,25 @@ test('self-serve approval, registration close, disqualification and restoration 
     changeTeamCompetitionStatus({ ...approveRequest, requestId: randomUUID() }),
     /changed.*refresh/i,
   );
+  const closeRegistrationRequest = {
+    huntId,
+    open: false,
+    expectedRevision: 1,
+    requestId: randomUUID(),
+    actor: 'Integration organizer',
+    sessionHash: '1'.repeat(64),
+  };
+  const closed = await setRegistrationOpen(closeRegistrationRequest);
+  assert.equal(closed.lifecycleRevision, 2);
+  assert.equal((await setRegistrationOpen(closeRegistrationRequest)).replayed, true);
   await assert.rejects(
-    registerV3Team({
-      requestId: randomUUID(), huntId, intent: 'join', playerName: 'Invented Helper', teamCode: registration.summary.team.code,
-      pin: '123456', memberPin: '333333', requestSource: 'team-control-test',
-    }),
-    /roster was locked when the organizer approved it/i,
-    'approval freezes the declared self-serve roster before any route is exposed',
+    setRegistrationOpen({ ...closeRegistrationRequest, requestId: randomUUID(), open: true }),
+    /changed.*refresh/i,
   );
-
-  await setHuntLifecycle(huntId, 'live', 1, 'Integration organizer');
+  await setHuntLifecycle(huntId, 'live', 2, 'Integration organizer');
   assert.deepEqual(
     (await getPool().query('select status,registration_open,lifecycle_revision from hunt_v3.hunts where id=$1', [huntId])).rows[0],
-    { status: 'live', registration_open: false, lifecycle_revision: 2 },
+    { status: 'live', registration_open: false, lifecycle_revision: 3 },
   );
   await assert.rejects(
     registerV3Team({
@@ -245,6 +253,8 @@ test('self-serve approval, registration close, disqualification and restoration 
   });
   assert.equal(teammate.summary.team.id, teamId, 'an existing declared member can join after creation closes');
   assert.equal(teammate.summary.team.approvalStatus, 'approved');
+  assert.equal(teammate.summary.team.competitionRevision, 3,
+    'a first claim advances the roster audit revision without revoking team-level organizer approval');
 
   const first = await createRun(teamId, memberId, randomUUID());
   const atFinale = await applyRunCommand(teamId, memberId, first.runId, randomUUID(), {
@@ -264,14 +274,14 @@ test('self-serve approval, registration close, disqualification and restoration 
     teamId,
     action: 'disqualify' as const,
     reason: 'Duplicate team identity confirmed by the event desk',
-    expectedRevision: 2,
+    expectedRevision: 3,
     requestId: randomUUID(),
     actor: 'Integration organizer',
     sessionHash: '1'.repeat(64),
   };
   const disqualified = await changeTeamCompetitionStatus(disqualifyRequest);
   assert.equal(disqualified.status, 'disqualified');
-  assert.equal(disqualified.competitionRevision, 3);
+  assert.equal(disqualified.competitionRevision, 4);
   assert.equal(disqualified.revokedSessions, 2);
   await assert.rejects(authenticateV3(registration.token, 'team'), /session has expired/i);
   await assert.rejects(authenticateV3(teammate.token, 'team'), /session has expired/i);
@@ -299,7 +309,7 @@ test('self-serve approval, registration close, disqualification and restoration 
     teamId,
     action: 'restore',
     reason: 'Identity review completed; future attempts may proceed',
-    expectedRevision: 3,
+    expectedRevision: 4,
     requestId: randomUUID(),
     actor: 'Integration organizer',
     sessionHash: '1'.repeat(64),
@@ -315,21 +325,21 @@ test('self-serve approval, registration close, disqualification and restoration 
   });
   const future = await createRun(teamId, memberId, randomUUID());
   assert.equal(future.eligible, true, 'an explicitly restored, already-approved team may create a new eligible run');
-  assert.equal(signedInAgain.summary.team.competitionRevision, 4);
+  assert.equal(signedInAgain.summary.team.competitionRevision, 5);
 
   const competing = await Promise.allSettled([
     changeTeamCompetitionStatus({
-      huntId, teamId, action: 'disqualify', reason: 'Concurrent decision A', expectedRevision: 4,
+      huntId, teamId, action: 'disqualify', reason: 'Concurrent decision A', expectedRevision: 5,
       requestId: randomUUID(), actor: 'Organizer A', sessionHash: '2'.repeat(64),
     }),
     changeTeamCompetitionStatus({
-      huntId, teamId, action: 'disqualify', reason: 'Concurrent decision B', expectedRevision: 4,
+      huntId, teamId, action: 'disqualify', reason: 'Concurrent decision B', expectedRevision: 5,
       requestId: randomUUID(), actor: 'Organizer B', sessionHash: '3'.repeat(64),
     }),
   ]);
   assert.equal(competing.filter(result => result.status === 'fulfilled').length, 1);
   assert.equal(competing.filter(result => result.status === 'rejected').length, 1);
-  assert.equal((await getPool().query('select competition_revision from hunt_v3.teams where id=$1', [teamId])).rows[0].competition_revision, 5);
+  assert.equal((await getPool().query('select competition_revision from hunt_v3.teams where id=$1', [teamId])).rows[0].competition_revision, 6);
 });
 
 test('organizer-assigned and rostered teams start approved and respect the atomic creation close', { skip: !enabled }, async () => {
@@ -350,7 +360,15 @@ test('organizer-assigned and rostered teams start approved and respect the atomi
       (await getPool().query('select status,approval_status,competition_revision from hunt_v3.teams where id=$1', [created.teamId])).rows[0],
       { status: 'active', approval_status: 'approved', competition_revision: 1 },
     );
-    await setHuntLifecycle(huntId, 'live', 1, 'Integration organizer');
+    await setRegistrationOpen({
+      huntId,
+      open: false,
+      expectedRevision: 1,
+      requestId: randomUUID(),
+      actor: 'Integration organizer',
+      sessionHash: '4'.repeat(64),
+    });
+    await setHuntLifecycle(huntId, 'live', 2, 'Integration organizer');
     await assert.rejects(
       createOrganizerTeam({
         huntId,
@@ -366,7 +384,7 @@ test('organizer-assigned and rostered teams start approved and respect the atomi
   }
 });
 
-test('self-serve approval serializes with last-minute member creation', { skip: !enabled }, async () => {
+test('self-serve approval remains team-level while freeze snapshots each run roster', { skip: !enabled }, async () => {
   const huntId = `v3-approval-roster-race-${randomUUID().slice(0, 8)}`;
   await insertHunt(definition(huntId, 'self-serve'));
   const registration = await registerV3Team({
@@ -388,20 +406,23 @@ test('self-serve approval serializes with last-minute member creation', { skip: 
     pin: '121212', memberPin: '565656', requestSource: 'approval-roster-race',
   });
   const raced = await Promise.allSettled([approve, lateJoin]);
-  assert.equal(raced.filter(result => result.status === 'fulfilled').length, 1, 'approval and undeclared member creation cannot both commit');
+  assert.equal(raced[1].status, 'fulfilled', 'team membership remains available under freeze-at-start');
+  assert.ok(
+    raced.filter(result => result.status === 'fulfilled').length >= 1,
+    'the serialized winner commits; a stale approval may ask the organizer to refresh',
+  );
 
   let state = (await getPool().query(
     'select approval_status,competition_revision from hunt_v3.teams where id=$1',
     [registration.summary.team.id],
   )).rows[0];
   if (state.approval_status === 'pending') {
-    assert.equal(state.competition_revision, 2, 'a winning member insert invalidates the stale approval revision');
     await changeTeamCompetitionStatus({
       huntId,
       teamId: registration.summary.team.id,
       action: 'approve',
       reason: 'Desk reviewed the member who won the approval race',
-      expectedRevision: 2,
+      expectedRevision: Number(state.competition_revision),
       requestId: randomUUID(),
       actor: 'Race organizer',
       sessionHash: '6'.repeat(64),
@@ -412,16 +433,25 @@ test('self-serve approval serializes with last-minute member creation', { skip: 
     [registration.summary.team.id],
   )).rows[0];
   assert.equal(state.approval_status, 'approved');
-  await assert.rejects(
-    registerV3Team({
-      requestId: randomUUID(), huntId, intent: 'join', playerName: 'After Approval', teamCode: registration.summary.team.code,
-      pin: '121212', memberPin: '787878', requestSource: 'approval-roster-race',
-    }),
-    /roster was locked when the organizer approved it/i,
-  );
+  const approvedRevision = Number(state.competition_revision);
+  await setHuntLifecycle(huntId, 'live', 1, 'Race organizer');
+  const run = await createRun(registration.summary.team.id, registration.summary.member.id, randomUUID());
+  const afterStart = await registerV3Team({
+    requestId: randomUUID(), huntId, intent: 'join', playerName: 'After Approval', teamCode: registration.summary.team.code,
+    pin: '121212', memberPin: '787878', requestSource: 'approval-roster-race',
+  });
+  assert.equal(afterStart.summary.team.approvalStatus, 'approved', 'membership growth does not silently revoke team-level approval');
+  assert.equal(afterStart.summary.team.competitionRevision, approvedRevision + 1,
+    'a newly added member advances the auditable roster revision');
+  assert.equal(afterStart.summary.activeRun, null);
+  assert.equal(afterStart.summary.waitingForNextRun, true);
+  assert.equal(Number((await getPool().query(
+    'select count(*)::int as count from hunt_v3.run_members where run_id=$1 and member_id=$2',
+    [run.runId, afterStart.summary.member.id],
+  )).rows[0].count), 0, 'the current run keeps its immutable starting roster');
 });
 
-test('organizer-assigned teams stop accepting new identities at the first run', { skip: !enabled }, async () => {
+test('organizer-assigned late identities wait for the next run under freeze-at-start', { skip: !enabled }, async () => {
   const huntId = `v3-assigned-roster-lock-${randomUUID().slice(0, 8)}`;
   await insertHunt(definition(huntId, 'organizer-assigned'));
   const assigned = await createOrganizerTeam({
@@ -439,14 +469,16 @@ test('organizer-assigned teams stop accepting new identities at the first run', 
     pin: '909090', memberPin: '808080', requestSource: 'assigned-roster-lock',
   });
   await setHuntLifecycle(huntId, 'live', 1, 'Integration organizer');
-  await createRun(assigned.teamId, captain.summary.member.id, randomUUID());
-  await assert.rejects(
-    registerV3Team({
-      requestId: randomUUID(), huntId, intent: 'join', playerName: 'Synthetic Runner', teamCode: assigned.code,
-      pin: '909090', memberPin: '707070', requestSource: 'assigned-roster-lock',
-    }),
-    /roster was locked when its first run started/i,
-  );
+  const run = await createRun(assigned.teamId, captain.summary.member.id, randomUUID());
+  const late = await registerV3Team({
+    requestId: randomUUID(), huntId, intent: 'join', playerName: 'Late Runner', teamCode: assigned.code,
+    pin: '909090', memberPin: '707070', requestSource: 'assigned-roster-lock',
+  });
+  assert.equal(late.summary.waitingForNextRun, true);
+  assert.equal(Number((await getPool().query(
+    'select count(*)::int as count from hunt_v3.run_members where run_id=$1 and member_id=$2',
+    [run.runId, late.summary.member.id],
+  )).rows[0].count), 0);
   const recovered = await registerV3Team({
     requestId: randomUUID(), huntId, intent: 'join', playerName: 'Assigned Captain', teamCode: assigned.code,
     pin: '909090', memberPin: '808080', requestSource: 'assigned-roster-lock',
@@ -454,7 +486,7 @@ test('organizer-assigned teams stop accepting new identities at the first run', 
   assert.equal(recovered.summary.member.id, captain.summary.member.id, 'the roster lock does not block a legitimate session recovery');
 });
 
-test('organizer-assigned first-run creation wins a queued new-member join without a stale roster check', { skip: !enabled }, async () => {
+test('organizer-assigned run creation and queued join preserve one immutable per-run snapshot', { skip: !enabled }, async () => {
   const huntId = `v3-assigned-run-join-race-${randomUUID().slice(0, 8)}`;
   await insertHunt(definition(huntId, 'organizer-assigned'));
   const assigned = await createOrganizerTeam({
@@ -508,14 +540,11 @@ test('organizer-assigned first-run creation wins a queued new-member join withou
 
     const [runResult, joinResult] = await Promise.allSettled([firstRun, lateJoin]);
     assert.equal(runResult.status, 'fulfilled', 'the request queued first behind the team lock creates the first run');
-    assert.equal(joinResult.status, 'rejected', 'the queued new identity observes the committed run after it acquires the team lock');
-    if (joinResult.status === 'rejected') {
-      assert.match(String(joinResult.reason), /roster was locked when its first run started/i);
-    }
+    assert.equal(joinResult.status, 'fulfilled', 'the queued identity joins the persistent team after the run snapshot commits');
     assert.deepEqual(
       (await getPool().query('select name from hunt_v3.team_members where team_id=$1 order by created_at,id', [assigned.teamId])).rows,
-      [{ name: 'Race Captain' }],
-      'the losing join cannot persist an extra identity',
+      [{ name: 'Race Captain' }, { name: 'Queued Synthetic Runner' }],
+      'the persistent roster records the late identity for a later attempt',
     );
     assert.deepEqual(
       (await getPool().query(
@@ -709,7 +738,7 @@ test('disabled policy restores exactly the official slot invalidated by team dis
   assert.equal(signedInAgain.summary.remainingOfficialRuns, 1);
   const replacement = await createRun(assigned.teamId, captain.summary.member.id, randomUUID());
   await completeSimpleRun(assigned.teamId, captain.summary.member.id, replacement.runId);
-  await assert.rejects(createRun(assigned.teamId, captain.summary.member.id, randomUUID()), /allows one official run/i);
+  await assert.rejects(createRun(assigned.teamId, captain.summary.member.id, randomUUID()), /turned off replays/i);
   assert.deepEqual(
     (await getPool().query(
       'select id,run_number,status,eligible,ineligibility_reason from hunt_v3.runs where team_id=$1 order by run_number',
@@ -812,7 +841,7 @@ test('capped policy makes practice a permanent one-way boundary even after organ
   assert.equal(signedInAgain.summary.remainingOfficialRuns, 0);
   await assert.rejects(
     createRun(assigned.teamId, captain.summary.member.id, randomUUID()),
-    /already entered practice.*cannot return to official competition/i,
+    /now in replay mode/i,
     'a restore cannot convert knowledge gained in practice back into an official attempt',
   );
   const continuedPractice = await createRun(assigned.teamId, captain.summary.member.id, randomUUID(), true);

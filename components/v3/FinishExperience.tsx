@@ -13,31 +13,31 @@ function replayAvailability(summary: TeamSessionSummary) {
   if (summary.hasPracticeRun) return {
     allowed: true,
     practice: true,
-    reason: 'This crew has entered practice, so every later run under this team identity remains practice-only. Ask the organizer if the registration needs correction; players cannot create an official restart.',
+    reason: 'Keep exploring and playing for fun. Your crew record stays right where it is.',
   };
   const replacementOfficialRun = summary.officialAttemptCount > 0 && summary.officialAttemptSlotsUsed === 0;
   if (policy.mode === 'disabled') return summary.remainingOfficialRuns === 0
-    ? { allowed: false, reason: 'This event is set to one official attempt per team.' }
-    : { allowed: true, practice: false, reason: 'The organizer restored your crew. Your disqualified result stays ineligible, and this replacement run is your official attempt.' };
+    ? { allowed: false, reason: 'This hunt is set to one scored run per crew.' }
+    : { allowed: true, practice: false, reason: 'Your crew can take the challenge again. The earlier result remains in your history.' };
   if (policy.mode === 'capped' && summary.remainingOfficialRuns === 0) {
     return {
       allowed: true,
       practice: true,
-      reason: `Your crew has used all ${policy.maxOfficialRuns ?? 1} official attempts. Practice now reuses one of your already-seen structural routes, with fresh generated values, and cannot reveal another competition route.`,
+      reason: `Your crew has completed all ${policy.maxOfficialRuns ?? 1} scored turn${(policy.maxOfficialRuns ?? 1) === 1 ? '' : 's'}. You can still play again for fun.`,
     };
   }
   if (policy.mode === 'practice-only') return replacementOfficialRun
     ? {
       allowed: true,
       practice: false,
-      reason: 'The organizer restored your crew. Your disqualified result stays ineligible, and this replacement run is official before practice resumes.',
+      reason: 'Your crew can take the challenge again. The earlier result remains in your history.',
     }
     : {
       allowed: true,
       practice: true,
-      reason: 'Your next run is practice-only. It reuses your official structural route with fresh generated values and will not change the leaderboard.',
+      reason: 'Your next round is just for fun and will not change the event standings.',
     };
-  return { allowed: true, practice: false, reason: 'A replay creates a new seeded route and keeps this result intact.' };
+  return { allowed: true, practice: false, reason: 'Your result is safe. Another go gives the crew a fresh challenge.' };
 }
 
 export default function FinishExperience({ view, summary, busy, onReplay }: {
@@ -57,7 +57,7 @@ export default function FinishExperience({ view, summary, busy, onReplay }: {
 
   return <div className="space-y-6">
     <section className={`${cardStyle} overflow-hidden !bg-emerald-950 !text-white`}>
-      <div className="flex items-start justify-between gap-4"><span aria-hidden="true" className="text-5xl text-emerald-200">✦</span><span className="rounded-full bg-white/10 px-3 py-1.5 text-xs font-bold uppercase tracking-wide">Run {view.runNumber}{view.practice ? ' · Practice' : ''}</span></div>
+      <div className="flex items-start justify-between gap-4"><span aria-hidden="true" className="text-5xl text-emerald-200">✦</span><span className="rounded-full bg-white/10 px-3 py-1.5 text-xs font-bold uppercase tracking-wide">Run {view.runNumber}{view.practice ? ' · Just for fun' : ''}</span></div>
       <p className="mt-6 text-xs font-extrabold uppercase tracking-[0.2em] text-emerald-200">Finish confirmed</p>
       <h2 className="mt-2 text-4xl font-black tracking-tight">You found the finish.</h2>
       <p className="mt-3 max-w-lg leading-relaxed text-emerald-50/80">{view.hunt.settings?.completionMessage || 'Every solve, scan, and discovery is safely recorded for this run.'}</p>
@@ -67,19 +67,19 @@ export default function FinishExperience({ view, summary, busy, onReplay }: {
         <div className="rounded-2xl bg-white/10 p-4"><dt className="text-xs font-bold uppercase tracking-wide text-emerald-200">Time</dt><dd className="mt-1 text-xl font-black tabular-nums">{formatDuration(elapsedMilliseconds)}</dd></div>
         <div className="rounded-2xl bg-white/10 p-4"><dt className="text-xs font-bold uppercase tracking-wide text-emerald-200">Team best</dt><dd className="mt-1 text-3xl font-black tabular-nums">{best?.score ?? view.score}</dd></div>
       </dl>
-      {view.practice && <p className="mt-4 rounded-xl bg-amber-300/15 p-3 text-sm text-amber-100">Practice run: this result is saved for your crew but excluded from competitive ranking.</p>}
+      {view.practice && <p className="mt-4 rounded-xl bg-amber-300/15 p-3 text-sm text-amber-100">Just for fun: this result is saved for your crew and will not change the event standings.</p>}
       {view.bonusScore !== 0 && <p className="mt-4 rounded-xl bg-violet-300/15 p-3 text-sm text-violet-100"><strong>{view.bonusScore > 0 ? '+' : ''}{view.bonusScore} extra points</strong> were recorded for the fun of the hunt and do not affect the leaderboard.</p>}
     </section>
 
     <section className="rounded-[1.75rem] border border-violet-200 bg-violet-50 p-5 sm:p-7">
-      <p className="text-xs font-extrabold uppercase tracking-[0.18em] text-violet-700">Run it differently</p>
-      <h2 className="mt-1 text-3xl font-black tracking-tight text-violet-950">Want to beat your best?</h2>
-      <p className="mt-3 text-sm leading-relaxed text-violet-900">{availability.reason} Your previous runs, contribution history, and best result stay untouched.</p>
+      <p className="text-xs font-extrabold uppercase tracking-[0.18em] text-violet-700">One more go?</p>
+      <h2 className="mt-1 text-3xl font-black tracking-tight text-violet-950">Think you can beat it?</h2>
+      <p className="mt-3 text-sm leading-relaxed text-violet-900">{availability.reason} Your scores and crew highlights stay saved.</p>
       <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
         <div className="rounded-2xl bg-white p-4"><span className="block text-xs font-bold uppercase tracking-wide text-stone-500">This run</span><strong className="mt-1 block text-xl">{view.score} pts</strong></div>
         <div className="rounded-2xl bg-white p-4"><span className="block text-xs font-bold uppercase tracking-wide text-stone-500">Current best</span><strong className="mt-1 block text-xl">{best?.score ?? view.score} pts</strong></div>
       </div>
-      {availability.allowed && <button type="button" disabled={busy} onClick={() => void onReplay(Boolean(availability.practice))} className={`${primaryButton} mt-5 !bg-violet-950 hover:!bg-violet-900`}>{busy ? 'Preparing a fresh route…' : availability.practice ? 'Try a practice replay' : 'Start another run'}</button>}
+      {availability.allowed && <button type="button" disabled={busy} onClick={() => void onReplay(Boolean(availability.practice))} className={`${primaryButton} mt-5 !bg-violet-950 hover:!bg-violet-900`}>{busy ? 'Getting the next run ready…' : availability.practice ? 'Play again for fun' : 'Try again'}</button>}
     </section>
 
     <Leaderboards board={leaderboard} failed={leaderboardFailed} />

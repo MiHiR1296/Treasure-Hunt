@@ -22,6 +22,60 @@ after(async () => {
 
 type TeamFixture = { id: string; code: string };
 
+test('replay board is hidden when the configured run policy can never reach a second scored finish', { skip: !enabled }, async () => {
+  const cases = [
+    { mode: 'disabled', expected: false },
+    { mode: 'practice-only', expected: false },
+    { mode: 'capped', maxOfficialRuns: 1, expected: false },
+    { mode: 'capped', maxOfficialRuns: 2, expected: true },
+    { mode: 'unlimited', expected: true },
+  ] as const;
+  for (const [index, runPolicy] of cases.entries()) {
+    const huntId = `v3-replay-availability-${index}-${randomUUID().slice(0, 8)}`;
+    const teamId = randomUUID();
+    const definition = {
+      schemaVersion: 3,
+      id: huntId,
+      version: 1,
+      title: 'Replay availability test',
+      settings: {
+        integrityPolicy: { locationVerification: 'gps_only', selfServeApproval: 'automatic', rosterParticipation: 'flexible_fixed_scoring' },
+        runPolicy: runPolicy.mode === 'capped'
+          ? { mode: runPolicy.mode, maxOfficialRuns: runPolicy.maxOfficialRuns }
+          : { mode: runPolicy.mode },
+        leaderboardPolicy: {
+          bestRunRule: 'score_then_time_then_completion',
+          mainBoardEnabled: true,
+          replayBoardEnabled: true,
+          replayBoardPublic: false,
+          timeVisibility: 'after_second_eligible_run',
+          showProgress: false,
+        },
+      },
+      checkpoints: [],
+    };
+    await getPool().query(
+      `insert into hunt_v3.hunts(id,title,slug,status,registration_mode,latest_version,settings)
+        values($1,$2,$1,'live','organizer_assigned',1,$3)`,
+      [huntId, definition.title, definition.settings],
+    );
+    await getPool().query(
+      `insert into hunt_v3.hunt_versions(hunt_id,version,definition,content_hash,validation_report,fairness_report)
+        values($1,1,$2,$3,$4,$5)`,
+      [huntId, definition, String(index + 1).repeat(64), { valid: true, issues: [] }, { valid: true, issues: [], routes: [] }],
+    );
+    await getPool().query(
+      `insert into hunt_v3.teams(
+        id,hunt_id,canonical_code,pin_hash,registration_source,approval_status,approval_method)
+        values($1,$2,'T-001',$3,'organizer_assigned','approved','organizer')`,
+      [teamId, huntId, 'p'.repeat(32)],
+    );
+    const board = await teamLeaderboards(huntId, teamId);
+    assert.equal(board.replay.enabled, runPolicy.expected, `unexpected replay availability for ${runPolicy.mode}`);
+    assert.equal(board.replay.unlocked, false);
+  }
+});
+
 test('PostgreSQL V3 leaderboards project one best/first/count row per team and safely cache only live anonymous reads', { skip: !enabled }, async () => {
   const suffix = randomUUID().slice(0, 8);
   const huntId = `v3-leaderboard-${suffix}`;
@@ -39,7 +93,10 @@ test('PostgreSQL V3 leaderboards project one best/first/count row per team and s
     id: huntId,
     version: 1,
     title: 'Leaderboard projection test',
-    settings: { leaderboardPolicy: policy },
+    settings: {
+      integrityPolicy: { locationVerification: 'strict', selfServeApproval: 'organizer', rosterParticipation: 'freeze_at_run_start' },
+      leaderboardPolicy: policy,
+    },
     checkpoints: [],
   };
   await getPool().query(
@@ -225,7 +282,10 @@ test('PostgreSQL V3 leaderboard fields come only from eligible completed officia
     id: huntId,
     version: 1,
     title: 'Leaderboard source isolation test',
-    settings: { leaderboardPolicy: policy },
+    settings: {
+      integrityPolicy: { locationVerification: 'strict', selfServeApproval: 'organizer', rosterParticipation: 'freeze_at_run_start' },
+      leaderboardPolicy: policy,
+    },
     checkpoints: [],
   };
   await getPool().query(
@@ -349,6 +409,7 @@ test('PostgreSQL V3 live Main board includes provisional teams while Final and R
     version: 1,
     title: 'Live Main projection test',
     settings: {
+      integrityPolicy: { locationVerification: 'strict', selfServeApproval: 'organizer', rosterParticipation: 'freeze_at_run_start' },
       leaderboardPolicy: {
         bestRunRule: 'score_then_time_then_completion',
         mainBoardEnabled: true,
@@ -568,6 +629,7 @@ test('PostgreSQL V3 live reads terminalize an expired timed run even when the te
     version: 1,
     title: 'Timed expiry projection test',
     settings: {
+      integrityPolicy: { locationVerification: 'strict', selfServeApproval: 'organizer', rosterParticipation: 'freeze_at_run_start' },
       leaderboardPolicy: {
         bestRunRule: 'score_then_time_then_completion',
         mainBoardEnabled: true,

@@ -5,6 +5,7 @@ import { createMediaUploadUrl, mediaBackend, readIncomingMedia, removeIncomingMe
 import { canonicalJson, digest, HttpError } from '../security';
 import { lockV3Hunt, lockV3Team } from './locking';
 import { activePhotoTask, uploadV3Photo } from './media';
+import { assertPublishedIntegrityPolicy } from './runtime';
 import { rateLimitV3 } from './security';
 
 type Owner = { teamId: string; memberId: string };
@@ -126,6 +127,14 @@ async function findTicket(id: unknown, owner: Owner, client: PoolClient | Return
 }
 
 async function completedMedia(row: Ticket, owner: Owner, client: PoolClient | ReturnType<typeof getPool> = getPool()) {
+  const pinned = (await client.query(
+    `select version.definition from hunt_v3.runs run
+      join hunt_v3.hunt_versions version on version.hunt_id=run.hunt_id and version.version=run.hunt_version
+      where run.id=$1 and run.team_id=$2 and run.hunt_id=$3`,
+    [row.run_id, row.team_id, row.hunt_id],
+  )).rows[0];
+  if (!pinned) throw new HttpError(410, 'This uploaded file is no longer available. Choose it again.');
+  assertPublishedIntegrityPolicy(pinned.definition?.settings);
   const media = (await client.query(
     `select media.id,media.content_type,media.bytes
       from hunt_v3.media media

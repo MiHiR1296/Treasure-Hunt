@@ -8,6 +8,7 @@ import {
   createOrganizerTeam,
   freezePublicBoard,
   renameTeam,
+  setRegistrationOpen,
   setHuntLifecycle,
   updatePublicBoard,
 } from '@/lib/server/v3/operations';
@@ -71,6 +72,19 @@ export async function POST(request: NextRequest) {
     if (action === 'set_hunt_status') {
       if (!Number.isSafeInteger(body.expectedRevision)) throw new HttpError(400, 'A current lifecycle revision is required.');
       return setHuntLifecycle(textField(body, 'huntId'), textField(body, 'status'), Number(body.expectedRevision), session.organizerName);
+    }
+    if (action === 'set_registration_open') {
+      if (typeof body.open !== 'boolean' || !Number.isSafeInteger(body.expectedRevision)) {
+        throw new HttpError(400, 'Choose whether new crew creation is open using the current event revision.');
+      }
+      return setRegistrationOpen({
+        huntId: textField(body, 'huntId'),
+        open: body.open,
+        expectedRevision: Number(body.expectedRevision),
+        requestId: textField(body, 'requestId'),
+        actor: session.organizerName,
+        sessionHash: session.sessionHash,
+      });
     }
     if (action === 'update_public_board') {
       if (typeof body.enabled !== 'boolean' || typeof body.mainVisible !== 'boolean' || typeof body.replayVisible !== 'boolean' ||

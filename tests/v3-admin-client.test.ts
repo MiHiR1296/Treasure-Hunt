@@ -8,6 +8,12 @@ test('live organizer normalization round-trips lifecycle and all public-board co
     selectedHuntId: 'night-hunt',
     hunts: [{
       id: 'night-hunt', title: 'Night Hunt', slug: 'night-hunt', status: 'paused',
+      registrationMode: 'self-serve', registrationOpen: false,
+      integrityPolicy: {
+        locationVerification: 'gps_photo',
+        selfServeApproval: 'organizer',
+        rosterParticipation: 'freeze_at_run_start',
+      },
       lifecycleRevision: 9,
       publicBoard: {
         enabled: true,
@@ -27,6 +33,12 @@ test('live organizer normalization round-trips lifecycle and all public-board co
   });
 
   assert.equal(response.hunt?.lifecycleRevision, 9);
+  assert.equal(response.hunt?.registrationOpen, false);
+  assert.deepEqual(response.hunt?.integrityPolicy, {
+    locationVerification: 'gps_photo',
+    selfServeApproval: 'organizer',
+    rosterParticipation: 'freeze_at_run_start',
+  });
   assert.deepEqual(response.alerts, { help: 3, photos: 4, stalled: 2, fairness: 1 });
   assert.deepEqual(response.publicBoard, {
     enabled: true,
@@ -63,6 +75,8 @@ test('flattened live rows use the active run ID instead of the team ID', () => {
       activeRunId: '22222222-2222-2222-2222-222222222222',
       code: 'T-014',
       status: 'archived',
+      approvalStatus: 'approved',
+      approvalMethod: 'automatic',
       runNumber: 2,
       runStatus: 'active',
       score: 45,
@@ -75,6 +89,7 @@ test('flattened live rows use the active run ID instead of the team ID', () => {
   });
 
   assert.equal(response.teams[0]?.teamId, '11111111-1111-1111-1111-111111111111');
+  assert.equal(response.teams[0]?.approvalMethod, 'automatic');
   assert.equal(response.teams[0]?.activeRun?.id, '22222222-2222-2222-2222-222222222222');
   assert.equal(response.teams[0]?.activeRun?.status, 'active');
   assert.equal(response.teams[0]?.activeRun?.revision, 7);

@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
+import { resolveIntegrityPolicy, type V3Definition } from '../../v3/types';
 import { getPool, transaction } from '../db';
 import { canonicalJson, digest, hashPin, HttpError, verifyPin } from '../security';
 import { formatTeamCode, normalizedKey, validateMemberName, validateOptionalTeamName } from './names';
+import { assertPublishedIntegrityPolicy } from './runtime';
 import { createSessionToken, rateLimitV3, SESSION_SECONDS } from './security';
 
 export type RegistrationIntent = 'create' | 'join' | 'claim';
@@ -27,7 +29,7 @@ type HuntRegistrationRow = {
   registration_mode: 'self_serve' | 'organizer_assigned' | 'rostered';
   registration_open: boolean;
   next_team_number: number;
-  settings: Record<string, unknown>;
+  settings: V3Definition['settings'];
 };
 
 class RegistrationReplayNeeded extends Error {}
@@ -90,6 +92,7 @@ type JoinPreflight = {
     pin_hash: string;
     status: string;
     approval_status: 'pending' | 'approved';
+    approval_method: 'automatic' | 'organizer' | null;
     registration_source: 'self_serve' | 'organizer_assigned' | 'roster_import';
   };
   member: { id: string; status: string; claimed_at: string | null; claim_pin_hash: string | null } | null;
@@ -97,17 +100,10 @@ type JoinPreflight = {
 };
 
 function assertNewMemberAllowed(
-  team: { approval_status: string; registration_source: string },
-  hasRuns: boolean,
+  team: { registration_source: string },
 ) {
   if (team.registration_source === 'roster_import') {
     throw new HttpError(404, 'Choose your name exactly as it appears on the organizer roster.');
-  }
-  if (team.registration_source === 'self_serve' && team.approval_status === 'approved') {
-    throw new HttpError(409, 'This team roster was locked when the organizer approved it. Join using a name already declared for the team.');
-  }
-  if (team.registration_source === 'organizer_assigned' && hasRuns) {
-    throw new HttpError(409, 'This team roster was locked when its first run started. Join using an existing member name or ask the organizer for help.');
   }
 }
 
@@ -121,7 +117,7 @@ async function preflightJoin(
   const result = await getPool().query(
     `select h.id,h.title,h.slug,h.status,h.registration_mode,h.registration_open,h.next_team_number,h.settings,
       t.id as team_id,t.pin_hash as team_pin_hash,t.status as team_status,
-      t.approval_status,t.registration_source,
+      t.approval_status,t.approval_method,t.registration_source,
       exists(select 1 from hunt_v3.runs run where run.team_id=t.id) as team_has_runs,
       m.id as member_id,m.status as member_status,m.claimed_at,m.claim_pin_hash
       from hunt_v3.hunts h
@@ -160,9 +156,12 @@ async function preflightJoin(
     pin_hash: row.team_pin_hash as string,
     status: row.team_status as string,
     approval_status: row.approval_status as 'pending' | 'approved',
+    approval_method: row.approval_method as 'automatic' | 'organizer' | null,
     registration_source: row.registration_source as 'self_serve' | 'organizer_assigned' | 'roster_import',
   };
-  if (!member) assertNewMemberAllowed(team, Boolean(row.team_has_runs));
+  if (!member || (!member.claimed_at && team.registration_source === 'self_serve')) {
+    assertNewMemberAllowed(team);
+  }
   if (member?.claim_pin_hash) {
     if (!await verifyPin(memberPin, member.claim_pin_hash)) throw new HttpError(401, 'The personal member PIN is incorrect.');
     return { hunt, team, member, newMemberPinHash: null };
@@ -279,7 +278,7 @@ export async function listV3Hunts() {
 
 export async function teamSessionSummary(client: PoolClient, teamId: string, memberId: string) {
   const team = (await client.query(
-    `select t.id,t.canonical_code,t.display_name,t.status,t.approval_status,t.competition_revision,t.registration_source,
+    `select t.id,t.canonical_code,t.display_name,t.status,t.approval_status,t.approval_method,t.competition_revision,t.registration_source,
       h.id as hunt_id,h.title as hunt_title,h.slug,h.status as hunt_status,h.registration_mode,h.settings
       from hunt_v3.teams t join hunt_v3.hunts h on h.id=t.hunt_id where t.id=$1 and t.status='active'`,
     [teamId],
@@ -299,6 +298,7 @@ export async function teamSessionSummary(client: PoolClient, teamId: string, mem
     [teamId, memberId],
   );
   const participatingRuns = runs.filter(run => run.participating);
+  const waitingForNextRun = runs.some(run => run.status === 'active' && !run.participating);
   const completed = runs.filter(run => run.status === 'completed' && run.eligible && !run.practice);
   const officialAttemptCount = runs.filter(run => !run.practice).length;
   const hasPracticeRun = runs.some(run => run.practice);
@@ -314,6 +314,13 @@ export async function teamSessionSummary(client: PoolClient, teamId: string, mem
       ? Number(runPolicy.maxOfficialRuns ?? 1)
       : null;
   const best = [...completed].sort((a, b) => b.score - a.score || (a.elapsed_ms ?? Infinity) - (b.elapsed_ms ?? Infinity) || Date.parse(a.completed_at) - Date.parse(b.completed_at))[0] ?? null;
+  const integrityPolicy = resolveIntegrityPolicy(team.settings);
+  const effectiveApprovalStatus = team.registration_source === 'self_serve' &&
+    integrityPolicy.selfServeApproval === 'organizer' && team.approval_method !== 'organizer'
+    ? 'pending'
+    : integrityPolicy.selfServeApproval === 'automatic' && team.registration_source === 'self_serve'
+      ? 'approved'
+      : team.approval_status;
   const runSummary = (run: Record<string, unknown> | null) => run ? {
     id: run.id,
     runNumber: run.run_number,
@@ -341,13 +348,14 @@ export async function teamSessionSummary(client: PoolClient, teamId: string, mem
       displayName: team.display_name,
       label: team.display_name ? `${team.canonical_code} · ${team.display_name}` : team.canonical_code,
       status: team.status,
-      approvalStatus: team.approval_status,
+      approvalStatus: effectiveApprovalStatus,
       competitionRevision: Number(team.competition_revision),
       registrationSource: String(team.registration_source).replaceAll('_', '-'),
     },
     member: { id: member.id, name: member.name },
     members: members.map(item => ({ id: item.id, name: item.name, checkedIn: Boolean(item.checked_in_at) })),
     activeRun: runSummary(participatingRuns.find(run => run.status === 'active') ?? null),
+    waitingForNextRun,
     latestRun: runSummary(participatingRuns[0] ?? null),
     bestRun: runSummary(best),
     completedOfficialRuns: completed.length,
@@ -367,11 +375,57 @@ export async function teamSessionSummary(client: PoolClient, teamId: string, mem
   };
 }
 
+async function enrollFlexibleRunParticipant(
+  client: PoolClient,
+  teamId: string,
+  memberId: string,
+  requestId: string,
+) {
+  const active = (await client.query(
+    `select run.id,run.engine_state,version.definition,member.name
+      from hunt_v3.runs run
+      join hunt_v3.hunt_versions version on version.hunt_id=run.hunt_id and version.version=run.hunt_version
+      join hunt_v3.team_members member on member.team_id=run.team_id and member.id=$2
+        and member.status='active' and member.checked_in_at is not null
+      where run.team_id=$1 and run.status='active'
+      order by run.run_number desc limit 1 for update of run`,
+    [teamId, memberId],
+  )).rows[0];
+  if (!active) return;
+  assertPublishedIntegrityPolicy(active.definition?.settings);
+  const rosterParticipation = resolveIntegrityPolicy(active.definition?.settings).rosterParticipation;
+  if (rosterParticipation === 'freeze_at_run_start') return;
+  const contributionEligible = rosterParticipation === 'flexible';
+  const inserted = await client.query(
+    `insert into hunt_v3.run_members(run_id,team_id,member_id,member_name_snapshot,contribution_eligible)
+      values($1,$2,$3,$4,$5) on conflict(run_id,member_id) do nothing
+      returning contribution_eligible,joined_run_at`,
+    [active.id, teamId, memberId, active.name, contributionEligible],
+  );
+  if (!inserted.rowCount) return;
+  const state = active.engine_state as { revision?: number };
+  const revision = Number(state.revision ?? 0);
+  const ordinal = Number((await client.query(
+    'select coalesce(max(ordinal),0)+1 as ordinal from hunt_v3.run_events where run_id=$1 and revision=$2',
+    [active.id, revision],
+  )).rows[0].ordinal);
+  await client.query(
+    `insert into hunt_v3.run_events(
+      run_id,team_id,revision,ordinal,request_id,actor_kind,actor_member_id,event_type,details,occurred_at)
+      values($1,$2,$3,$4,$5,'member',$6,'run_member_joined',$7,$8)`,
+    [active.id, teamId, revision, ordinal, requestId, memberId, {
+      rosterParticipation,
+      contributionEligible: Boolean(inserted.rows[0].contribution_eligible),
+    }, inserted.rows[0].joined_run_at],
+  );
+}
+
 async function establishMemberSession(
   client: PoolClient,
   sessionHash: string,
   teamId: string,
   memberId: string,
+  requestId: string,
 ) {
   const replacedClaims = await client.query(
     `update hunt_v3.roster_claims set status='released',ended_at=now(),ended_by='member',reason='Signed in again'
@@ -405,9 +459,7 @@ async function establishMemberSession(
       values($1,$2,'check_in','member',$2,'claim')`,
     [teamId, memberId],
   );
-  // Run membership is an immutable starting snapshot. Signing in after a run
-  // starts checks this member in for the next run without granting access to
-  // the active attempt.
+  await enrollFlexibleRunParticipant(client, teamId, memberId, requestId);
   return teamSessionSummary(client, teamId, memberId);
 }
 
@@ -499,17 +551,20 @@ export async function registerV3Team(input: RegistrationInput) {
       const maximum = Number(hunt.settings?.maxTeamSize ?? 50);
       const names = rosterNames(input.memberNames, playerName, maximum);
       const prepared = preparedCreate!;
+      const integrityPolicy = resolveIntegrityPolicy(hunt.settings);
+      const automaticApproval = integrityPolicy.selfServeApproval === 'automatic';
       teamId = randomUUID();
       const allocatedCode = formatTeamCode(hunt.next_team_number);
       const inserted = await client.query(
         `insert into hunt_v3.teams(
-          id,hunt_id,canonical_code,display_name,name_key,name_status,registration_source,approval_status,status,pin_hash)
+          id,hunt_id,canonical_code,display_name,name_key,name_status,registration_source,approval_status,approval_method,status,pin_hash)
           values($1,$2,$3,$4,$5,case when $4::text is null then 'code_only' else 'approved' end,
-            'self_serve','pending','active',$6)
+            'self_serve',$6,$7,'active',$8)
           on conflict(hunt_id,name_key) where name_key is not null and name_status<>'rejected'
           do nothing returning id`,
         [teamId, hunt.id, allocatedCode, prepared.displayName,
-          prepared.displayName ? normalizedKey(prepared.displayName) : null, prepared.teamPinHash],
+          prepared.displayName ? normalizedKey(prepared.displayName) : null,
+          automaticApproval ? 'approved' : 'pending', automaticApproval ? 'automatic' : null, prepared.teamPinHash],
       );
       if (!inserted.rowCount) throw new HttpError(409, 'That nickname is already in use. Choose another nickname or leave it blank.');
       await client.query('update hunt_v3.hunts set next_team_number=next_team_number+1,updated_at=now() where id=$1', [hunt.id]);
@@ -526,7 +581,12 @@ export async function registerV3Team(input: RegistrationInput) {
       await client.query(
         `insert into hunt_v3.admin_events(action,hunt_id,team_id,details)
           values('team_registered',$1,$2,$3)`,
-        [hunt.id, teamId, { code: allocatedCode, displayName: prepared.displayName, source: 'self_serve' }],
+        [hunt.id, teamId, {
+          code: allocatedCode,
+          displayName: prepared.displayName,
+          source: 'self_serve',
+          approval: automaticApproval ? 'automatic' : 'organizer',
+        }],
       );
     } else {
       const prepared = preparedJoin!;
@@ -541,7 +601,7 @@ export async function registerV3Team(input: RegistrationInput) {
       )).rows[0] as HuntRegistrationRow | undefined;
       if (!hunt || !acceptsRegistration(hunt.status)) throw new HttpError(409, 'This hunt is not accepting players right now.');
       const team = (await client.query(
-        `select id,pin_hash,status,approval_status,registration_source
+        `select id,pin_hash,status,approval_status,approval_method,registration_source
           from hunt_v3.teams teams where hunt_id=$1 and canonical_code=$2 for update`,
         [input.huntId, code],
       )).rows[0];
@@ -555,6 +615,7 @@ export async function registerV3Team(input: RegistrationInput) {
       }
       if (team.status !== 'active') throw new HttpError(409, 'This team is not active. Ask the organizer for help.');
       teamId = team.id;
+      const integrityPolicy = resolveIntegrityPolicy(hunt.settings);
       const existing = (await client.query(
         'select id,status,claimed_at,claim_pin_hash from hunt_v3.team_members where team_id=$1 and name_key=$2 for update',
         [teamId, normalizedKey(playerName)],
@@ -564,12 +625,22 @@ export async function registerV3Team(input: RegistrationInput) {
           throw new HttpError(409, 'This member identity changed while you were signing in. Try again.');
         }
         if (existing.status === 'removed') throw new HttpError(409, 'This member was removed from the team. Ask the organizer for help.');
+        const firstSelfServeClaim = team.registration_source === 'self_serve' && !existing.claimed_at;
+        if (firstSelfServeClaim) {
+          assertNewMemberAllowed(team);
+        }
         memberId = existing.id;
         await client.query(
           `update hunt_v3.team_members set status='active',claim_pin_hash=coalesce(claim_pin_hash,$2),
             claimed_at=coalesce(claimed_at,now()),checked_in_at=coalesce(checked_in_at,now()) where id=$1`,
           [memberId, prepared.newMemberPinHash],
         );
+        if (firstSelfServeClaim) {
+          await client.query(
+            'update hunt_v3.teams set competition_revision=competition_revision+1 where id=$1',
+            [teamId],
+          );
+        }
       } else {
         if (prepared.member) throw new HttpError(409, 'This member identity changed while you were signing in. Try again.');
         // This must be a separate statement after the team-row lock. Under
@@ -577,11 +648,7 @@ export async function registerV3Team(input: RegistrationInput) {
         // creation can retain the statement's older snapshot for a correlated
         // EXISTS. The post-lock statement sees the committed run, while the
         // shared team lock makes join-first versus run-first linearizable.
-        const hasRuns = Boolean((await client.query(
-          'select 1 from hunt_v3.runs where team_id=$1 limit 1',
-          [teamId],
-        )).rowCount);
-        assertNewMemberAllowed(team, hasRuns);
+        assertNewMemberAllowed(team);
         const count = Number((await client.query(
           "select count(*)::int as count from hunt_v3.team_members where team_id=$1 and status<>'removed'",
           [teamId],
@@ -594,9 +661,9 @@ export async function registerV3Team(input: RegistrationInput) {
             values($1,$2,$3,$4,$5,'active',now(),now())`,
           [memberId, teamId, playerName, normalizedKey(playerName), prepared.newMemberPinHash],
         );
-        // Membership growth and organizer competition controls serialize on the
-        // team row. Advancing the shared revision prevents an approval based on
-        // a stale roster from silently accepting a just-added identity.
+        // Membership growth and organizer competition controls serialize on
+        // the team row. Approval remains team-level, while the shared revision
+        // provides an auditable, race-safe signal that the roster changed.
         await client.query(
           'update hunt_v3.teams set competition_revision=competition_revision+1 where id=$1',
           [teamId],
@@ -608,7 +675,7 @@ export async function registerV3Team(input: RegistrationInput) {
         [teamId, memberId, { registrationMode: hunt.registration_mode }],
       );
     }
-    const result = await establishMemberSession(client, session.hash, teamId, memberId);
+    const result = await establishMemberSession(client, session.hash, teamId, memberId, input.requestId);
     await client.query(
       `insert into hunt_v3.command_receipts(
         scope_key,request_id,operation,team_id,member_id,payload_hash,response)

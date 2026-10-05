@@ -33,6 +33,7 @@ function allocationDefinition(id: string): V3Definition {
       maxTeamSize: 4,
       registrationOpen: false,
       registrationMode: 'organizer-assigned',
+      integrityPolicy: { locationVerification: 'strict', selfServeApproval: 'organizer', rosterParticipation: 'freeze_at_run_start' },
       runPolicy: { mode: 'unlimited' },
       leaderboardPolicy: {
         bestRunRule: 'score_then_time_then_completion',

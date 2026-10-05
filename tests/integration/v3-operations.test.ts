@@ -37,6 +37,7 @@ test('PostgreSQL V3 operations: lifecycle revisions and public-board settings ro
       version: 1,
       title: 'Operations test',
       settings: {
+        integrityPolicy: { locationVerification: 'strict', selfServeApproval: 'organizer', rosterParticipation: 'freeze_at_run_start' },
         leaderboardPolicy: {
           bestRunRule: 'score_then_time_then_completion', mainBoardEnabled: true,
           replayBoardEnabled: true, replayBoardPublic: true,
@@ -296,7 +297,10 @@ test('PostgreSQL V3 analytics: only the exact score/time/completion key is an ex
   await getPool().query(
     `insert into hunt_v3.hunt_versions(hunt_id,version,definition,content_hash,validation_report,fairness_report)
       values($1,1,$2,$3,'{}',$4)`,
-    [huntId, { schemaVersion: 3 }, 'c'.repeat(64), { valid: true, issues: [], routes: [] }],
+    [huntId, {
+      schemaVersion: 3,
+      settings: { integrityPolicy: { locationVerification: 'strict', selfServeApproval: 'organizer', rosterParticipation: 'freeze_at_run_start' } },
+    }, 'c'.repeat(64), { valid: true, issues: [], routes: [] }],
   );
   await getPool().query('update hunt_v3.hunts set latest_version=1 where id=$1', [huntId]);
 
@@ -359,7 +363,10 @@ test('PostgreSQL V3 live operations: sampled route and challenge outliers create
   await getPool().query(
     `insert into hunt_v3.hunt_versions(hunt_id,version,definition,content_hash,validation_report,fairness_report)
       values($1,1,$2,$3,'{}',$4)`,
-    [huntId, { schemaVersion: 3 }, 'd'.repeat(64), { valid: true, issues: [], routes: [] }],
+    [huntId, {
+      schemaVersion: 3,
+      settings: { integrityPolicy: { locationVerification: 'strict', selfServeApproval: 'organizer', rosterParticipation: 'freeze_at_run_start' } },
+    }, 'd'.repeat(64), { valid: true, issues: [], routes: [] }],
   );
   await getPool().query('update hunt_v3.hunts set latest_version=1 where id=$1', [huntId]);
 

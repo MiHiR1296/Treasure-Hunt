@@ -39,6 +39,7 @@ function definition(id: string, registrationMode: V3Definition['settings']['regi
       completionMessage: 'Great run.',
       photoRetention: 'after_verification',
       registrationMode,
+      integrityPolicy: { locationVerification: 'strict', selfServeApproval: 'organizer', rosterParticipation: 'freeze_at_run_start' },
       runPolicy: { mode: 'unlimited' },
       leaderboardPolicy: {
         bestRunRule: 'score_then_time_then_completion',
@@ -153,7 +154,10 @@ async function insertHunt(value: V3Definition, status = 'live') {
 }
 
 async function approveTestTeam(teamId: string) {
-  await getPool().query("update hunt_v3.teams set approval_status='approved' where id=$1", [teamId]);
+  await getPool().query(
+    "update hunt_v3.teams set approval_status='approved',approval_method='organizer' where id=$1",
+    [teamId],
+  );
 }
 
 async function taskStartedAt(runId: string, checkpointId: string, nodeId: string) {
@@ -352,7 +356,7 @@ test('PostgreSQL V3 runtime: self-serve registration, isolated replays, idempote
 
   await assert.rejects(
     createRun(alice.summary.team.id, alice.summary.member.id, randomUUID(), true),
-    /practice is unavailable.*unlimited official attempts/i,
+    /every replay counts for this event/i,
     'an unlimited competition cannot use practice mode to scout outside official allocator accounting',
   );
   const replay = await createRun(alice.summary.team.id, alice.summary.member.id, randomUUID());
@@ -437,7 +441,7 @@ test('PostgreSQL V3 runs freeze their starting roster and admit late check-ins o
 
   await assert.rejects(
     currentRunView(captain.summary.team.id, late.summary.member.id, firstRun.runId),
-    /locked to its starting roster/i,
+    /already underway.*(?:aren't|not) part of this run/i,
   );
   await assert.rejects(
     applyRunCommand(
@@ -447,7 +451,7 @@ test('PostgreSQL V3 runs freeze their starting roster and admit late check-ins o
       randomUUID(),
       { type: 'continue', checkpointId: 'start', nodeId: 'parallel-gate' },
     ),
-    /locked to its starting roster/i,
+    /already underway.*(?:aren't|not) part of this run/i,
   );
   await assert.rejects(
     getPool().query(
@@ -481,7 +485,7 @@ test('PostgreSQL V3 runs freeze their starting roster and admit late check-ins o
   await finishRun(captain.summary.team.id, captain.summary.member.id, scout.summary.member.id, firstRun.runId);
   await assert.rejects(
     privateRecognition(captain.summary.team.id, late.summary.member.id, firstRun.runId),
-    /locked to its starting roster/i,
+    /contribution board belongs to the crew who played this run/i,
     'a late check-in cannot read the completed run contribution board',
   );
   const replay = await createRun(captain.summary.team.id, captain.summary.member.id, randomUUID());
@@ -598,7 +602,7 @@ test('PostgreSQL V3 runs: capped practice unlocks only after competition and reu
   await approveTestTeam(captain.summary.team.id);
   await assert.rejects(
     createRun(captain.summary.team.id, captain.summary.member.id, randomUUID(), true),
-    /official run before starting practice/i,
+    /finish your first adventure/i,
   );
 
   const started = await createRun(captain.summary.team.id, captain.summary.member.id, randomUUID());
@@ -609,7 +613,7 @@ test('PostgreSQL V3 runs: capped practice unlocks only after competition and reu
 
   await assert.rejects(
     createRun(captain.summary.team.id, captain.summary.member.id, randomUUID()),
-    /used all 1 official runs/i,
+    /finished all 1 scored attempts/i,
   );
   const expired = (await getPool().query(
     'select status,eligible,elapsed_ms from hunt_v3.runs where id=$1',
@@ -1035,7 +1039,7 @@ test('PostgreSQL V3 verifier attempts share one run/node budget across team memb
     applyRunCommand(captain.summary.team.id, lateMemberId, run.runId, randomUUID(), {
       type: 'verify', checkpointId: 'start', nodeId: 'answer', value: 'correct',
     }),
-    /starting roster/i,
+    /already underway.*(?:aren't|not) part of this run/i,
     'a member who joined after the run began cannot spend the starting roster\'s answer budget',
   );
   assert.equal(
@@ -2012,4 +2016,10 @@ test('PostgreSQL V3 terminal photo reviews finalize evidence without resurrectin
     'terminal review closes the provisional clock interval without changing gameplay state',
   );
   assert.equal((await pendingPhotoReviews(huntId)).some(photo => photo.id === mediaId), false);
+  await getPool().query('delete from hunt_v3.media where id=$1', [mediaId]);
+  assert.deepEqual(
+    await reviewPhoto(reviewInput),
+    result,
+    'the append-only receipt remains replayable after after-review retention removes the media row',
+  );
 });

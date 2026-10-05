@@ -14,6 +14,7 @@ import {
   planRunForFairnessRoute,
   publicParallelMechanics,
   renderVariableTemplate,
+  resolveIntegrityPolicy,
   resolveVariables,
   selectBalancedPlan,
   validateFairness,
@@ -62,6 +63,11 @@ function definition(): V3Definition {
       minTeamSize: 3,
       maxTeamSize: 4,
       registrationMode: 'rostered',
+      integrityPolicy: {
+        locationVerification: 'strict',
+        selfServeApproval: 'organizer',
+        rosterParticipation: 'freeze_at_run_start',
+      },
       runPolicy: { mode: 'unlimited' },
       leaderboardPolicy: {
         bestRunRule: 'score_then_time_then_completion', mainBoardEnabled: true,
@@ -119,6 +125,24 @@ function definition(): V3Definition {
 }
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value))
+
+test('integrity policy resolution fails closed field by field for legacy or malformed published data', () => {
+  assert.deepEqual(resolveIntegrityPolicy(undefined), {
+    locationVerification: 'strict',
+    selfServeApproval: 'organizer',
+    rosterParticipation: 'freeze_at_run_start',
+  })
+  assert.deepEqual(resolveIntegrityPolicy({
+    integrityPolicy: {
+      locationVerification: 'gps_photo',
+      selfServeApproval: 'not-a-mode',
+    },
+  }), {
+    locationVerification: 'gps_photo',
+    selfServeApproval: 'organizer',
+    rosterParticipation: 'freeze_at_run_start',
+  })
+})
 
 function scoreBoundaryDefinition(totalMagnitude: number, options: { excluded: boolean; negative: boolean }): V3Definition {
   const amounts: number[] = []
@@ -558,7 +582,7 @@ test('publication rejects hidden-duration branches, immediate fallbacks, and ske
   assert.ok(validateFairness(weighted).issues.some(issue => issue.code === 'unequal_variant_weights'))
 })
 
-test('shareable GPS and QR proofs require independent photo or organizer evidence', () => {
+test('GPS completion paths follow the selected location-verification policy while QR stays protected', () => {
   const gpsOnly = definition()
   gpsOnly.checkpoints.find(item => item.id === 'park')!.flow = {
     startNodeId: 'gps',
@@ -567,9 +591,11 @@ test('shareable GPS and QR proofs require independent photo or organizer evidenc
       { id: 'done', type: 'complete' },
     ],
   }
-  assert.ok(validateFairness(gpsOnly).issues.some(issue => issue.code === 'gps_requires_companion_evidence'))
+  gpsOnly.settings.integrityPolicy.locationVerification = 'gps_only'
+  assert.equal(validateFairness(gpsOnly).issues.some(issue => issue.code === 'gps_requires_companion_evidence'), false)
 
   const compound = clone(gpsOnly)
+  compound.settings.integrityPolicy.locationVerification = 'gps_photo'
   const compoundPark = compound.checkpoints.find(item => item.id === 'park')!
   compoundPark.flow = {
     startNodeId: 'gps',
@@ -581,7 +607,48 @@ test('shareable GPS and QR proofs require independent photo or organizer evidenc
   }
   assert.equal(validateFairness(compound).issues.some(issue => issue.code === 'gps_requires_companion_evidence'), false)
 
+  const missingPhoto = clone(gpsOnly)
+  missingPhoto.settings.integrityPolicy.locationVerification = 'gps_photo'
+  assert.ok(validateFairness(missingPhoto).issues.some(issue =>
+    issue.code === 'gps_requires_companion_evidence' && issue.message.includes('photo')))
+
+  const organizerOnly = clone(gpsOnly)
+  organizerOnly.settings.integrityPolicy.locationVerification = 'gps_organizer'
+  organizerOnly.checkpoints.find(item => item.id === 'park')!.flow = {
+    startNodeId: 'gps',
+    nodes: [
+      { id: 'gps', type: 'verify_gps', prompt: 'Arrive.', latitude: 19, longitude: 73, radiusMeters: 50, maxAccuracyMeters: 30, next: 'marshal' },
+      { id: 'marshal', type: 'verify_organizer', prompt: 'Meet the marshal.', next: 'done' },
+      { id: 'done', type: 'complete' },
+    ],
+  }
+  assert.equal(validateFairness(organizerOnly).issues.some(issue => issue.code === 'gps_requires_companion_evidence'), false)
+  assert.ok(validateFairness({
+    ...compound,
+    settings: {
+      ...compound.settings,
+      integrityPolicy: { ...compound.settings.integrityPolicy, locationVerification: 'gps_organizer' },
+    },
+  }).issues.some(issue => issue.code === 'gps_requires_companion_evidence'), 'photo alone cannot satisfy organizer mode')
+
+  const strict = clone(organizerOnly)
+  strict.settings.integrityPolicy.locationVerification = 'strict'
+  strict.checkpoints.find(item => item.id === 'park')!.flow = {
+    startNodeId: 'gps',
+    nodes: [
+      { id: 'gps', type: 'verify_gps', prompt: 'Arrive.', latitude: 19, longitude: 73, radiusMeters: 50, maxAccuracyMeters: 30, next: 'photo' },
+      { id: 'photo', type: 'verify_image', prompt: 'Show the current landmark.', referenceImages: [], next: 'marshal' },
+      { id: 'marshal', type: 'verify_organizer', prompt: 'Meet the marshal.', next: 'done' },
+      { id: 'done', type: 'complete' },
+    ],
+  }
+  assert.equal(validateFairness(strict).issues.some(issue => issue.code === 'gps_requires_companion_evidence'), false)
+  const strictWithoutOrganizer = clone(compound)
+  strictWithoutOrganizer.settings.integrityPolicy.locationVerification = 'strict'
+  assert.ok(validateFairness(strictWithoutOrganizer).issues.some(issue => issue.code === 'gps_requires_companion_evidence'))
+
   const qrOnly = definition()
+  qrOnly.settings.integrityPolicy.locationVerification = 'gps_only'
   qrOnly.checkpoints.find(item => item.id === 'park')!.flow = {
     startNodeId: 'qr',
     nodes: [
@@ -814,6 +881,60 @@ test('parallel static codes require a photo lane but run-scoped generated codes 
   })
   assert.ok(validateParallelMechanics(duplicateGate).some(issue =>
     issue.message.includes('Only one parallel mechanic')))
+})
+
+test('parallel GPS lanes follow location policy without weakening QR and static-code rules', () => {
+  const gpsParallel = definition()
+  gpsParallel.settings.integrityPolicy.locationVerification = 'gps_only'
+  gpsParallel.checkpoints.find(item => item.id === 'park')!.flow = {
+    startNodeId: 'gate',
+    nodes: [
+      { id: 'gate', type: 'verify_organizer', prompt: 'Finish both lanes.', next: 'done' },
+      { id: 'done', type: 'complete' },
+    ],
+  }
+  gpsParallel.settings.parallelMechanics = [{
+    id: 'park-split', checkpointId: 'park', nodeId: 'gate', timeWindowSeconds: 60,
+    lanes: [
+      { id: 'where', label: 'Reach the location', type: 'gps', location: { latitude: 19, longitude: 73, radiusMeters: 50, maxAccuracyMeters: 30 } },
+      { id: 'code', label: 'Enter the run code', type: 'code', code: '{{code}}' },
+    ],
+  }]
+  assert.deepEqual(validateParallelMechanics(gpsParallel), [])
+
+  const photoPolicy = clone(gpsParallel)
+  photoPolicy.settings.integrityPolicy.locationVerification = 'gps_photo'
+  assert.ok(validateParallelMechanics(photoPolicy).some(issue => issue.path.endsWith('.lanes') && issue.message.includes('photo')))
+  photoPolicy.settings.parallelMechanics![0].lanes.push({ id: 'proof', label: 'Fresh proof', type: 'photo' })
+  assert.deepEqual(validateParallelMechanics(photoPolicy), [])
+
+  const organizerPolicy = clone(gpsParallel)
+  organizerPolicy.settings.integrityPolicy.locationVerification = 'gps_organizer'
+  assert.deepEqual(validateParallelMechanics(organizerPolicy), [])
+  assert.ok(validateFairness(organizerPolicy).issues.some(issue =>
+    issue.code === 'gps_requires_companion_evidence' && issue.path.endsWith('.lanes')))
+  organizerPolicy.checkpoints.find(item => item.id === 'park')!.flow.nodes = [
+    { id: 'gate', type: 'verify_organizer', prompt: 'Finish both lanes.', next: 'marshal' },
+    { id: 'marshal', type: 'verify_organizer', prompt: 'Show the location to the marshal.', next: 'done' },
+    { id: 'done', type: 'complete' },
+  ]
+  assert.equal(validateFairness(organizerPolicy).issues.some(issue => issue.code === 'gps_requires_companion_evidence'), false)
+
+  const strict = clone(gpsParallel)
+  strict.settings.integrityPolicy.locationVerification = 'strict'
+  strict.settings.parallelMechanics![0].lanes.push({ id: 'proof', label: 'Fresh proof', type: 'photo' })
+  assert.deepEqual(validateParallelMechanics(strict), [])
+  assert.ok(validateFairness(strict).issues.some(issue => issue.code === 'gps_requires_companion_evidence'))
+  strict.checkpoints.find(item => item.id === 'park')!.flow.nodes = [
+    { id: 'gate', type: 'verify_organizer', prompt: 'Finish all lanes.', next: 'marshal' },
+    { id: 'marshal', type: 'verify_organizer', prompt: 'Show the location to the marshal.', next: 'done' },
+    { id: 'done', type: 'complete' },
+  ]
+  assert.equal(validateFairness(strict).issues.some(issue => issue.code === 'gps_requires_companion_evidence'), false)
+
+  const qrStillProtected = clone(gpsParallel)
+  qrStillProtected.settings.parallelMechanics![0].lanes[0] = { id: 'where', label: 'Scan the marker', type: 'qr', token: 'PRIVATE-QR' }
+  assert.ok(validateParallelMechanics(qrStillProtected).some(issue => issue.path.endsWith('.lanes') && issue.message.includes('QR')))
 })
 
 test('fairness rejects every automatic runtime branch with unequal score ceilings', () => {

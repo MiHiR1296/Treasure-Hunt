@@ -106,8 +106,8 @@ export default function Registration({ onRegistered }: { onRegistered: (summary:
       </label>
 
       {selected && <div className="rounded-2xl bg-emerald-50 p-4 text-sm leading-relaxed text-emerald-950">
-        {registrationMode === 'self-serve' && (selected.registrationOpen ? <><strong>Open team registration.</strong> Create a new crew or join one with its official team code. Once the organizer approves a crew, only its already-declared names may join.</> : <><strong>New team registration is closed.</strong> Existing declared crew members can still join with their official team code.</>)}
-        {registrationMode === 'organizer-assigned' && <><strong>Organizer-assigned teams.</strong> Use the team code and team PIN from your organizer, then choose your own private member PIN. Every teammate must join before the team starts its first run.</>}
+        {registrationMode === 'self-serve' && (selected.registrationOpen ? <><strong>Bring your crew.</strong> Create a new team or join friends with their team code.</> : <><strong>New team creation is closed.</strong> You can still join an existing crew with its team code.</>)}
+        {registrationMode === 'organizer-assigned' && <><strong>Your team is ready.</strong> Use the team code and team PIN from your organizer, then choose your own private member PIN.</>}
         {registrationMode === 'rostered' && <><strong>Rostered event.</strong> Claim your listed identity using the team code, team PIN, your personal claim PIN, and the same name the organizer entered.</>}
       </div>}
 
@@ -119,9 +119,9 @@ export default function Registration({ onRegistered }: { onRegistered: (summary:
       {intent === 'create' ? <>
         <label htmlFor="v3-team-name" className="block text-sm font-bold text-stone-800">Team nickname <span className="font-normal text-stone-500">(optional)</span>
           <input id="v3-team-name" name="teamName" maxLength={40} autoComplete="organization" disabled={busy} className={inputStyle} placeholder="Falcons" />
-          <span className="mt-2 block text-xs font-normal leading-relaxed text-stone-500">Keep it recognizable. Your official code stays the team’s permanent identity even if the organizer changes this nickname.</span>
+          <span className="mt-2 block text-xs font-normal leading-relaxed text-stone-500">Keep it recognizable. Your team code stays the same even if the organizer changes this nickname.</span>
         </label>
-      </> : <label htmlFor="v3-team-code" className="block text-sm font-bold text-stone-800">Official team code
+      </> : <label htmlFor="v3-team-code" className="block text-sm font-bold text-stone-800">Team code
         <input id="v3-team-code" name="teamCode" required maxLength={20} autoCapitalize="characters" autoComplete="off" disabled={busy} className={`${inputStyle} font-mono font-bold uppercase tracking-[0.12em]`} placeholder="T-014" />
       </label>}
 
@@ -131,7 +131,7 @@ export default function Registration({ onRegistered }: { onRegistered: (summary:
 
       {intent === 'create' && <label htmlFor="v3-other-members" className="block text-sm font-bold text-stone-800">Other crew members <span className="font-normal text-stone-500">(optional)</span>
         <textarea id="v3-other-members" name="otherMembers" rows={3} disabled={busy} className={inputStyle} placeholder="One name per line" />
-        <span className="mt-2 block text-xs font-normal text-stone-500">Declare every teammate now. Organizer approval locks this list; each person should later join on their own device so contributions are authenticated.</span>
+        <span className="mt-2 block text-xs font-normal text-stone-500">Add anyone already in your crew. Each person can join on their own device so their solves and discoveries appear with their name.</span>
       </label>}
 
       <label htmlFor="v3-pin" className="block text-sm font-bold text-stone-800">Team PIN

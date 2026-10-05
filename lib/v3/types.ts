@@ -9,6 +9,59 @@ import type {
 
 export type RegistrationMode = 'self-serve' | 'organizer-assigned' | 'rostered'
 
+export type LocationVerificationMode = 'gps_only' | 'gps_photo' | 'gps_organizer' | 'strict'
+export type SelfServeApprovalMode = 'automatic' | 'organizer'
+export type RosterParticipationMode = 'flexible' | 'freeze_at_run_start' | 'flexible_fixed_scoring'
+
+/**
+ * Organizer-selected integrity posture. These choices alter verification and
+ * participation policy, but never turn server authority or team-wide attempt
+ * budgets into per-member limits.
+ */
+export interface IntegrityPolicy {
+  locationVerification: LocationVerificationMode
+  selfServeApproval: SelfServeApprovalMode
+  rosterParticipation: RosterParticipationMode
+}
+
+/** Explicit product defaults for friendly, casual hunts and legacy draft imports. */
+export const CASUAL_INTEGRITY_POLICY: Readonly<IntegrityPolicy> = Object.freeze({
+  locationVerification: 'gps_only',
+  selfServeApproval: 'automatic',
+  rosterParticipation: 'flexible_fixed_scoring',
+})
+
+/** Fail-safe projection for incomplete settings; it does not make a published version playable. */
+export const HARDENED_LEGACY_INTEGRITY_POLICY: Readonly<IntegrityPolicy> = Object.freeze({
+  locationVerification: 'strict',
+  selfServeApproval: 'organizer',
+  rosterParticipation: 'freeze_at_run_start',
+})
+
+/**
+ * Read-only summaries use a hardened fallback so incomplete data never looks
+ * permissive. Run creation and the database cutover independently reject any
+ * published version without a complete explicit policy. Editable draft
+ * imports are upgraded to the casual defaults before validation and storage.
+ */
+export function resolveIntegrityPolicy(settings: { integrityPolicy?: unknown } | null | undefined): Readonly<IntegrityPolicy> {
+  const value = settings?.integrityPolicy
+  const policy = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Partial<Record<keyof IntegrityPolicy, unknown>>
+    : {}
+  return {
+    locationVerification: ['gps_only', 'gps_photo', 'gps_organizer', 'strict'].includes(String(policy.locationVerification))
+      ? policy.locationVerification as LocationVerificationMode
+      : HARDENED_LEGACY_INTEGRITY_POLICY.locationVerification,
+    selfServeApproval: ['automatic', 'organizer'].includes(String(policy.selfServeApproval))
+      ? policy.selfServeApproval as SelfServeApprovalMode
+      : HARDENED_LEGACY_INTEGRITY_POLICY.selfServeApproval,
+    rosterParticipation: ['flexible', 'freeze_at_run_start', 'flexible_fixed_scoring'].includes(String(policy.rosterParticipation))
+      ? policy.rosterParticipation as RosterParticipationMode
+      : HARDENED_LEGACY_INTEGRITY_POLICY.rosterParticipation,
+  }
+}
+
 export interface RunPolicy {
   mode: 'disabled' | 'capped' | 'unlimited' | 'practice-only'
   /** Required when mode is capped. The first run counts toward this limit. */
@@ -148,6 +201,7 @@ export type RuntimeCompatibleSettings = Pick<HuntSettings,
 
 export interface V3Settings extends RuntimeCompatibleSettings {
   registrationMode: RegistrationMode
+  integrityPolicy: IntegrityPolicy
   runPolicy: RunPolicy
   leaderboardPolicy: LeaderboardPolicy
   publicBoard: PublicBoardSettings

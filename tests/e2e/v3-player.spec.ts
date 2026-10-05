@@ -36,6 +36,11 @@ const definition: V3Definition = {
     completionMessage: 'Great run. Celebrate the crew, then try to beat your best.',
     photoRetention: 'after_verification',
     registrationMode: 'self-serve',
+    integrityPolicy: {
+      locationVerification: 'gps_only',
+      selfServeApproval: 'organizer',
+      rosterParticipation: 'flexible_fixed_scoring',
+    },
     runPolicy: { mode: 'unlimited' },
     leaderboardPolicy: {
       bestRunRule: 'score_then_time_then_completion',
@@ -258,8 +263,8 @@ test('mobile crew registers, replays, celebrates, shares, and stays private on t
   await page.getByRole('button', { name: 'Create crew', exact: true }).click();
 
   await expect(page.getByRole('heading', { name: new RegExp(`^T-\\d{3,} · ${teamName}$`) })).toBeVisible();
-  await expect(page.getByText('Awaiting organizer approval', { exact: true })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Your team is waiting for approval.', exact: true })).toBeVisible();
+  await expect(page.getByText('Organizer check-in', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Almost ready to play.', exact: true })).toBeVisible();
   await expect(page.getByText(/^(?:Alice, Bob|Bob, Alice)$/)).toBeVisible();
   await expect(page.getByText('1/2 checked in', { exact: true })).toBeVisible();
   const sessionResponse = await page.request.get('/api/v3/session');
@@ -273,7 +278,7 @@ test('mobile crew registers, replays, celebrates, shares, and stays private on t
   try {
     await teammate.goto(`/v3?hunt=${huntId}`);
     await teammate.getByRole('button', { name: 'Join a team', exact: true }).click();
-    await teammate.getByLabel('Official team code').fill(teamCode);
+    await teammate.getByLabel('Team code').fill(teamCode);
     await teammate.getByLabel('Your name', { exact: true }).fill('Bob');
     await teammate.locator('#v3-pin').fill('246824');
     await teammate.locator('#v3-member-pin').fill('222222');
@@ -292,14 +297,20 @@ test('mobile crew registers, replays, celebrates, shares, and stays private on t
     await approvalPage.getByLabel('Organizer password').fill('browser-test-password-only');
     await approvalPage.getByRole('button', { name: 'Open command centre', exact: true }).click();
     await approvalPage.getByLabel('Event').selectOption(huntId);
-    await expect(approvalPage.getByText(/self-serve registration proves a team PIN, not one human per team/i)).toBeVisible();
+    await expect(approvalPage.getByText(/self-serve keeps casual events quick/i)).toBeVisible();
+    approvalPage.once('dialog', dialog => dialog.accept());
+    await approvalPage.getByRole('button', { name: 'Close new crews', exact: true }).click();
+    await expect(approvalPage.getByRole('button', { name: 'Open new crews', exact: true })).toBeVisible();
+    await approvalPage.getByRole('button', { name: 'Open new crews', exact: true }).click();
+    await expect(approvalPage.getByRole('button', { name: 'Close new crews', exact: true })).toBeVisible();
     const teamRow = approvalPage.getByRole('row').filter({ hasText: teamCode });
-    await expect(teamRow.getByText('Approval pending', { exact: true })).toBeVisible();
-    await teamRow.getByRole('button', { name: 'Approve', exact: true }).click();
-    await expect(approvalPage.getByRole('heading', { name: 'Approve this team?', exact: true })).toBeVisible();
-    await approvalPage.getByLabel('Required audit reason').fill('Roster and identity confirmed in the mobile journey');
-    await approvalPage.getByRole('button', { name: 'Approve team', exact: true }).click();
-    await expect(approvalPage.getByText(`${teamCode} approved for competition.`, { exact: true })).toBeVisible();
+    await expect(teamRow.getByText('Check-in pending', { exact: true })).toBeVisible();
+    await teamRow.getByRole('button', { name: 'Give go-ahead', exact: true }).click();
+    const approvalDialog = approvalPage.getByRole('dialog', { name: 'Give this crew the go-ahead?' });
+    await expect(approvalDialog).toBeVisible();
+    await approvalDialog.getByLabel('Required audit reason').fill('Roster and identity confirmed in the mobile journey');
+    await approvalDialog.getByRole('button', { name: 'Give go-ahead', exact: true }).click();
+    await expect(approvalPage.getByText(`${teamCode} checked by the organizer.`, { exact: true })).toBeVisible();
   } finally {
     await approvalContext.close();
   }
@@ -332,8 +343,11 @@ test('mobile crew registers, replays, celebrates, shares, and stays private on t
 
   await completeShortRun(page, 1);
 
-  await expect(page.getByRole('heading', { name: 'Want to beat your best?', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Start another run', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Think you can beat it?', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Try again', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Replay board', exact: true }).click();
+  await expect(page.getByText('Your next scored run reveals more.', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Main scoreboard', exact: true }).click();
   const crewBoard = page.getByRole('region', { name: 'Crew Contribution Board' });
   await expect(crewBoard).toBeVisible();
   await expect(crewBoard.getByRole('button', { name: 'Alice', exact: true })).toHaveCount(0);
@@ -366,7 +380,7 @@ test('mobile crew registers, replays, celebrates, shares, and stays private on t
   expect(copiedCaption).toContain('#MobileReplay');
   expect(copiedCaption).toContain(`${origin}/board/${boardSlug}`);
 
-  await page.getByRole('button', { name: 'Start another run', exact: true }).click();
+  await page.getByRole('button', { name: 'Try again', exact: true }).click();
   await completeShortRun(page, 2);
   await page.getByRole('button', { name: 'Replay board', exact: true }).click();
   await expect(page.getByText('Replay board locked.', { exact: true })).toHaveCount(0);
@@ -422,6 +436,14 @@ test('mobile crew registers, replays, celebrates, shares, and stays private on t
       await expect(adminPage.getByText(new RegExp(teamName)).first()).toBeVisible();
       await adminPage.locator('nextjs-portal').evaluateAll(elements => elements.forEach(element => element.remove()));
       await adminPage.screenshot({ path: resolve(screenshotDirectory, 'v3-organizer-live-console.png'), fullPage: true });
+      await adminPage.getByRole('button', { name: 'Authoring', exact: true }).click();
+      const starterResponse = await adminContext.request.get('/authoring/treasure-hunt-v3.starter.json');
+      const starterText = await starterResponse.text();
+      expect(starterResponse.ok(), starterText).toBeTruthy();
+      await adminPage.getByLabel('V3 JSON').fill(starterText);
+      const playStyle = adminPage.getByRole('region', { name: 'How should this hunt work?' });
+      await expect(playStyle).toBeVisible();
+      await playStyle.screenshot({ path: resolve(screenshotDirectory, 'v3-organizer-play-style.png') });
     } finally {
       await adminContext.close();
     }

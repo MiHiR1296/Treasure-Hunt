@@ -49,6 +49,8 @@ export interface TeamSessionSummary {
   member: { id: string; name: string };
   members: Array<{ id: string; name: string; checkedIn: boolean }>;
   activeRun: SessionRunSummary | null;
+  /** This member joined after a frozen run began and can enter the team's next run. */
+  waitingForNextRun: boolean;
   latestRun: SessionRunSummary | null;
   bestRun: SessionRunSummary | null;
   completedOfficialRuns: number;

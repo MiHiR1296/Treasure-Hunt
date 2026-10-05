@@ -1,3 +1,5 @@
+import type { IntegrityPolicy } from '@/lib/v3/types';
+
 export type HuntStatus = 'ready' | 'live' | 'paused' | 'ended' | 'archived';
 
 export interface ValidationIssue {
@@ -12,6 +14,7 @@ export interface AdminHunt {
   status: HuntStatus | string;
   registrationMode?: string;
   registrationOpen?: boolean;
+  integrityPolicy?: IntegrityPolicy;
   version?: number;
   lifecycleRevision?: number;
 }
@@ -51,6 +54,7 @@ export interface LiveTeam {
   displayName: string | null;
   status: 'active' | 'disabled' | 'disqualified' | 'archived' | string;
   approvalStatus: 'pending' | 'approved';
+  approvalMethod?: 'automatic' | 'organizer' | null;
   competitionRevision: number;
   memberNames: string[];
   memberCount: number;

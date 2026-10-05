@@ -9,7 +9,7 @@ import { getPool, transaction } from '../db';
 import { prepareImage } from '../media';
 import { mediaBackend, readMediaBytes, removeMediaBytes, writeMediaBytes } from '../media-storage.mjs';
 import { canonicalJson, digest, HttpError } from '../security';
-import { materializeRunDefinition, materializeRunParallelMechanics } from './runtime';
+import { assertPublishedIntegrityPolicy, materializeRunDefinition, materializeRunParallelMechanics } from './runtime';
 import { authenticateV3, rateLimitV3, V3_ADMIN_COOKIE, V3_TEAM_COOKIE } from './security';
 
 const uuid = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value);
@@ -92,6 +92,7 @@ export async function activePhotoTask(
       ? 'This upload was prepared for a previous run. Choose the file again.'
       : 'Start or resume a run before uploading a photo.');
   }
+  assertPublishedIntegrityPolicy(row.definition.settings);
   const definition = materializeRunDefinition(row.definition, row.route_plan);
   const clock = playability(definition, row.engine_state, row.hunt_status, new Date(row.now).toISOString());
   if (!clock.allowed) throw new HttpError(409, clock.message || 'This hunt is not open for play.');
@@ -341,6 +342,7 @@ export async function authorizeV3Media(request: NextRequest, id: string) {
           [session.teamId, session.memberId],
         )).rows[0] as ({ engine_state: GameState; route_plan: ResolvedRunPlan; definition: V3Definition; hunt_status: string; now: string } | undefined);
         if (row) {
+          assertPublishedIntegrityPolicy(row.definition.settings);
           const definition = materializeRunDefinition(row.definition, row.route_plan);
           const view = getPlayerView(definition, row.engine_state, new Date(row.now).toISOString());
           const clock = playability(definition, row.engine_state, row.hunt_status, new Date(row.now).toISOString());

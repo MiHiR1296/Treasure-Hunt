@@ -80,6 +80,7 @@
       "additionalProperties": false,
       "required": [
         "registrationMode",
+        "integrityPolicy",
         "runPolicy",
         "leaderboardPolicy",
         "publicBoard",
@@ -103,6 +104,7 @@
         "completionMessage": { "$ref": "#/definitions/longText" },
         "photoRetention": { "enum": ["after_verification", "after_event", "retain"] },
         "registrationMode": { "enum": ["self-serve", "organizer-assigned", "rostered"] },
+        "integrityPolicy": { "$ref": "#/definitions/integrityPolicy" },
         "runPolicy": { "$ref": "#/definitions/runPolicy" },
         "leaderboardPolicy": { "$ref": "#/definitions/leaderboardPolicy" },
         "publicBoard": { "$ref": "#/definitions/publicBoard" },
@@ -127,6 +129,17 @@
           "additionalProperties": { "$ref": "#/definitions/variableGenerator" }
         },
         "fairnessPolicy": { "$ref": "#/definitions/fairnessPolicy" }
+      }
+    },
+    "integrityPolicy": {
+      "description": "Organizer-selected balance between casual access and competition integrity. Attempt budgets remain team-wide in every mode.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["locationVerification", "selfServeApproval", "rosterParticipation"],
+      "properties": {
+        "locationVerification": { "enum": ["gps_only", "gps_photo", "gps_organizer", "strict"] },
+        "selfServeApproval": { "enum": ["automatic", "organizer"] },
+        "rosterParticipation": { "enum": ["flexible", "freeze_at_run_start", "flexible_fixed_scoring"] }
       }
     },
     "runPolicy": {

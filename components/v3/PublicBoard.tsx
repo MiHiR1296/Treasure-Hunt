@@ -100,7 +100,7 @@ export default function PublicBoard({ slug }: { slug: string }) {
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2"><span className={`rounded-full px-3 py-1 text-xs font-black uppercase tracking-[0.16em] ${board.status === 'live' ? 'bg-emerald-300 text-emerald-950' : board.status === 'final' ? 'bg-amber-300 text-amber-950' : 'bg-violet-300 text-violet-950'}`}>{board.status}</span>{board.frozen && <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-bold text-white">Snapshot</span>}</div>
             <h1 className="mt-4 text-4xl font-black leading-tight tracking-tight sm:text-6xl">{board.title}</h1>
-            <p className="mt-3 text-sm text-emerald-100/70">{board.status === 'final' ? 'One best completed eligible run per team' : 'Official best when completed · live progress until then'} · score first, time breaks official ties</p>
+            <p className="mt-3 text-sm text-emerald-100/70">{board.status === 'final' ? 'One best completed run per team' : 'Best completed result · live progress while crews play'} · score first, time settles ties</p>
           </div>
           <div className="text-left text-xs text-emerald-100/60 sm:text-right"><p>{stale ? 'Connection interrupted · showing last standings' : board.status === 'live' ? 'Updates every 5 seconds while this screen is visible' : 'Organizer-controlled event result'}</p><p className="mt-1 tabular-nums">Updated {new Date(board.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</p></div>
         </header>

@@ -4,13 +4,13 @@ import { executeControl } from '../../engine';
 import type { PuzzleDefinition } from '../../engine/puzzles';
 import type { GameState, InteractiveNode, ScoreEntry } from '../../engine/types';
 import { discardReviewClockPause, elapsedMilliseconds, endReviewClockPause, pauseRunClock, resumeRunClock } from '../../engine/session';
-import type { ResolvedRunPlan, V3Definition } from '../../v3/types';
+import { resolveIntegrityPolicy, type ResolvedRunPlan, type V3Definition } from '../../v3/types';
 import { getPool, transaction } from '../db';
 import { canonicalJson, digest, hashPin, HttpError, verifyPin } from '../security';
 import { formatTeamCode, normalizedKey, validateMemberName, validateOptionalTeamName } from './names';
 import { publicLeaderboard } from './leaderboards';
 import { lockV3Hunt, lockV3Team } from './locking';
-import { materializeRunDefinition, materializeRunParallelMechanics } from './runtime';
+import { assertPublishedIntegrityPolicy, materializeRunDefinition, materializeRunParallelMechanics } from './runtime';
 import { recalculateRecognition } from './recognition';
 import { stateProgress, terminalizeExpiredV3Runs, updateLiveRollup } from './runs';
 import { isV3Uuid } from './security';
@@ -143,7 +143,7 @@ async function observedFairnessGroups(huntId: string): Promise<ObservedFairnessG
 
 export async function liveOperations(huntId?: string, search = '') {
   const { rows: hunts } = await getPool().query(
-    `select h.id,h.title,h.slug,h.status,h.registration_mode,h.registration_open,h.latest_version,h.lifecycle_revision,
+    `select h.id,h.title,h.slug,h.status,h.registration_mode,h.registration_open,h.latest_version,h.lifecycle_revision,h.settings,
       b.enabled as public_board_enabled,b.slug as public_board_slug,b.title as public_board_title,
       b.cover_ref as public_board_cover_ref,b.event_status as public_board_status,
       b.visible_columns as public_board_columns,b.main_board_visible as public_board_main_visible,
@@ -158,7 +158,8 @@ export async function liveOperations(huntId?: string, search = '') {
   const term = search.normalize('NFKC').trim().slice(0, 100);
   const measuredAt = new Date((await getPool().query('select clock_timestamp() as at')).rows[0].at).toISOString();
   const { rows: teams } = await getPool().query(
-    `select t.id,t.canonical_code,t.display_name,t.name_status,t.status,t.approval_status,t.competition_revision,t.created_at,
+    `select t.id,t.canonical_code,t.display_name,t.name_status,t.status,t.approval_status,t.approval_method,
+      t.registration_source,t.competition_revision,t.created_at,
       coalesce(m.members,'[]'::jsonb) as members,coalesce(m.member_count,0) as member_count,
       coalesce(m.checked_in_count,0) as checked_in_count,
       live.active_run_id,live.best_run_id,live.run_number,live.run_count,live.current_checkpoint_id,
@@ -270,6 +271,7 @@ export async function liveOperations(huntId?: string, search = '') {
     showTeamNames: hunt.public_board_team_name_mode === 'display_name',
   } : null;
   const selectedHunt = hunts.find(hunt => hunt.id === selected)!;
+  const selectedIntegrityPolicy = resolveIntegrityPolicy(selectedHunt.settings);
   return {
     measuredAt,
     hunts: hunts.map(hunt => ({
@@ -279,6 +281,7 @@ export async function liveOperations(huntId?: string, search = '') {
       status: hunt.status,
       registrationMode: String(hunt.registration_mode).replaceAll('_', '-'),
       registrationOpen: hunt.registration_open,
+      integrityPolicy: resolveIntegrityPolicy(hunt.settings),
       version: hunt.latest_version,
       lifecycleRevision: hunt.lifecycle_revision,
       publicBoard: publicBoard(hunt),
@@ -292,7 +295,13 @@ export async function liveOperations(huntId?: string, search = '') {
       label: team.display_name ? `${team.canonical_code} · ${team.display_name}` : team.canonical_code,
       nameStatus: team.name_status,
       status: team.status,
-      approvalStatus: team.approval_status,
+      approvalStatus: team.registration_source === 'self_serve' &&
+        selectedIntegrityPolicy.selfServeApproval === 'organizer' && team.approval_method !== 'organizer'
+        ? 'pending'
+        : selectedIntegrityPolicy.selfServeApproval === 'automatic' && team.registration_source === 'self_serve'
+          ? 'approved'
+          : team.approval_status,
+      approvalMethod: team.approval_method,
       competitionRevision: Number(team.competition_revision),
       members: team.members,
       memberCount: team.member_count,
@@ -591,10 +600,13 @@ export async function createOrganizerTeam(input: {
   )).rows[0];
   if (existingReceipt) return replay(existingReceipt);
   const initialHunt = (await getPool().query(
-    'select registration_mode,registration_open,settings from hunt_v3.hunts where id=$1',
+    'select status,registration_mode,registration_open,settings from hunt_v3.hunts where id=$1',
     [input.huntId],
   )).rows[0];
   if (!initialHunt) throw new HttpError(404, 'Hunt not found.');
+  if (!['ready', 'live', 'paused'].includes(initialHunt.status)) {
+    throw new HttpError(409, 'Team creation is unavailable after this event has ended.');
+  }
   if (!initialHunt.registration_open) throw new HttpError(409, 'Team creation is closed for this event.');
   if (initialHunt.registration_mode === 'self_serve') throw new HttpError(409, 'Use player self-registration for this hunt, or change its registration mode first.');
   if (initialHunt.registration_mode === 'rostered' && names.length === 0) {
@@ -613,6 +625,9 @@ export async function createOrganizerTeam(input: {
   const result = await transaction(async client => {
     const hunt = (await client.query('select * from hunt_v3.hunts where id=$1 for update', [input.huntId])).rows[0];
     if (!hunt) throw new HttpError(404, 'Hunt not found.');
+    if (!['ready', 'live', 'paused'].includes(hunt.status)) {
+      throw new HttpError(409, 'Team creation is unavailable after this event has ended.');
+    }
     if (!hunt.registration_open) throw new HttpError(409, 'Team creation is closed for this event.');
     if (hunt.registration_mode === 'self_serve') throw new HttpError(409, 'Use player self-registration for this hunt, or change its registration mode first.');
     if (hunt.registration_mode !== initialHunt.registration_mode) throw new HttpError(409, 'Registration mode changed. Refresh and try again.');
@@ -629,8 +644,8 @@ export async function createOrganizerTeam(input: {
     if (receipt) return replay(receipt, client);
     const teamId = randomUUID(), code = formatTeamCode(hunt.next_team_number);
     await client.query(
-      `insert into hunt_v3.teams(id,hunt_id,canonical_code,display_name,name_key,name_status,pin_hash,registration_source)
-        values($1,$2,$3,$4,$5,$6,$7,$8)`,
+      `insert into hunt_v3.teams(id,hunt_id,canonical_code,display_name,name_key,name_status,pin_hash,registration_source,approval_method)
+        values($1,$2,$3,$4,$5,$6,$7,$8,'organizer')`,
       [teamId, input.huntId, code, displayName, displayName ? normalizedKey(displayName) : null,
         displayName ? 'approved' : 'code_only', teamPinHash, hunt.registration_mode === 'rostered' ? 'roster_import' : 'organizer_assigned'],
     );
@@ -715,7 +730,7 @@ export async function changeTeamCompetitionStatus(input: {
       throw new HttpError(404, 'Hunt not found.');
     }
     const team = (await client.query(
-      `select id,hunt_id,canonical_code,status,approval_status,competition_revision
+      `select id,hunt_id,canonical_code,status,approval_status,approval_method,competition_revision
         from hunt_v3.teams where id=$1 and hunt_id=$2 for update`,
       [input.teamId, input.huntId],
     )).rows[0];
@@ -728,10 +743,14 @@ export async function changeTeamCompetitionStatus(input: {
 
     let nextStatus = String(team.status);
     let nextApprovalStatus = String(team.approval_status);
+    let nextApprovalMethod = team.approval_method as string | null;
     if (input.action === 'approve') {
       if (team.status !== 'active') throw new HttpError(409, 'Restore this team before approving it.');
-      if (team.approval_status !== 'pending') throw new HttpError(409, 'This team is already approved.');
+      if (team.approval_status === 'approved' && team.approval_method === 'organizer') {
+        throw new HttpError(409, 'This team is already approved.');
+      }
       nextApprovalStatus = 'approved';
+      nextApprovalMethod = 'organizer';
     } else if (input.action === 'disqualify') {
       if (team.status !== 'active') throw new HttpError(409, 'Only an active team can be disqualified.');
       nextStatus = 'disqualified';
@@ -747,10 +766,10 @@ export async function changeTeamCompetitionStatus(input: {
       )).rows[0].count)
       : 0;
     const updated = (await client.query(
-      `update hunt_v3.teams set status=$1,approval_status=$2,
-        competition_revision=competition_revision+1 where id=$3
-        returning status,approval_status,competition_revision`,
-      [nextStatus, nextApprovalStatus, input.teamId],
+      `update hunt_v3.teams set status=$1,approval_status=$2,approval_method=$3,
+        competition_revision=competition_revision+1 where id=$4
+        returning status,approval_status,approval_method,competition_revision`,
+      [nextStatus, nextApprovalStatus, nextApprovalMethod, input.teamId],
     )).rows[0];
 
     let invalidatedRuns = 0;
@@ -819,6 +838,7 @@ export async function changeTeamCompetitionStatus(input: {
       teamId: input.teamId,
       status: updated.status,
       approvalStatus: updated.approval_status,
+      approvalMethod: updated.approval_method,
       competitionRevision: Number(updated.competition_revision),
       invalidatedRuns,
       newlyInvalidatedOfficialRuns,
@@ -832,8 +852,8 @@ export async function changeTeamCompetitionStatus(input: {
         values($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
       [`team_${input.action === 'approve' ? 'approved' : input.action === 'disqualify' ? 'disqualified' : 'restored'}`,
         input.actor, input.sessionHash, input.huntId, input.teamId, reason,
-        { status: team.status, approvalStatus: team.approval_status, competitionRevision: Number(team.competition_revision) },
-        { status: response.status, approvalStatus: response.approvalStatus, competitionRevision: response.competitionRevision },
+        { status: team.status, approvalStatus: team.approval_status, approvalMethod: team.approval_method, competitionRevision: Number(team.competition_revision) },
+        { status: response.status, approvalStatus: response.approvalStatus, approvalMethod: response.approvalMethod, competitionRevision: response.competitionRevision },
         { invalidatedRuns, newlyInvalidatedOfficialRuns, replacementOfficialRunsAvailable, officialReplacementBlockedByPractice, revokedSessions: openSessions }],
     );
     await client.query(
@@ -981,6 +1001,7 @@ export async function controlRunGameplay(input: {
       approval_status: string;
     } | undefined);
     if (!run) throw new HttpError(404, 'Run not found for this team and hunt.');
+    assertPublishedIntegrityPolicy(run.definition.settings);
 
     const receipt = (await client.query(
       `select operation,payload_hash,response from hunt_v3.command_receipts
@@ -1189,6 +1210,87 @@ export async function renameTeam(teamId: string, displayName: string | null, rea
   });
 }
 
+export async function setRegistrationOpen(input: {
+  huntId: string;
+  open: boolean;
+  expectedRevision: number;
+  requestId: string;
+  actor: string;
+  sessionHash: string;
+}) {
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/.test(input.huntId) || !isV3Uuid(input.requestId)) {
+    throw new HttpError(400, 'Choose a valid hunt and request.');
+  }
+  if (typeof input.open !== 'boolean' || !Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 1) {
+    throw new HttpError(400, 'Use the current event revision when changing registration.');
+  }
+  if (!/^[0-9a-f]{64}$/i.test(input.sessionHash)) throw new HttpError(401, 'Organizer session is required.');
+  const actor = input.actor.normalize('NFKC').trim().slice(0, 120);
+  if (!actor) throw new HttpError(401, 'Organizer identity is required.');
+  const scopeKey = `admin:hunt-registration:${input.huntId}`;
+  const payloadHash = digest(canonicalJson({
+    operation: 'set_registration_open',
+    huntId: input.huntId,
+    open: input.open,
+    expectedRevision: input.expectedRevision,
+  }));
+
+  return transaction(async client => {
+    const replayReceipt = async () => {
+      const receipt = (await client.query(
+        `select operation,payload_hash,response from hunt_v3.command_receipts
+          where scope_key=$1 and request_id=$2`,
+        [scopeKey, input.requestId],
+      )).rows[0];
+      if (!receipt) return null;
+      if (receipt.operation !== 'set_registration_open' || receipt.payload_hash !== payloadHash) {
+        throw new HttpError(409, 'This request ID was already used with different registration controls.');
+      }
+      return { ...receipt.response, replayed: true } as Record<string, unknown>;
+    };
+    const replay = await replayReceipt();
+    if (replay) return replay;
+    const hunt = (await client.query(
+      `select status,registration_open,lifecycle_revision from hunt_v3.hunts
+        where id=$1 for update`,
+      [input.huntId],
+    )).rows[0];
+    if (!hunt) throw new HttpError(404, 'Hunt not found.');
+    const concurrentReplay = await replayReceipt();
+    if (concurrentReplay) return concurrentReplay;
+    if (!['ready', 'live', 'paused'].includes(hunt.status)) {
+      throw new HttpError(409, 'Registration cannot change after this event has ended.');
+    }
+    if (Number(hunt.lifecycle_revision) !== input.expectedRevision) {
+      throw new HttpError(409, 'This hunt changed. Refresh before updating registration.');
+    }
+    const changed = Boolean(hunt.registration_open) !== input.open;
+    const lifecycleRevision = changed
+      ? Number((await client.query(
+        `update hunt_v3.hunts set registration_open=$1,lifecycle_revision=lifecycle_revision+1
+          where id=$2 returning lifecycle_revision`,
+        [input.open, input.huntId],
+      )).rows[0].lifecycle_revision)
+      : Number(hunt.lifecycle_revision);
+    const response = { ok: true, registrationOpen: input.open, lifecycleRevision, changed };
+    await client.query(
+      `insert into hunt_v3.admin_events(
+        action,actor,session_token_hash,hunt_id,before_state,after_state,details)
+        values('registration_availability_changed',$1,$2,$3,$4,$5,$6)`,
+      [actor, input.sessionHash, input.huntId,
+        { registrationOpen: Boolean(hunt.registration_open), lifecycleRevision: Number(hunt.lifecycle_revision) },
+        { registrationOpen: input.open, lifecycleRevision },
+        { changed }],
+    );
+    await client.query(
+      `insert into hunt_v3.command_receipts(scope_key,request_id,operation,payload_hash,response)
+        values($1,$2,'set_registration_open',$3,$4)`,
+      [scopeKey, input.requestId, payloadHash, response],
+    );
+    return { ...response, replayed: false };
+  });
+}
+
 export async function setHuntLifecycle(huntId: string, status: string, expectedRevision: number, actor: string) {
   const transitions: Record<string, string[]> = { ready: ['live', 'archived'], live: ['paused', 'ended'], paused: ['live', 'ended'], ended: [], archived: [] };
   if (!Object.hasOwn(transitions, status)) throw new HttpError(400, 'Choose a supported hunt status.');
@@ -1267,7 +1369,6 @@ export async function setHuntLifecycle(huntId: string, status: string, expectedR
       }
       await client.query(
         `update hunt_v3.hunts set status=$1,
-          registration_open=case when status='ready' and $1='live' then false else registration_open end,
           lifecycle_revision=lifecycle_revision+1 where id=$2`,
         [status, huntId],
       );
@@ -1277,7 +1378,7 @@ export async function setHuntLifecycle(huntId: string, status: string, expectedR
         values('hunt_status_changed',$1,$2,$3,$4)`,
       [actor, huntId, { status: hunt.status, registrationOpen: hunt.registration_open }, {
         status,
-        registrationOpen: hunt.status === 'ready' && status === 'live' ? false : hunt.registration_open,
+        registrationOpen: hunt.registration_open,
       }],
     );
     return { ok: true };
@@ -1554,11 +1655,26 @@ export async function reviewPhoto(input: { mediaId: string; approved: boolean; r
   const scopeKey = `admin:photo:${input.mediaId}`;
   const payloadHash = digest(canonicalJson({ approved: input.approved, reason: input.reason.trim() }));
   return transaction(async client => {
-    const receipt = (await client.query('select payload_hash,response from hunt_v3.command_receipts where scope_key=$1 and request_id=$2', [scopeKey, input.requestId])).rows[0];
-    if (receipt) {
+    const replayReceipt = async () => {
+      const receipt = (await client.query(
+        `select receipt.payload_hash,receipt.response,receipt.run_id,version.definition
+          from hunt_v3.command_receipts receipt
+          left join hunt_v3.runs run on run.id=receipt.run_id
+          left join hunt_v3.hunt_versions version
+            on version.hunt_id=run.hunt_id and version.version=run.hunt_version
+          where receipt.scope_key=$1 and receipt.request_id=$2`,
+        [scopeKey, input.requestId],
+      )).rows[0];
+      if (!receipt) return null;
       if (receipt.payload_hash !== payloadHash) throw new HttpError(409, 'This review request ID was already used.');
+      if (!receipt.run_id || !receipt.definition) {
+        throw new HttpError(409, 'This review receipt no longer has its original run history. Ask the organizer for help.');
+      }
+      assertPublishedIntegrityPolicy((receipt.definition as V3Definition).settings);
       return receipt.response;
-    }
+    };
+    const replay = await replayReceipt();
+    if (replay) return replay;
     const identity = (await client.query('select hunt_id,team_id,run_id from hunt_v3.media where id=$1', [input.mediaId])).rows[0];
     if (!identity) throw new HttpError(404, 'Photo not found.');
     if (!await lockV3Hunt(client, identity.hunt_id)) throw new HttpError(404, 'Hunt not found.');
@@ -1570,7 +1686,11 @@ export async function reviewPhoto(input: { mediaId: string; approved: boolean; r
       [identity.run_id, identity.team_id, identity.hunt_id],
     )).rows[0] as ({ id: string; team_id: string; hunt_id: string; status: string; engine_state: GameState; route_plan: ResolvedRunPlan; definition: V3Definition } | undefined);
     if (!run) throw new HttpError(404, 'Run not found.');
+    assertPublishedIntegrityPolicy(run.definition.settings);
+    const concurrentReplay = await replayReceipt();
+    if (concurrentReplay) return concurrentReplay;
     const media = (await client.query('select * from hunt_v3.media where id=$1 for update', [input.mediaId])).rows[0];
+    if (!media) throw new HttpError(404, 'Photo not found.');
     if (media.review_status !== 'pending') throw new HttpError(409, 'This photo was already reviewed.');
     if (!media.submitted_at) throw new HttpError(409, 'This photo has not been submitted for organizer review.');
     if (run.status !== 'active') {
@@ -1753,7 +1873,9 @@ export async function reviewPhoto(input: { mediaId: string; approved: boolean; r
     );
     if (input.approved) await client.query(
       `insert into hunt_v3.run_contributions(run_id,team_id,member_id,source_event_id,source_key,category,credit,evidence,created_at)
-        values($1,$2,$3,$4,$5,'eagle_eye',2,$6,$7)`,
+        select $1,$2,$3,$4,$5,'eagle_eye',2,$6,$7
+        from hunt_v3.run_members participant
+        where participant.run_id=$1 and participant.member_id=$3 and participant.contribution_eligible`,
       [run.id, run.team_id, media.member_id, sourceEventId, `photo-approved:${media.id}`, { summary: 'Submitted approved photo evidence', mediaId: media.id }, now],
     );
     await client.query(

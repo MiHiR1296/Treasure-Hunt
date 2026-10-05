@@ -37,6 +37,7 @@ function photoDefinition(id: string): V3Definition {
       completionMessage: 'Complete.',
       photoRetention: 'after_verification',
       registrationMode: 'organizer-assigned',
+      integrityPolicy: { locationVerification: 'strict', selfServeApproval: 'organizer', rosterParticipation: 'freeze_at_run_start' },
       runPolicy: { mode: 'unlimited' },
       leaderboardPolicy: {
         bestRunRule: 'score_then_time_then_completion',

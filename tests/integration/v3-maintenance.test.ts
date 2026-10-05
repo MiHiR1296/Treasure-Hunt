@@ -44,7 +44,9 @@ test('V3 maintenance preserves submitted review evidence and terminal reviews re
     id: huntId,
     version: 1,
     title: 'Maintenance review evidence',
-    settings: {},
+    settings: {
+      integrityPolicy: { locationVerification: 'strict', selfServeApproval: 'organizer', rosterParticipation: 'freeze_at_run_start' },
+    },
     checkpoints: [],
   };
   await getPool().query(

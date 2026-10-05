@@ -104,10 +104,10 @@ The smoke check sends GET requests only. It checks V3 health, the public hunt li
 2. Put the V2 event into a visible maintenance/closed state. Stop application writes, background retention, imports, and organizer edits.
 3. Take the fresh V2 database/media archive described above and complete its restore verification. Do not continue with an unverified backup.
 4. Provision/confirm V3's private database role, private durable-media target, separate private incoming-upload bucket where used, HTTPS origin, organizer secret, and maintenance secret. Keep the V3 app stopped.
-5. Apply `npm run db:migrate:v3`. This creates/updates `hunt_v3`; it must not rewrite or drop V2 data.
+5. Apply `npm run db:migrate:v3`. This creates/updates `hunt_v3`; it must not rewrite or drop V2 data. The migration deliberately aborts if any existing V3 run is pinned to a published definition with a missing or malformed `integrityPolicy`. If that guard fires, do not edit immutable runs or bypass the check: keep the fresh backup, clean-reimport the hunt as a V3 draft, validate/preview/republish it, and begin with new runs and leaderboards.
 6. Start the reviewed V3 release. Run `npm run smoke:v3` against the actual origin and inspect logs and the retention worker/cron result.
 7. Import each event definition as a V3 draft, fix all path/schema/fairness errors, preview the exact revision, and publish explicitly. Create or import clean rosters; do not copy old runs into the V3 leaderboard.
-8. Test self-serve/assigned/rostered registration as configured, two distinct member sessions, one run, a replay, contribution attribution, recognition privacy, organizer live operations, frozen/final public-board privacy, and a downloadable share card.
+8. Test self-serve/assigned/rostered registration as configured, automatic and organizer approval, the live new-team switch, all selected roster/location policies, two distinct member sessions, one run, a replay, contribution attribution, recognition privacy, organizer live operations, frozen/final public-board privacy, and a downloadable share card. Confirm late participants never multiply team-wide answer limits.
 9. Open registrations and update the public link/QR material only after those checks pass. Keep the V2 deployment stopped but recoverable and retain the verified archive through the agreed retention period.
 
 ## Rollback
@@ -124,4 +124,4 @@ Never drop `hunt_v3`, overwrite a media bucket, or restore over production as a 
 
 ## Mandatory final device gate
 
-Before a real event, test the actual production HTTPS URL on at least one physical Android phone and one physical iPhone. Verify team creation/join or roster claim, refresh/rejoin, QR scanning, denied then granted camera/location permissions, real GPS at a checkpoint, photo upload/review, parallel-member behavior on separate devices, finish/replay, story-image download, native share sheet, caption-copy fallback, organizer polling, and public-board privacy. Record device/browser versions and outcome. Playwright mobile emulation is useful coverage but cannot satisfy this gate.
+Before a real event, test the actual production HTTPS URL on at least one physical Android phone and one physical iPhone. Verify team creation/join or roster claim, automatic/manual approval, live registration open/close, the event's roster policy, refresh/rejoin, QR scanning, denied then granted camera/location permissions, every enabled GPS verification mode, photo upload/review, parallel-member behavior on separate devices, finish/replay, story-image download, native share sheet, caption-copy fallback, organizer polling, and public-board privacy. Record device/browser versions and outcome. Playwright mobile emulation is useful coverage but cannot satisfy this gate.

@@ -7,6 +7,7 @@ import type {
   RoutePlanDefinition,
   V3Definition,
 } from './types'
+import { resolveIntegrityPolicy } from './types'
 import { deterministicIndex, deterministicWeightedIndex } from './seed'
 import { resolveVariables, usesStrongRunCodeTemplate } from './variables'
 
@@ -326,15 +327,21 @@ export function validateParallelMechanics(
       }
     })
     const authoredMechanic = authoredSecurityDefinition.settings.parallelMechanics?.find(source => source.id === mechanic.id)
-    const hasShareableLane = mechanic.lanes.some(lane => {
-      if (lane.type === 'gps' || lane.type === 'qr') return true
+    const hasGpsLane = mechanic.lanes.some(lane => lane.type === 'gps')
+    const hasShareableNonGpsLane = mechanic.lanes.some(lane => {
+      if (lane.type === 'qr') return true
       if (lane.type !== 'code') return false
       const authoredLane = authoredMechanic?.lanes.find(source => source.id === lane.id)
       const authoredCode = authoredLane?.type === 'code' ? authoredLane.code : lane.code
       return !usesStrongRunCodeTemplate(authoredCode, authoredSecurityDefinition.settings.variableGenerators)
     })
-    if (hasShareableLane && !mechanic.lanes.some(lane => lane.type === 'photo')) {
-      issues.push({ path: `${path}.lanes`, message: 'Browser GPS can be spoofed, and QR or static code values can be shared. A parallel mechanic containing one must also require a photo-evidence lane; a high-entropy run-scoped generated code is the only code-lane exception.' })
+    const locationVerification = resolveIntegrityPolicy(definition.settings).locationVerification
+    const gpsNeedsPhoto = hasGpsLane && (locationVerification === 'gps_photo' || locationVerification === 'strict')
+    if ((hasShareableNonGpsLane || gpsNeedsPhoto) && !mechanic.lanes.some(lane => lane.type === 'photo')) {
+      const reason = hasShareableNonGpsLane
+        ? 'QR or static code values can be shared, so this parallel mechanic must also require a photo-evidence lane; a high-entropy run-scoped generated code is the only code-lane exception.'
+        : 'This hunt requires every GPS parallel mechanic to include a photo-evidence lane.'
+      issues.push({ path: `${path}.lanes`, message: reason })
     }
   }
   return issues

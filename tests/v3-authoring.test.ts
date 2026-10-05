@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { GET as authoringKit } from '../app/api/v3/authoring-kit/route';
-import { validateV3Definition } from '../lib/server/v3/authoring';
+import { normalizeV3DraftInput, validateV3Definition } from '../lib/server/v3/authoring';
 
 async function starter() {
   return JSON.parse(await readFile(new URL('../public/authoring/treasure-hunt-v3.starter.json', import.meta.url), 'utf8')) as Record<string, any>;
@@ -22,6 +22,50 @@ test('V3 authoring executes the strict nested JSON Schema with field paths', asy
   assert.ok(issues.some(issue => issue.path === 'hunt.settings.publicBoard.columns[1]'));
   assert.ok(issues.some(issue => issue.path === 'hunt.settings.recognition.votingWindowMinutes'));
   assert.ok(issues.some(issue => issue.path === 'hunt.settings.leaderboardPolicy.timeVisibility'));
+});
+
+test('V3 authoring requires explicit integrity choices while legacy drafts normalize to casual defaults', async () => {
+  const explicit = await starter();
+  assert.deepEqual(explicit.settings.integrityPolicy, {
+    locationVerification: 'gps_only',
+    selfServeApproval: 'automatic',
+    rosterParticipation: 'flexible_fixed_scoring',
+  });
+
+  const legacy = await starter();
+  delete legacy.settings.integrityPolicy;
+  assert.ok(validateV3Definition(legacy).issues.some(issue => issue.path === 'hunt.settings.integrityPolicy'));
+
+  const normalized = normalizeV3DraftInput(legacy) as Record<string, any>;
+  assert.equal(legacy.settings.integrityPolicy, undefined, 'normalization must not mutate the uploaded object');
+  assert.deepEqual(normalized.settings.integrityPolicy, explicit.settings.integrityPolicy);
+  assert.deepEqual(validateV3Definition(normalized).issues, []);
+
+  const competition = await starter();
+  competition.settings.integrityPolicy = {
+    locationVerification: 'strict',
+    selfServeApproval: 'organizer',
+    rosterParticipation: 'freeze_at_run_start',
+  };
+  assert.equal(normalizeV3DraftInput(competition), competition, 'explicit organizer choices must never be replaced');
+});
+
+test('V3 authoring reports invalid integrity choices at exact paths', async () => {
+  const invalid = await starter();
+  invalid.settings.integrityPolicy = {
+    locationVerification: 'trust-the-browser',
+    selfServeApproval: 'sometimes',
+    rosterParticipation: 'one-limit-per-member',
+  };
+  const schemaIssues = validateV3Definition(invalid).issues;
+  assert.ok(schemaIssues.some(issue => issue.path === 'hunt.settings.integrityPolicy.locationVerification'));
+  assert.ok(schemaIssues.some(issue => issue.path === 'hunt.settings.integrityPolicy.selfServeApproval'));
+  assert.ok(schemaIssues.some(issue => issue.path === 'hunt.settings.integrityPolicy.rosterParticipation'));
+
+  const semanticIssues = validateV3Definition(invalid, { externalAuthoring: false }).issues;
+  assert.ok(semanticIssues.some(issue => issue.path === 'hunt.settings.integrityPolicy.locationVerification'));
+  assert.ok(semanticIssues.some(issue => issue.path === 'hunt.settings.integrityPolicy.selfServeApproval'));
+  assert.ok(semanticIssues.some(issue => issue.path === 'hunt.settings.integrityPolicy.rosterParticipation'));
 });
 
 test('V3 authoring rejects progression controls that runtime route plans replace', async () => {

@@ -5,12 +5,12 @@ import type { PuzzleDefinition } from '../../engine/puzzles';
 import { EngineError, type GameCommand, type GameEvent, type GameState, type HuntDefinition, type ScoreEntry } from '../../engine/types';
 import { assertSessionPlayable, assertStartWindow, beginReviewClockPause, elapsedMilliseconds, timerRemaining } from '../../engine/session';
 import { planRunForFairnessRoute, selectBalancedPlan } from '../../v3/planning';
-import type { ContributionCategory, FairnessReport, ResolvedRunPlan, V3Definition } from '../../v3/types';
+import { resolveIntegrityPolicy, type ContributionCategory, type FairnessReport, type ResolvedRunPlan, type V3Definition } from '../../v3/types';
 import { getPool, transaction } from '../db';
 import { canonicalJson, digest, HttpError } from '../security';
 import { lockV3Hunt } from './locking';
 import { recalculateRecognition } from './recognition';
-import { materializeRunDefinition, materializeRunParallelMechanics, seededEngineRoutes, v3PlayerView } from './runtime';
+import { assertPublishedIntegrityPolicy, materializeRunDefinition, materializeRunParallelMechanics, seededEngineRoutes, v3PlayerView } from './runtime';
 import { isV3Uuid, rateLimitV3, reserveV3RunAttempt } from './security';
 
 type RunRow = {
@@ -33,6 +33,7 @@ type RunRow = {
   display_name: string | null;
   member_name: string;
   hunt_status: string;
+  contribution_eligible: boolean;
 };
 
 function validRequestId(requestId: string) {
@@ -47,7 +48,8 @@ export async function databaseNow(client: PoolClient) {
 
 async function loadRun(client: PoolClient, teamId: string, memberId: string, runId?: string, lock = false): Promise<RunRow> {
   const selector = runId ? 'r.id=$3' : "r.status='active'";
-  const query = `select r.*,v.definition,t.canonical_code,t.display_name,m.name as member_name,h.status as hunt_status
+  const query = `select r.*,v.definition,t.canonical_code,t.display_name,m.name as member_name,h.status as hunt_status,
+    rm.contribution_eligible
     from hunt_v3.runs r
     join hunt_v3.teams t on t.id=r.team_id and t.status='active'
     join hunt_v3.hunts h on h.id=r.hunt_id
@@ -71,10 +73,11 @@ async function loadRun(client: PoolClient, teamId: string, memberId: string, run
       values,
     );
     if (excludedStartingRoster.rowCount) {
-      throw new HttpError(409, 'This run is locked to its starting roster. You can take part in the team\'s next run.');
+      throw new HttpError(409, 'This adventure is already underway. You aren\'t part of this run.');
     }
     throw new HttpError(404, runId ? 'Run not found.' : 'This team has no active run.');
   }
+  assertPublishedIntegrityPolicy(run.definition.settings);
   return run;
 }
 
@@ -133,25 +136,25 @@ export async function currentRunView(teamId: string, memberId: string, runId?: s
 
 function runPolicy(settings: V3Definition['settings'], previousOfficialAttempts: number, requestedPractice: boolean) {
   if (previousOfficialAttempts === 0) {
-    if (requestedPractice) throw new HttpError(409, 'Complete an official run before starting practice attempts.');
+    if (requestedPractice) throw new HttpError(409, 'Finish your first adventure before choosing a just-for-fun replay.');
     return { practice: false, eligible: true };
   }
   const policy = settings.runPolicy;
-  if (policy.mode === 'disabled') throw new HttpError(409, 'This hunt allows one official run per team.');
+  if (policy.mode === 'disabled') throw new HttpError(409, 'This adventure is complete. Your organizer has turned off replays.');
   if (policy.mode === 'practice-only') return { practice: true, eligible: false };
   if (policy.mode === 'capped') {
     const maximum = policy.maxOfficialRuns ?? 1;
     if (previousOfficialAttempts >= maximum) {
       if (requestedPractice) return { practice: true, eligible: false };
-      throw new HttpError(409, `This team has used all ${maximum} official runs. Start a practice run to keep playing.`);
+      throw new HttpError(409, `Your crew has finished all ${maximum} scored attempts. Choose “Try again” to keep playing for fun.`);
     }
     if (requestedPractice) {
-      throw new HttpError(409, `Practice unlocks after this team uses all ${maximum} official runs. Start the next official run instead.`);
+      throw new HttpError(409, `Your crew still has another scored attempt available. Start run ${previousOfficialAttempts + 1} when you are ready.`);
     }
     return { practice: false, eligible: true };
   }
   if (requestedPractice) {
-    throw new HttpError(409, 'Practice is unavailable while this team still has unlimited official attempts.');
+    throw new HttpError(409, 'Every replay counts for this event. Choose “Try again” to begin your next adventure.');
   }
   return { practice: false, eligible: true };
 }
@@ -269,14 +272,11 @@ export async function createRun(teamId: string, memberId: string, requestId: str
   }
   const outcome = await transaction(async client => {
     const identity = (await client.query(
-      'select hunt_id,status,approval_status from hunt_v3.teams where id=$1',
+      'select hunt_id,status from hunt_v3.teams where id=$1',
       [teamId],
     )).rows[0];
     if (!identity) throw new HttpError(404, 'Team not found.');
     if (identity.status !== 'active') throw new HttpError(409, 'This team is not allowed to start runs. Ask the organizer for help.');
-    if (identity.approval_status !== 'approved') {
-      throw new HttpError(409, 'Your team is awaiting organizer approval before it can start an official run.');
-    }
     const hunt = (await client.query(
       `select h.*,v.definition,v.fairness_report
         from hunt_v3.hunts h join hunt_v3.hunt_versions v on v.hunt_id=h.id and v.version=h.latest_version
@@ -284,15 +284,43 @@ export async function createRun(teamId: string, memberId: string, requestId: str
       [identity.hunt_id],
     )).rows[0] as ({ definition: V3Definition; fairness_report: FairnessReport } & Record<string, unknown>) | undefined;
     if (!hunt) throw new HttpError(404, 'Hunt not found.');
+    assertPublishedIntegrityPolicy(hunt.definition.settings);
     const lockedIdentity = (await client.query(
-      'select status,approval_status from hunt_v3.teams where id=$1 for update',
+      'select status,approval_status,approval_method,registration_source,competition_revision from hunt_v3.teams where id=$1 for update',
       [teamId],
     )).rows[0];
     if (!lockedIdentity || lockedIdentity.status !== 'active') {
       throw new HttpError(409, 'This team is not allowed to start runs. Ask the organizer for help.');
     }
-    if (lockedIdentity.approval_status !== 'approved') {
-      throw new HttpError(409, 'Your team is awaiting organizer approval before it can start an official run.');
+    const integrityPolicy = resolveIntegrityPolicy(hunt.definition.settings);
+    const needsOrganizerApproval = lockedIdentity.registration_source === 'self_serve' &&
+      integrityPolicy.selfServeApproval === 'organizer' &&
+      (lockedIdentity.approval_status !== 'approved' || lockedIdentity.approval_method !== 'organizer');
+    if (needsOrganizerApproval) {
+      throw new HttpError(409, 'Your crew is waiting for the organizer\'s go-ahead.');
+    }
+    if (lockedIdentity.registration_source === 'self_serve' &&
+      integrityPolicy.selfServeApproval === 'automatic' &&
+      lockedIdentity.approval_status !== 'approved') {
+      const updatedApproval = (await client.query(
+        `update hunt_v3.teams set approval_status='approved',approval_method='automatic',
+          competition_revision=competition_revision+1 where id=$1
+          returning competition_revision`,
+        [teamId],
+      )).rows[0];
+      await client.query(
+        `insert into hunt_v3.admin_events(action,hunt_id,team_id,before_state,after_state,details)
+          values('team_auto_approved',$1,$2,$3,$4,$5)`,
+        [identity.hunt_id, teamId, {
+          approvalStatus: lockedIdentity.approval_status,
+          approvalMethod: lockedIdentity.approval_method,
+          competitionRevision: Number(lockedIdentity.competition_revision),
+        }, {
+          approvalStatus: 'approved',
+          approvalMethod: 'automatic',
+          competitionRevision: Number(updatedApproval.competition_revision),
+        }, { policy: 'automatic', source: 'run_start' }],
+      );
     }
     const member = (await client.query(
       "select id from hunt_v3.team_members where id=$1 and team_id=$2 and status='active' and checked_in_at is not null",
@@ -308,8 +336,9 @@ export async function createRun(teamId: string, memberId: string, requestId: str
       if (receipt.payload_hash !== payloadHash) throw new HttpError(409, 'This request ID was already used for another action.');
       return renderRun(client, await loadRun(client, teamId, memberId, receipt.response.runId), memberId);
     }
-    if (!hunt.fairness_report?.valid) throw new HttpError(409, 'This hunt version has not passed V3 fairness validation.');
-    const planCapacity = hunt.fairness_report.routes?.length ?? 0;
+    const fairnessReport = hunt.fairness_report;
+    if (!fairnessReport?.valid) throw new HttpError(409, 'This adventure needs an organizer update before play can begin.');
+    const planCapacity = fairnessReport.routes?.length ?? 0;
     // Publication rejects an oversized capped policy. Clamp defensively at
     // runtime as well so an old/manual database row cannot allocate more
     // capped official attempts than the validated deck contains. Unlimited
@@ -384,7 +413,7 @@ export async function createRun(teamId: string, memberId: string, requestId: str
       // It may keep replaying, but every subsequent run stays practice-only.
       if (Number(counts.practice) > 0) {
         if (!requestedPractice) {
-          throw new HttpError(409, 'This team has already entered practice and cannot return to official competition. Ask the organizer for help; this identity can start practice runs only.');
+          throw new HttpError(409, 'This crew is now in replay mode. Choose “Try again” to keep playing, or ask the organizer for help.');
         }
         policy = { practice: true, eligible: false };
       } else {
@@ -406,7 +435,7 @@ export async function createRun(teamId: string, memberId: string, requestId: str
       throw error;
     }
     const privateSeed = randomBytes(32).toString('base64url');
-    const routeKeyByDigest = new Map((hunt.fairness_report.routes ?? []).map(route => [digest(route.routeKey), route.routeKey]));
+    const routeKeyByDigest = new Map((fairnessReport.routes ?? []).map(route => [digest(route.routeKey), route.routeKey]));
     const allocationRows = (await client.query(
       `select id,team_id,plan_key,allocation_cycle,practice,engine_state from hunt_v3.runs
         where hunt_id=$1 and hunt_version=$2
@@ -426,10 +455,10 @@ export async function createRun(teamId: string, memberId: string, requestId: str
     });
     const officialUsage = resolvedUsage.filter(item => !item.row.practice);
     const practiceRoutes = policy.practice
-      ? (hunt.fairness_report.routes ?? []).filter(route => officialUsage.some(item => item.teamId === teamId && item.routeKey === route.routeKey))
+      ? (fairnessReport.routes ?? []).filter(route => officialUsage.some(item => item.teamId === teamId && item.routeKey === route.routeKey))
       : [];
     if (policy.practice && !practiceRoutes.length) {
-      throw new HttpError(409, 'Practice could not recover one of this team\'s official routes. Ask the organizer for help.');
+      throw new HttpError(409, 'We could not prepare the next adventure. Ask the organizer for help.');
     }
     const allocation = policy.practice
       ? selectBalancedPlan(
@@ -438,13 +467,13 @@ export async function createRun(teamId: string, memberId: string, requestId: str
         teamId,
         privateSeed,
       )
-      : selectBalancedPlan(hunt.fairness_report.routes ?? [], officialUsage, teamId, privateSeed);
+      : selectBalancedPlan(fairnessReport.routes ?? [], officialUsage, teamId, privateSeed);
     const planDigest = digest(allocation.route.routeKey);
     const practiceSource = policy.practice
       ? [...resolvedUsage].reverse().find(item => !item.row.practice && item.teamId === teamId && item.routeKey === allocation.route.routeKey)?.row
       : undefined;
     if (policy.practice && !practiceSource) {
-      throw new HttpError(409, 'Practice could not recover its official source run. Ask the organizer for help.');
+      throw new HttpError(409, 'We could not prepare the next adventure. Ask the organizer for help.');
     }
     const allocationCycle = policy.practice
       ? Math.max(-1, ...allocationRows
@@ -643,7 +672,7 @@ async function appendRunAudit(
       [run.id, run.team_id, after.revision, baseOrdinal + index, event.type, memberId,
         event.checkpointId ?? null, event.nodeId ?? null, event.at, event, requestId],
     )).rows[0];
-    const contribution = contributionFor(command, event);
+    const contribution = run.contribution_eligible ? contributionFor(command, event) : null;
     if (contribution) await client.query(
       `insert into hunt_v3.run_contributions(run_id,team_id,member_id,source_event_id,source_key,category,credit,evidence,created_at)
         values($1,$2,$3,$4,$5,$6,$7,$8,$9)`,

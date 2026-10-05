@@ -136,6 +136,10 @@ function normalizeTeam(value: unknown, index: number): LiveTeam {
     displayName: text(row.displayName, row.display_name, row.teamName) ?? null,
     status: text(row.status) ?? 'active',
     approvalStatus: text(row.approvalStatus, row.approval_status) === 'pending' ? 'pending' : 'approved',
+    approvalMethod: (() => {
+      const method = text(row.approvalMethod, row.approval_method);
+      return method === 'automatic' || method === 'organizer' ? method : null;
+    })(),
     competitionRevision: number(row.competitionRevision, row.competition_revision) ?? 1,
     memberNames,
     memberCount: number(row.memberCount, row.member_count) ?? memberNames.length,

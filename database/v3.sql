@@ -75,6 +75,55 @@ create table if not exists hunt_v3.hunt_versions (
   unique (hunt_id, content_hash)
 );
 
+-- V3 intentionally does not execute pre-integrity-policy publications. The
+-- resolver still renders legacy summaries conservatively, but every version
+-- that can own a run must carry a complete, validated policy explicitly.
+create or replace function hunt_v3.has_complete_integrity_policy(definition jsonb) returns boolean
+language sql
+immutable
+set search_path = hunt_v3, pg_temp
+as $$
+  select coalesce(
+    jsonb_typeof(definition #> '{settings,integrityPolicy}')='object'
+    and definition #>> '{settings,integrityPolicy,locationVerification}' in ('gps_only','gps_photo','gps_organizer','strict')
+    and definition #>> '{settings,integrityPolicy,selfServeApproval}' in ('automatic','organizer')
+    and definition #>> '{settings,integrityPolicy,rosterParticipation}' in ('flexible','freeze_at_run_start','flexible_fixed_scoring'),
+    false
+  )
+$$;
+
+create or replace function hunt_v3.require_complete_integrity_policy() returns trigger
+language plpgsql
+set search_path = hunt_v3, pg_temp
+as $$
+begin
+  if not hunt_v3.has_complete_integrity_policy(new.definition) then
+    raise exception 'Published V3 hunt versions require a complete integrityPolicy; create a clean V3 draft and republish'
+      using errcode='23514', constraint='hunt_versions_integrity_policy_required';
+  end if;
+  return new;
+end;
+$$;
+
+create or replace function hunt_v3.assert_run_integrity_policy_cutover() returns void
+language plpgsql
+set search_path = hunt_v3, pg_temp
+as $$
+declare
+  affected_runs bigint;
+begin
+  select count(*) into affected_runs
+  from hunt_v3.runs run
+  join hunt_v3.hunt_versions version
+    on version.hunt_id=run.hunt_id and version.version=run.hunt_version
+  where not hunt_v3.has_complete_integrity_policy(version.definition);
+  if affected_runs > 0 then
+    raise exception 'V3 integrity-policy cutover blocked: % existing run(s) use a legacy or malformed published version. Back up the database, then clean-reimport and republish instead of rewriting immutable run history.', affected_runs
+      using errcode='55000';
+  end if;
+end;
+$$;
+
 -- Generated QR and backup-code material is separated from authoring drafts so
 -- external AI tooling never receives production secrets. Organizers may read
 -- this immutable, version-scoped print manifest through an authenticated API.
@@ -153,6 +202,11 @@ create table if not exists hunt_v3.teams (
   -- kept in status so restoring a team never silently changes its approval.
   approval_status text not null default 'approved'
     constraint teams_approval_status_valid check (approval_status in ('pending', 'approved')),
+  -- Records whether self-serve approval was granted by policy or by a named
+  -- organizer decision. This makes tightening a hunt from automatic to
+  -- organizer approval fail closed for teams that have not been reviewed.
+  approval_method text default 'organizer'
+    constraint teams_approval_method_valid check (approval_method in ('automatic', 'organizer')),
   status text not null default 'active'
     check (status in ('active', 'disabled', 'disqualified', 'archived')),
   competition_revision integer not null default 1
@@ -161,6 +215,10 @@ create table if not exists hunt_v3.teams (
   updated_at timestamptz not null default now(),
   unique (hunt_id, canonical_code),
   unique (id, hunt_id),
+  constraint teams_approval_state_consistent check (
+    (approval_status='pending' and approval_method is null)
+    or (approval_status='approved' and approval_method in ('automatic','organizer'))
+  ),
   check (
     (display_name is null and name_key is null)
     or (display_name is not null and name_key is not null)
@@ -170,15 +228,34 @@ create table if not exists hunt_v3.teams (
 -- Repeatable hardening for databases initialized before competition approval
 -- became explicit. Existing organizer-approved V3 teams remain approved.
 alter table hunt_v3.teams add column if not exists approval_status text not null default 'approved';
+alter table hunt_v3.teams add column if not exists approval_method text default 'organizer';
 alter table hunt_v3.teams add column if not exists competition_revision integer not null default 1;
+update hunt_v3.teams set approval_method=null
+where approval_status='pending' and approval_method is not null;
 do $$
 begin
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid='hunt_v3.teams'::regclass and conname='teams_approval_method_valid'
+  ) then
+    alter table hunt_v3.teams add constraint teams_approval_method_valid
+      check (approval_method in ('automatic', 'organizer'));
+  end if;
   if not exists (
     select 1 from pg_constraint
     where conrelid='hunt_v3.teams'::regclass and conname='teams_approval_status_valid'
   ) then
     alter table hunt_v3.teams add constraint teams_approval_status_valid
       check (approval_status in ('pending', 'approved'));
+  end if;
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid='hunt_v3.teams'::regclass and conname='teams_approval_state_consistent'
+  ) then
+    alter table hunt_v3.teams add constraint teams_approval_state_consistent check (
+      (approval_status='pending' and approval_method is null)
+      or (approval_status='approved' and approval_method in ('automatic','organizer'))
+    );
   end if;
   if not exists (
     select 1 from pg_constraint
@@ -473,6 +550,11 @@ begin
 end;
 $$;
 
+-- Fail the migration before the application can serve any pre-policy run.
+-- This is deliberately a clean cutover: old V3 attempts and leaderboards are
+-- not silently reinterpreted under new organizer choices.
+select hunt_v3.assert_run_integrity_policy_cutover();
+
 create unique index if not exists runs_one_open_per_team
   on hunt_v3.runs(team_id)
   where status in ('waiting', 'active');
@@ -520,13 +602,19 @@ create table if not exists hunt_v3.help_requests (
 create index if not exists help_requests_live
   on hunt_v3.help_requests(hunt_id, status, created_at);
 
--- Immutable starting-roster snapshot for an attempt. A member who checks in
--- after the run starts participates from the next run instead.
+-- Run participants include the starting roster plus late participants when
+-- the pinned hunt policy permits them. Fixed-scoring late participants can
+-- play and celebrate an eligible teammate, but cannot receive contribution
+-- credit, a peer vote, or a recognition result for that attempt. This
+-- table is included in the append-only trigger set below, so its snapshot
+-- identity, joined time, and contribution eligibility cannot be promoted or
+-- rewritten after insertion.
 create table if not exists hunt_v3.run_members (
   run_id uuid not null,
   team_id uuid not null,
   member_id uuid not null,
   member_name_snapshot text not null check (length(member_name_snapshot) between 1 and 100),
+  contribution_eligible boolean not null default true,
   joined_run_at timestamptz not null default now(),
   primary key (run_id, member_id),
   foreign key (team_id, run_id)
@@ -534,6 +622,9 @@ create table if not exists hunt_v3.run_members (
   foreign key (team_id, member_id)
     references hunt_v3.team_members(team_id, id)
 );
+
+alter table hunt_v3.run_members
+  add column if not exists contribution_eligible boolean not null default true;
 
 -- Accepted actions and scoring ---------------------------------------------
 
@@ -1356,9 +1447,71 @@ create or replace function hunt_v3.reject_late_run_member() returns trigger
 language plpgsql
 set search_path = hunt_v3, pg_temp
 as $$
+declare
+  run_status text;
+  roster_participation text;
 begin
   if exists(select 1 from hunt_v3.run_events event where event.run_id = new.run_id) then
-    raise exception 'Run membership is frozen after the starting roster is recorded'
+    select run.status,
+      coalesce(version.definition #>> '{settings,integrityPolicy,rosterParticipation}', 'freeze_at_run_start')
+      into run_status,roster_participation
+      from hunt_v3.runs run
+      join hunt_v3.hunt_versions version
+        on version.hunt_id=run.hunt_id and version.version=run.hunt_version
+      where run.id=new.run_id and run.team_id=new.team_id;
+    if run_status is null or run_status <> 'active' then
+      raise exception 'Members can join only an active run'
+        using errcode = '55000';
+    end if;
+    if roster_participation not in ('flexible', 'flexible_fixed_scoring') then
+      raise exception 'Run membership is frozen after the starting roster is recorded'
+        using errcode = '55000';
+    end if;
+    if not exists(
+      select 1 from hunt_v3.team_members member
+      where member.team_id=new.team_id and member.id=new.member_id
+        and member.status='active' and member.checked_in_at is not null
+    ) then
+      raise exception 'A late run participant must be an active checked-in team member'
+        using errcode = '55000';
+    end if;
+    new.contribution_eligible := roster_participation = 'flexible';
+  else
+    -- Starting-roster members always retain normal contribution eligibility.
+    new.contribution_eligible := true;
+  end if;
+  return new;
+end;
+$$;
+
+create or replace function hunt_v3.require_contribution_eligible_member() returns trigger
+language plpgsql
+set search_path = hunt_v3, pg_temp
+as $$
+begin
+  if not exists(
+    select 1 from hunt_v3.run_members participant
+    where participant.run_id=new.run_id and participant.member_id=new.member_id
+      and participant.contribution_eligible
+  ) then
+    raise exception 'This run participant is not eligible for contribution recognition'
+      using errcode = '55000';
+  end if;
+  return new;
+end;
+$$;
+
+create or replace function hunt_v3.require_recognition_eligible_recipient() returns trigger
+language plpgsql
+set search_path = hunt_v3, pg_temp
+as $$
+begin
+  if not exists(
+    select 1 from hunt_v3.run_members participant
+    where participant.run_id=new.run_id and participant.member_id=new.recipient_member_id
+      and participant.contribution_eligible
+  ) then
+    raise exception 'This run participant cannot receive recognition for this attempt'
       using errcode = '55000';
   end if;
   return new;
@@ -1642,6 +1795,11 @@ create trigger hunts_touch_updated_at
 before update on hunt_v3.hunts
 for each row execute function hunt_v3.touch_updated_at();
 
+drop trigger if exists hunt_versions_require_integrity_policy on hunt_v3.hunt_versions;
+create trigger hunt_versions_require_integrity_policy
+before insert on hunt_v3.hunt_versions
+for each row execute function hunt_v3.require_complete_integrity_policy();
+
 drop trigger if exists drafts_touch_updated_at on hunt_v3.drafts;
 create trigger drafts_touch_updated_at
 before update on hunt_v3.drafts
@@ -1671,6 +1829,26 @@ drop trigger if exists run_members_reject_late_insert on hunt_v3.run_members;
 create trigger run_members_reject_late_insert
 before insert on hunt_v3.run_members
 for each row execute function hunt_v3.reject_late_run_member();
+
+drop trigger if exists run_contributions_require_eligible_member on hunt_v3.run_contributions;
+create trigger run_contributions_require_eligible_member
+before insert on hunt_v3.run_contributions
+for each row execute function hunt_v3.require_contribution_eligible_member();
+
+drop trigger if exists recognition_votes_require_eligible_recipient on hunt_v3.recognition_votes;
+create trigger recognition_votes_require_eligible_recipient
+before insert on hunt_v3.recognition_votes
+for each row execute function hunt_v3.require_recognition_eligible_recipient();
+
+drop trigger if exists recognition_results_require_eligible_member on hunt_v3.recognition_results;
+create trigger recognition_results_require_eligible_member
+before insert on hunt_v3.recognition_results
+for each row execute function hunt_v3.require_contribution_eligible_member();
+
+drop trigger if exists recognition_overrides_require_eligible_member on hunt_v3.recognition_overrides;
+create trigger recognition_overrides_require_eligible_member
+before insert on hunt_v3.recognition_overrides
+for each row execute function hunt_v3.require_contribution_eligible_member();
 
 drop trigger if exists public_boards_touch_updated_at on hunt_v3.public_boards;
 create trigger public_boards_touch_updated_at

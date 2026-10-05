@@ -2,6 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { adminRequest, V3AdminRequestError } from './client';
+import {
+  CASUAL_INTEGRITY_POLICY,
+  hasExplicitIntegrityPolicy,
+  parseDefinitionForPlayStyle,
+  readIntegrityPolicy,
+  withIntegrityPolicy,
+} from './integrityPolicy';
+import PlayStylePanel from './PlayStylePanel';
 import type { AuthoringKit, DraftSummary, ValidationIssue } from './types';
 import { EmptyState, inputClass, panelClass, primaryButton, secondaryButton, SectionHeading, StatusPill } from './ui';
 
@@ -121,7 +129,19 @@ export default function AuthoringPanel({ active, reportError, notify }: { active
   useEffect(() => { if (active && !kit) void refresh(); }, [active, kit, refresh]);
 
   const currentIssues = useMemo(() => validationIssues(editing, localIssues), [editing, localIssues]);
+  const editorDefinition = useMemo(() => parseDefinitionForPlayStyle(jsonText), [jsonText]);
+  const editorIntegrityPolicy = useMemo(
+    () => editorDefinition ? readIntegrityPolicy(editorDefinition) : CASUAL_INTEGRITY_POLICY,
+    [editorDefinition],
+  );
   const revisionKey = (draft: DraftSummary) => `${draft.id}:${draft.revision}:${draft.generation}`;
+
+  const updateIntegrityPolicy = (policy: typeof editorIntegrityPolicy) => {
+    if (!editorDefinition) return;
+    setJsonText(JSON.stringify(withIntegrityPolicy(editorDefinition, policy), null, 2));
+    setLocalIssues([]);
+    setReviewedRevision('');
+  };
 
   const parseEditor = () => {
     try {
@@ -217,6 +237,12 @@ export default function AuthoringPanel({ active, reportError, notify }: { active
 
     <section className={`${panelClass} p-5 sm:p-6`}>
       <SectionHeading title={editing ? `Edit ${editing.title}` : 'Import hunt JSON'} detail={editing ? `Saving updates draft revision ${editing.revision}; it never mutates a published version or an active run.` : 'Paste a complete V3 definition or choose a JSON file. Validation returns exact field paths.'} actions={editing ? <button type="button" className={secondaryButton} onClick={() => { setEditing(null); setJsonText(''); setLocalIssues([]); }}>New import</button> : undefined} />
+      <PlayStylePanel
+        disabled={!editorDefinition || Boolean(pending)}
+        explicit={editorDefinition ? hasExplicitIntegrityPolicy(editorDefinition) : false}
+        policy={editorIntegrityPolicy}
+        onChange={updateIntegrityPolicy}
+      />
       <div className="mt-5 grid gap-5 xl:grid-cols-[1.3fr_0.7fr]">
         <div>
           <label className="text-sm font-bold text-slate-200">V3 JSON<textarea className={`${inputClass} mt-2 min-h-[28rem] resize-y font-mono text-xs leading-5`} spellCheck={false} value={jsonText} onChange={event => { setJsonText(event.target.value); setLocalIssues([]); }} placeholder={'{\n  "schemaVersion": 3,\n  ...\n}'} /></label>

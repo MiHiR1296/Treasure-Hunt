@@ -60,7 +60,7 @@ function MainBoard({ entries }: { entries: MainLeaderboardEntry[] }) {
 }
 
 function ReplayBoard({ entries }: { entries: ReplayLeaderboardEntry[] }) {
-  if (!entries.length) return <p className="py-6 text-center text-sm text-stone-500">Complete another official run to join the replay board.</p>;
+  if (!entries.length) return <p className="py-6 text-center text-sm text-stone-500">Complete another scored run to join the replay board.</p>;
   return <div className="overflow-x-auto">
     <table className="w-full min-w-[38rem] text-left text-sm">
       <thead className="text-xs uppercase tracking-wide text-stone-500"><tr><th className="pb-3 pr-3">Rank</th><th className="pb-3 pr-3">Team</th><th className="pb-3 pr-3 text-right">Best</th><th className="pb-3 pr-3 text-right">Time</th><th className="pb-3 text-right">Lift</th></tr></thead>
@@ -92,18 +92,18 @@ export default function Leaderboards({ board, failed, defaultTab = 'main' }: {
   const activeTab = tab === 'replay' && board.replay.enabled ? 'replay' : board.main.visible ? 'main' : 'replay';
   return <section className={cardStyle} aria-labelledby="v3-leaderboard-heading">
     <div className="flex flex-wrap items-end justify-between gap-3">
-      <div><p className="text-xs font-extrabold uppercase tracking-[0.18em] text-emerald-800">Official best, or live progress until finish</p><h2 id="v3-leaderboard-heading" className="mt-1 text-2xl font-black tracking-tight">Leaderboard</h2></div>
+      <div><p className="text-xs font-extrabold uppercase tracking-[0.18em] text-emerald-800">Best results, with live progress while crews play</p><h2 id="v3-leaderboard-heading" className="mt-1 text-2xl font-black tracking-tight">Leaderboard</h2></div>
       {failed && <span className="text-xs text-amber-700">Showing the last update</span>}
     </div>
     {showTabs && <div className="mt-5 grid grid-cols-2 gap-2 rounded-2xl bg-stone-100 p-1.5">
       <button type="button" aria-pressed={tab === 'main'} onClick={() => setTab('main')} className={`min-h-11 rounded-xl px-3 text-sm font-bold ${tab === 'main' ? 'bg-white text-emerald-950 shadow-sm' : 'text-stone-600'}`}>Main scoreboard</button>
       <button type="button" aria-pressed={tab === 'replay'} onClick={() => setTab('replay')} className={`min-h-11 rounded-xl px-3 text-sm font-bold ${tab === 'replay' ? 'bg-white text-violet-950 shadow-sm' : 'text-stone-600'}`}>Replay board</button>
     </div>}
-    <p className="my-4 text-xs leading-relaxed text-stone-500">{activeTab === 'main' ? 'Highest completed score wins. Unfinished teams are marked live; time breaks official ties without putting every one-run team on a speed table.' : 'Unlocked after your crew completes its second eligible run.'}</p>
+    <p className="my-4 text-xs leading-relaxed text-stone-500">{activeTab === 'main' ? 'Highest completed score wins. Crews still playing are marked live, and time settles tied scores.' : 'Complete two scored runs to see your crew’s best time and improvement.'}</p>
     {activeTab === 'main'
       ? <MainBoard entries={board.main.entries} />
       : board.replay.unlocked && board.replay.visible
         ? <ReplayBoard entries={board.replay.entries} />
-        : <div className="rounded-2xl border border-dashed border-violet-300 bg-violet-50 p-5 text-sm leading-relaxed text-violet-950"><strong>Replay board locked.</strong><br />{board.replay.unlockMessage || 'Complete a second eligible run to reveal your best time and improvement.'}</div>}
+        : <div className="rounded-2xl border border-dashed border-violet-300 bg-violet-50 p-5 text-sm leading-relaxed text-violet-950"><strong>Your next scored run reveals more.</strong><br />{board.replay.unlockMessage || 'Complete two scored runs to see your best time and how much you improved.'}</div>}
   </section>;
 }

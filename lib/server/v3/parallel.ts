@@ -6,7 +6,7 @@ import type { ParallelLane, ParallelMechanic, ResolvedRunPlan, V3Definition } fr
 import { getPool, transaction } from '../db';
 import { canonicalJson, digest, HttpError } from '../security';
 import { lockV3Hunt, lockV3Team } from './locking';
-import { materializeRunDefinition, materializeRunParallelMechanics } from './runtime';
+import { assertPublishedIntegrityPolicy, materializeRunDefinition, materializeRunParallelMechanics } from './runtime';
 import { currentRunView, databaseNow, stateProgress, updateLiveRollup } from './runs';
 import { recalculateRecognition } from './recognition';
 import { isV3Uuid, rateLimitV3, reserveV3RunAttempt } from './security';
@@ -198,6 +198,7 @@ export async function submitParallelLane(input: {
         where r.id=$1 and r.team_id=$2`,
       [input.runId, input.teamId, input.memberId],
     )).rows[0] as { definition: V3Definition } | undefined;
+    if (preflightRun) assertPublishedIntegrityPolicy(preflightRun.definition.settings);
     const mechanic = preflightRun?.definition.settings.parallelMechanics?.find(candidate => candidate.id === input.mechanicId);
     const lane = mechanic?.lanes.find(candidate => candidate.id === input.laneId);
     if (mechanic && lane) {
@@ -225,8 +226,9 @@ export async function submitParallelLane(input: {
       [input.runId, input.teamId],
     )).rows[0] as ({ id: string; team_id: string; status: string; engine_state: GameState; definition: V3Definition; route_plan: ResolvedRunPlan; hunt_status: string } | undefined);
     if (!run) throw new HttpError(404, 'Run not found.');
+    assertPublishedIntegrityPolicy(run.definition.settings);
     const member = (await client.query(
-      `select 1 from hunt_v3.run_members rm
+      `select rm.contribution_eligible from hunt_v3.run_members rm
         join hunt_v3.team_members member on member.id=rm.member_id and member.team_id=$3 and member.status='active'
         where rm.run_id=$1 and rm.member_id=$2`,
       [run.id, input.memberId, input.teamId],
@@ -359,14 +361,16 @@ export async function submitParallelLane(input: {
           where id=$2 and run_id=$3 and member_id=$4`,
         [now, input.evidence.mediaId, run.id, input.memberId],
       );
-      const credit = contribution(lane);
-      await client.query(
-        `insert into hunt_v3.run_contributions(run_id,team_id,member_id,source_event_id,source_key,category,credit,evidence,created_at)
-          values($1,$2,$3,$4,$5,$6,2,$7,$8)
-          on conflict(run_id,member_id,source_key) do nothing`,
-        [run.id, run.team_id, input.memberId, event.id, `parallel:${mechanic.id}:${lane.id}`, credit.category,
-          { summary: credit.summary, mechanicId: mechanic.id, laneId: lane.id }, now],
-      );
+      if (member.contribution_eligible) {
+        const credit = contribution(lane);
+        await client.query(
+          `insert into hunt_v3.run_contributions(run_id,team_id,member_id,source_event_id,source_key,category,credit,evidence,created_at)
+            values($1,$2,$3,$4,$5,$6,2,$7,$8)
+            on conflict(run_id,member_id,source_key) do nothing`,
+          [run.id, run.team_id, input.memberId, event.id, `parallel:${mechanic.id}:${lane.id}`, credit.category,
+            { summary: credit.summary, mechanicId: mechanic.id, laneId: lane.id }, now],
+        );
+      }
       const completeLanes = new Set(successful.map(item => item.details.laneId));
       if (mechanic.lanes.every(candidate => completeLanes.has(candidate.id))) {
         mechanicCompleted = true;
@@ -427,6 +431,7 @@ export async function parallelPhotoReviewStatus(input: {
     route_plan: ResolvedRunPlan;
   } | undefined);
   if (!row) throw new HttpError(404, 'Submitted parallel photo not found.');
+  assertPublishedIntegrityPolicy(row.definition.settings);
   const mechanic = materializeRunParallelMechanics(row.definition, row.route_plan).find(candidate => candidate.id === input.mechanicId);
   const lane = mechanic?.lanes.find(candidate => candidate.id === input.laneId);
   if (!mechanic || !lane || lane.type !== 'photo' || mechanic.checkpointId !== row.checkpoint_id || mechanic.nodeId !== row.node_id) {

@@ -8,7 +8,7 @@ V3 is a clean runtime replacement for V2. The final V2 implementation remains av
 
 - Self-serve, organizer-assigned, and rostered registration with canonical team codes and visible crew rosters.
 - Deterministic run seeds, replay policies, run-scoped variables, challenge pools, constrained routes, and publication-time score/duration fairness checks.
-- Organizer-approved competition entry, frozen starting rosters, balanced non-repeating plan allocation, aggregate attempt budgets, and audited disqualification controls.
+- Organizer-selectable play style: casual hunts default to automatic self-serve approval, join-anytime participation with fixed contribution eligibility, and GPS-only completion; staffed and prize events can require approval, freeze the starting roster, and add photo and/or organizer location checks. Aggregate attempt budgets remain team-wide in every mode.
 - Best-run scoreboards, an optional replay board, and an organizer-controlled public board that exposes team-level data only.
 - Private, server-backed crew contributions and optional teammate recognition, with a named organizer audit and reasoned overrides.
 - Parallel multi-member mechanics backed by authenticated member identities and idempotent commands.

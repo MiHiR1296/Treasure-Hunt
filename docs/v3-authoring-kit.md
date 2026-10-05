@@ -52,11 +52,12 @@ IDs use letters, digits, underscores, and hyphens, begin with a letter or digit,
 
 ## V3 settings
 
-The following V3 fields are required so imports do not silently inherit competition-critical behavior.
+The following V3 fields are required in newly authored documents. Older editable draft imports receive the documented explicit casual policy before validation; published data never silently inherits it.
 
 | Field | Purpose |
 | --- | --- |
 | `registrationMode` | `self-serve`, `organizer-assigned`, or `rostered`. |
+| `integrityPolicy` | Selects GPS evidence, self-serve approval, and active-run roster behavior. |
 | `runPolicy` | Controls whether official replays are disabled, capped, unlimited, or practice-only. |
 | `leaderboardPolicy` | Fixes best-run ordering and controls the main/replay boards and time reveal. |
 | `publicBoard` | Controls public team-level columns, identity display, and live/frozen/final state. |
@@ -67,7 +68,7 @@ The following V3 fields are required so imports do not silently inherit competit
 | `variableGenerators` | Resolves deterministic per-run values from the private run seed. |
 | `fairnessPolicy` | Sets proof limits, duration tolerance, travel assumptions, and bonus treatment. |
 
-`parallelMechanics` is optional. Existing runtime-compatible fields remain available: `map`, `rules`, `minTeamSize`, `maxTeamSize`, `sessionDurationSeconds`, `registrationOpen`, `startsAt`, `endsAt`, `completionMessage`, and `photoRetention`. If `mode` is present it must be `sequential`: the private V3 `routePlan` is the sole source of checkpoint order.
+`parallelMechanics` is optional. Existing runtime-compatible fields remain available: `map`, `rules`, `minTeamSize`, `maxTeamSize`, `sessionDurationSeconds`, `registrationOpen`, `startsAt`, `endsAt`, `completionMessage`, and `photoRetention`. `registrationOpen` is the organizer-controlled team-creation switch: `true` permits new teams through the selected registration workflow and `false` closes creation without blocking existing-team sign-in. Starting the event does not silently change it. If `mode` is present it must be `sequential`: the private V3 `routePlan` is the sole source of checkpoint order.
 
 ### Registration and team identity
 
@@ -76,6 +77,37 @@ The following V3 fields are required so imports do not silently inherit competit
 - `rostered`: players claim a listed identity in an imported or organizer-entered roster.
 
 Canonical team codes and display-name moderation are server concerns, not AI-authored hunt content. Do not put team names, member names, PINs, or a roster in this JSON. A roster uses the protected registration workflow after the hunt draft exists.
+
+### Integrity policy
+
+The friendly starter makes the casual product defaults explicit:
+
+```json
+{
+  "locationVerification": "gps_only",
+  "selfServeApproval": "automatic",
+  "rosterParticipation": "flexible_fixed_scoring"
+}
+```
+
+`locationVerification` applies to GPS checkpoints and GPS parallel lanes:
+
+- `gps_only`: GPS may complete without companion evidence. This is fastest and easiest to spoof.
+- `gps_photo`: every GPS completion path needs downstream fresh photo review; a GPS parallel mechanic needs a photo lane.
+- `gps_organizer`: every GPS completion path, including a GPS parallel mechanic, needs a later standalone human organizer gate. A parallel mechanic's automatically completed gate does not count.
+- `strict`: requires both photo evidence and a later standalone organizer gate.
+
+QR tokens, static codes, static answers, and reusable puzzle solutions keep their existing companion-evidence requirements in every GPS mode. Strong run-scoped generated codes remain the documented exception. Changing the GPS setting never weakens score fairness, route fairness, player-fallback validation, server authority, or team-wide attempt budgets.
+
+`selfServeApproval` is `automatic` for a casual walk-up event or `organizer` when every self-created team must be approved before an official start. It has no effect on organizer-assigned or rostered team creation.
+
+`rosterParticipation` controls who may act after a run starts:
+
+- `flexible`: eligible teammates may join and participate during the active run, including contribution recognition.
+- `freeze_at_run_start`: only the run's starting roster may access or act in that attempt.
+- `flexible_fixed_scoring`: late teammates may help and submit, but they cannot multiply team-level answer limits or claim contribution recognition for that attempt. This is the casual default.
+
+Attempt, hint, puzzle-move, and verifier budgets remain team/run-wide in all three roster modes. Adding members never creates more guesses. New authoring files must include the complete object. When an older V3 JSON file is imported or saved as an editable draft, the server writes these casual defaults into that draft before validation. It does not rewrite a published version. A pre-policy or malformed published definition cannot start a run and must be corrected through a newly validated, previewed, and published draft. The V3 migration also refuses existing run history pinned to one of those versions; follow the backup and clean-reimport cutover instead of rewriting immutable results.
 
 ### Run policy
 
@@ -287,7 +319,7 @@ Publication fails when:
 - required duration/travel data is missing;
 - estimated route durations differ at all (`durationToleranceMinutes` is fixed at `0` while time is a tie-break);
 - a travel estimate is missing;
-- a GPS or QR completion path lacks photo or standalone organizer-confirmed companion evidence;
+- a GPS completion path fails the selected `locationVerification` evidence rule, or a QR completion path lacks fresh photo or standalone human-organizer evidence;
 - a static/reusable `verify_code` or `verify_answer` completion path lacks that same independent companion evidence;
 - a checkpoint time bonus can change competitive score instead of being marked `rankingImpact: "excluded"`;
 - an immediate player fallback could bypass a competitive verifier;
@@ -335,11 +367,11 @@ Parallel mechanics require two or more distinct authenticated members to complet
 }
 ```
 
-`checkpointId` must exist, and `nodeId` must identify a `verify_organizer` gate in that checkpoint flow. Only one mechanic may target a checkpoint/node gate. A mechanic needs two to twenty unique lanes, and its lane count cannot exceed either `minTeamSize` or `maxTeamSize`, because every lane requires a distinct starting-roster member. Lane types are:
+`checkpointId` must exist, and `nodeId` must identify a `verify_organizer` gate in that checkpoint flow. Only one mechanic may target a checkpoint/node gate. A mechanic needs two to twenty unique lanes, and its lane count cannot exceed either `minTeamSize` or `maxTeamSize`, because every lane requires a distinct authenticated run participant admitted by the selected roster policy. Lane types are:
 
 - `qr`: private `token`; external files use an `@server:generate:<logical-name>` directive only. Because a QR value can be forwarded, any mechanic containing a QR lane also needs a photo lane.
 - `code`: private `code`. A static code is remotely shareable and therefore requires a photo lane; only a high-entropy run-scoped `code` variable may omit that lane.
-- `gps`: a private `location` with latitude, longitude, radius, and maximum accepted accuracy. Browser coordinates are only a proximity signal; a GPS lane also needs a photo lane.
+- `gps`: a private `location` with latitude, longitude, radius, and maximum accepted accuracy. Browser coordinates are only a proximity signal. `gps_only` needs no companion lane; `gps_photo` needs a photo lane; `gps_organizer` needs a later standalone human-organizer gate; and `strict` needs both the photo lane and that later human gate. The parallel mechanic's automatic gate never counts as human approval.
 - `photo`: optional private GPS region plus photo review evidence.
 
 The command layer must make lane claims idempotent, start the window with the first accepted lane, require a different authenticated `team_member_id` per lane, and record contribution events. Public projection contains only lane ID, label, and type—never tokens, codes, or target coordinates.
@@ -359,7 +391,7 @@ Every flow has a `startNodeId` and 1–200 nodes. Node IDs are unique within tha
 | `verify_qr` | `prompt`, private generation-directive `token`, `next`; optional generated `backupCode`. Every completion path containing QR must later require `verify_image` or a standalone, human-approved `verify_organizer` gate. |
 | `verify_code` | `prompt`, private `code`, `next`; optional case sensitivity and safe recap. A static code must later require `verify_image` or a standalone human-approved `verify_organizer`; a high-entropy run-scoped `code` variable is the only exception. |
 | `verify_answer` | `prompt`, one or more private `answers`, `next`; optional case sensitivity, recap, and bounded attempt recording. Every accepted static answer makes the path shareable and requires the same downstream companion evidence. |
-| `verify_gps` | `prompt`, latitude, longitude, radius, maximum accuracy, `next`. Browser GPS is spoofable, so every completion path that uses it must also require `verify_image` or `verify_organizer`. |
+| `verify_gps` | `prompt`, latitude, longitude, radius, maximum accuracy, `next`. Browser GPS is spoofable. Downstream evidence follows `locationVerification`: none for `gps_only`, fresh photo for `gps_photo`, a standalone human-organizer gate for `gps_organizer`, and both for `strict`. |
 | `choose_path` | Base-engine shape: `prompt`, two to twenty `{id,label,next}` choices. Competitive V3 publication rejects it because choice-specific duration is not modeled; use a challenge pool. |
 | `puzzle` | `prompt`, one supported private puzzle definition, `next`. Reusable puzzle solutions require downstream fresh photo or a genuine organizer gate. |
 | `camera_guide` | `prompt`, `next`; optional reference image and paired latitude/longitude. Guidance is not automatic verification. |
@@ -508,7 +540,7 @@ OUTPUT CONTRACT
 - Set duration tolerance to zero, require every travel edge, and make all route estimates equal.
 - Use equal challenge-variant weights; official allocation is balanced, not independent roulette.
 - Do not hide alternatives in `choose_path`, `random_branch`, time/hint/checkpoint branches, or generated/mutable-variable branches; use challenge pools with explicit estimates.
-- Pair every GPS or QR completion path with fresh photo or standalone organizer evidence; never describe browser GPS or a scanned token as cheat-proof.
+- Apply the selected `locationVerification` rule to every GPS completion path. Independently pair every QR path with fresh photo or a standalone human-organizer gate; never describe browser GPS or a scanned token as cheat-proof.
 - Keep fallbacks disabled for competitive flows and handle recovery through audited organizer controls.
 - Bind every bonus at its real score source. Omitted impact is competitive; use
   rankingImpact/bonusRankingImpact = excluded only for points that must never
@@ -520,9 +552,11 @@ OUTPUT CONTRACT
   failed guesses into a ranking strategy; use failure analytics instead.
 - Keep every route's official and excluded positive/negative score magnitude
   inside a signed 32-bit cache. The publication report rejects overflow.
-- Parallel mechanics need 2–20 lanes, a verify_organizer gate, a bounded window,
-  and no real verifier secret. A QR/GPS lane requires a photo lane;
-  distinct-member enforcement is server-side.
+- Parallel mechanics need 2–20 lanes, a `verify_organizer` gate, a bounded window,
+  and no real verifier secret. A QR lane always requires a photo lane. GPS lanes
+  follow `locationVerification`: no companion for `gps_only`, a photo lane for
+  `gps_photo`, a later standalone human gate for `gps_organizer`, and both for
+  `strict`. Distinct-member enforcement is server-side.
 - Public-board configuration must contain team-level data only.
 - AI output is a draft only; do not add any field that claims it is published.
 

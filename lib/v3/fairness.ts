@@ -7,6 +7,7 @@ import type {
   TravelEstimate,
   V3Definition,
 } from './types'
+import { resolveIntegrityPolicy } from './types'
 import { enumerateEligibleRoutes } from './planning'
 import { acceptedTemplatesUseSingleStrongRunCode, usesStrongRunCodeTemplate } from './variables'
 
@@ -160,13 +161,15 @@ interface CheckpointScoreAnalysis {
 function hasUncorroboratedVerifierPath(
   checkpoint: CheckpointDefinition,
   isShareableVerifier: (node: FlowNode) => boolean,
-  automaticOrganizerGateIds: ReadonlySet<string>,
+  parallelOrganizerGateIds: ReadonlySet<string>,
+  photoBackedParallelGateIds: ReadonlySet<string>,
+  requirement: 'either' | 'photo' | 'organizer' | 'both' = 'either',
   initiallyNeedsCompanionEvidence = false,
 ): boolean {
   const nodes = new Map(checkpoint.flow.nodes.map(node => [node.id, node]))
   const memo = new Map<string, boolean>()
-  const visit = (nodeId: string, needsCompanionEvidence: boolean): boolean => {
-    const key = `${nodeId}\u0000${needsCompanionEvidence}`
+  const visit = (nodeId: string, needsCompanionEvidence: boolean, hasPhoto: boolean, hasOrganizer: boolean): boolean => {
+    const key = `${nodeId}\u0000${needsCompanionEvidence}\u0000${hasPhoto}\u0000${hasOrganizer}`
     const cached = memo.get(key)
     if (cached !== undefined) return cached
     const node = nodes.get(nodeId)
@@ -175,17 +178,24 @@ function hasUncorroboratedVerifierPath(
     // the linked lane engine, not by an organizer. It cannot corroborate its
     // own QR/GPS evidence. Only a standalone organizer gate or reviewed photo
     // is an independent proof source.
-    const isIndependentEvidence = node.type === 'verify_image' ||
-      (node.type === 'verify_organizer' && !automaticOrganizerGateIds.has(node.id))
+    const isPhotoEvidence = node.type === 'verify_image' ||
+      (node.type === 'verify_organizer' && photoBackedParallelGateIds.has(node.id))
+    const isOrganizerEvidence = node.type === 'verify_organizer' && !parallelOrganizerGateIds.has(node.id)
     // Evidence has to follow the shareable/spoofable verifier. A marshal gate
     // before a QR scan cannot corroborate what happens after that gate.
-    const nextNeedsEvidence = isShareableVerifier(node)
-      ? true
-      : isIndependentEvidence
-        ? false
-        : needsCompanionEvidence
+    const verifier = isShareableVerifier(node)
+    const nextNeedsEvidence = verifier ? true : needsCompanionEvidence
+    const nextHasPhoto = verifier ? false : hasPhoto || (needsCompanionEvidence && isPhotoEvidence)
+    const nextHasOrganizer = verifier ? false : hasOrganizer || (needsCompanionEvidence && isOrganizerEvidence)
     if (node.type === 'complete') {
-      const unsafe = nextNeedsEvidence
+      const satisfied = requirement === 'photo'
+        ? nextHasPhoto
+        : requirement === 'organizer'
+          ? nextHasOrganizer
+          : requirement === 'both'
+            ? nextHasPhoto && nextHasOrganizer
+            : nextHasPhoto || nextHasOrganizer
+      const unsafe = nextNeedsEvidence && !satisfied
       memo.set(key, unsafe)
       return unsafe
     }
@@ -194,11 +204,11 @@ function hasUncorroboratedVerifierPath(
     memo.set(key, false)
     const destinations = primaryDestinations(node)
     if ('fallback' in node && node.fallback && node.fallback.enabled !== false) destinations.push(node.fallback.nodeId)
-    const unsafe = destinations.some(destination => visit(destination, nextNeedsEvidence))
+    const unsafe = destinations.some(destination => visit(destination, nextNeedsEvidence, nextHasPhoto, nextHasOrganizer))
     memo.set(key, unsafe)
     return unsafe
   }
-  return visit(checkpoint.flow.startNodeId, initiallyNeedsCompanionEvidence)
+  return visit(checkpoint.flow.startNodeId, initiallyNeedsCompanionEvidence, false, false)
 }
 
 function isShareablePuzzle(puzzle: PuzzleDefinition, definition: V3Definition): boolean {
@@ -443,12 +453,17 @@ export function validateFairness(definition: V3Definition): FairnessReport {
   }
 
   const checkpoints = new Map(definition.checkpoints.map(checkpoint => [checkpoint.id, checkpoint]))
-  const automaticOrganizerGates = new Map<string, Set<string>>()
+  const parallelOrganizerGates = new Map<string, Set<string>>()
+  const photoBackedParallelGates = new Map<string, Set<string>>()
   for (const mechanic of definition.settings.parallelMechanics ?? []) {
-    if (mechanic.lanes.some(lane => lane.type === 'photo')) continue
-    const gates = automaticOrganizerGates.get(mechanic.checkpointId) ?? new Set<string>()
+    const gates = parallelOrganizerGates.get(mechanic.checkpointId) ?? new Set<string>()
     gates.add(mechanic.nodeId)
-    automaticOrganizerGates.set(mechanic.checkpointId, gates)
+    parallelOrganizerGates.set(mechanic.checkpointId, gates)
+    if (mechanic.lanes.some(lane => lane.type === 'photo')) {
+      const photoGates = photoBackedParallelGates.get(mechanic.checkpointId) ?? new Set<string>()
+      photoGates.add(mechanic.nodeId)
+      photoBackedParallelGates.set(mechanic.checkpointId, photoGates)
+    }
   }
   const scoreCache = new Map<string, number>()
   const scoreCacheBounds = new Map<string, ScoreCacheBounds>()
@@ -467,31 +482,69 @@ export function validateFairness(definition: V3Definition): FairnessReport {
       const score = analysis.maximumScore
       scoreCache.set(checkpointId, score)
       scoreCacheBounds.set(checkpointId, cacheBounds)
-      const automaticGates = automaticOrganizerGates.get(checkpoint.id) ?? new Set<string>()
-      if (hasUncorroboratedVerifierPath(checkpoint, node => node.type === 'verify_gps', automaticGates)) {
+      const parallelGates = parallelOrganizerGates.get(checkpoint.id) ?? new Set<string>()
+      const photoGates = photoBackedParallelGates.get(checkpoint.id) ?? new Set<string>()
+      const locationVerification = resolveIntegrityPolicy(definition.settings).locationVerification
+      const gpsRequirement = locationVerification === 'gps_photo'
+        ? 'photo'
+        : locationVerification === 'gps_organizer'
+          ? 'organizer'
+          : locationVerification === 'strict'
+            ? 'both'
+            : null
+      if (gpsRequirement && hasUncorroboratedVerifierPath(
+        checkpoint,
+        node => node.type === 'verify_gps',
+        parallelGates,
+        photoGates,
+        gpsRequirement,
+      )) {
+        const evidence = gpsRequirement === 'photo'
+          ? 'fresh photo review'
+          : gpsRequirement === 'organizer'
+            ? 'a standalone organizer verification gate'
+            : 'fresh photo review and a separate standalone organizer verification gate'
         addIssue({
           code: 'gps_requires_companion_evidence',
           path: `checkpoints[${checkpointIndexes.get(checkpointId)}].flow`,
-          message: 'Browser GPS can be spoofed. Every completion path containing GPS must also require photo review or an organizer verification gate.',
+          message: `This hunt requires ${evidence} after GPS on every completion path. Browser GPS can be spoofed.`,
         })
       }
-      if (hasUncorroboratedVerifierPath(checkpoint, node => node.type === 'verify_qr', automaticGates)) {
+      if (hasUncorroboratedVerifierPath(checkpoint, node => node.type === 'verify_qr', parallelGates, photoGates)) {
         addIssue({
           code: 'qr_requires_companion_evidence',
           path: `checkpoints[${checkpointIndexes.get(checkpointId)}].flow`,
           message: 'A QR value can be shared remotely. Every completion path containing QR verification must also require fresh photo review or a standalone organizer verification gate.',
         })
       }
-      if (hasUncorroboratedVerifierPath(checkpoint, node => isShareableAnswerVerifier(node, definition), automaticGates)) {
+      if (hasUncorroboratedVerifierPath(checkpoint, node => isShareableAnswerVerifier(node, definition), parallelGates, photoGates)) {
         addIssue({
           code: 'shareable_verifier_requires_companion_evidence',
           path: `checkpoints[${checkpointIndexes.get(checkpointId)}].flow`,
           message: 'Static codes, accepted answers, and reusable puzzle solutions can be shared across teams; independently generated answer alternatives also weaken guessing resistance. Every completion path containing one must also require fresh photo review or a standalone organizer verification gate. Without companion evidence, code/text-answer aliases must all derive from one high-entropy run-scoped code variable.',
         })
       }
+      if (locationVerification === 'gps_organizer' || locationVerification === 'strict') {
+        for (const [mechanicIndex, mechanic] of (definition.settings.parallelMechanics ?? []).entries()) {
+          if (mechanic.checkpointId !== checkpoint.id || !mechanic.lanes.some(lane => lane.type === 'gps')) continue
+          if (hasUncorroboratedVerifierPath(
+            checkpoint,
+            node => node.id === mechanic.nodeId,
+            parallelGates,
+            photoGates,
+            'organizer',
+          )) {
+            addIssue({
+              code: 'gps_requires_companion_evidence',
+              path: `settings.parallelMechanics[${mechanicIndex}].lanes`,
+              message: 'This GPS parallel mechanic must lead to a separate standalone organizer verification gate on every completion path. Its automatically completed parallel gate does not count as human approval.',
+            })
+          }
+        }
+      }
       checkpoint.hints.forEach((hint, hintIndex) => {
         if (hint.enabled === false || hint.content.type !== 'puzzle' || !isShareablePuzzle(hint.content.puzzle, definition)) return
-        if (hasUncorroboratedVerifierPath(checkpoint, () => false, automaticGates, true)) {
+        if (hasUncorroboratedVerifierPath(checkpoint, () => false, parallelGates, photoGates, 'either', true)) {
           addIssue({
             code: 'shareable_verifier_requires_companion_evidence',
             path: `checkpoints[${checkpointIndexes.get(checkpointId)}].hints[${hintIndex}].content.puzzle`,

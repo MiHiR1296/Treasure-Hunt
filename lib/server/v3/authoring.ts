@@ -6,7 +6,14 @@ import type { PuzzleDefinition } from '../../engine/puzzles';
 import type { HuntDefinition, ValidationIssue } from '../../engine/types';
 import { validateFairness } from '../../v3/fairness';
 import { validateParallelMechanics } from '../../v3/planning';
-import type { FairnessReport, FairnessRouteResult, ResolvedRunPlan, V3Definition, VariableGenerator } from '../../v3/types';
+import {
+  CASUAL_INTEGRITY_POLICY,
+  type FairnessReport,
+  type FairnessRouteResult,
+  type ResolvedRunPlan,
+  type V3Definition,
+  type VariableGenerator,
+} from '../../v3/types';
 import {
   generatedCodeEntropyBits,
   MINIMUM_GENERATED_CODE_ENTROPY_BITS,
@@ -25,8 +32,24 @@ const topLevelKeys = new Set(['schemaVersion', 'id', 'version', 'title', 'descri
 const settingKeys = new Set([
   'mode', 'map', 'rules', 'maxTeamSize', 'minTeamSize', 'sessionDurationSeconds', 'registrationOpen', 'startsAt', 'endsAt',
   'completionMessage', 'photoRetention', 'registrationMode', 'runPolicy', 'leaderboardPolicy', 'publicBoard', 'socialShare',
-  'recognition', 'routePlan', 'challengePools', 'variableGenerators', 'fairnessPolicy', 'parallelMechanics',
+  'recognition', 'routePlan', 'challengePools', 'variableGenerators', 'fairnessPolicy', 'parallelMechanics', 'integrityPolicy',
 ]);
+
+/**
+ * Upgrade only editable/imported draft JSON. Published definitions remain
+ * immutable and must be migrated deliberately instead of silently inheriting
+ * a less restrictive posture.
+ */
+export function normalizeV3DraftInput(input: unknown): unknown {
+  if (!isObject(input) || input.schemaVersion !== 3 || !isObject(input.settings) || 'integrityPolicy' in input.settings) return input;
+  return {
+    ...input,
+    settings: {
+      ...input.settings,
+      integrityPolicy: { ...CASUAL_INTEGRITY_POLICY },
+    },
+  };
+}
 
 const schemaValidator = (() => {
   const ajv = new Ajv({ allErrors: true, strict: true, strictRequired: false, allowUnionTypes: true });
@@ -531,6 +554,19 @@ export function validateV3Definition(input: unknown, options: { externalAuthorin
       issue('hunt.settings.mode', 'V3 route plans execute sequentially. Use "sequential" or omit mode; open and dependency modes are not supported.');
     }
     if (!['self-serve', 'organizer-assigned', 'rostered'].includes(String(input.settings.registrationMode))) issue('hunt.settings.registrationMode', 'Choose self-serve, organizer-assigned, or rostered.');
+    const integrityPolicy = input.settings.integrityPolicy;
+    if (!isObject(integrityPolicy)) issue('hunt.settings.integrityPolicy', 'Choose the hunt integrity settings.');
+    else {
+      if (!['gps_only', 'gps_photo', 'gps_organizer', 'strict'].includes(String(integrityPolicy.locationVerification))) {
+        issue('hunt.settings.integrityPolicy.locationVerification', 'Choose GPS only, GPS plus photo, GPS plus organizer approval, or strict verification.');
+      }
+      if (!['automatic', 'organizer'].includes(String(integrityPolicy.selfServeApproval))) {
+        issue('hunt.settings.integrityPolicy.selfServeApproval', 'Choose automatic or organizer approval for self-serve teams.');
+      }
+      if (!['flexible', 'freeze_at_run_start', 'flexible_fixed_scoring'].includes(String(integrityPolicy.rosterParticipation))) {
+        issue('hunt.settings.integrityPolicy.rosterParticipation', 'Choose flexible, freeze at run start, or flexible participation with fixed scoring.');
+      }
+    }
     const runPolicy = input.settings.runPolicy;
     if (!isObject(runPolicy) || !['disabled', 'capped', 'unlimited', 'practice-only'].includes(String(runPolicy.mode))) issue('hunt.settings.runPolicy', 'Choose a supported replay policy.');
     else if (runPolicy.mode === 'capped' && (!Number.isSafeInteger(runPolicy.maxOfficialRuns) || Number(runPolicy.maxOfficialRuns) < 1)) issue('hunt.settings.runPolicy.maxOfficialRuns', 'Capped replay policies need a positive official-run limit.');
@@ -612,16 +648,17 @@ function draftView(row: Record<string, unknown>) {
 
 export async function importV3Draft(input: unknown) {
   if (!isObject(input)) throw new HttpError(400, 'Import a JSON object.');
-  const validation = validateV3Definition(input);
+  const normalizedInput = normalizeV3DraftInput(input) as ObjectValue;
+  const validation = validateV3Definition(normalizedInput);
   const id = randomUUID(), generation = randomUUID();
-  const title = typeof input.title === 'string' && input.title.trim() ? input.title.trim().slice(0, 160) : 'Imported V3 hunt';
+  const title = typeof normalizedInput.title === 'string' && normalizedInput.title.trim() ? normalizedInput.title.trim().slice(0, 160) : 'Imported V3 hunt';
   const result = await transaction(async client => {
-    const huntId = typeof input.id === 'string' && (await client.query('select 1 from hunt_v3.hunts where id=$1', [input.id])).rowCount
-      ? input.id : null;
+    const huntId = typeof normalizedInput.id === 'string' && (await client.query('select 1 from hunt_v3.hunts where id=$1', [normalizedInput.id])).rowCount
+      ? normalizedInput.id : null;
     return (await client.query(
       `insert into hunt_v3.drafts(id,hunt_id,title,definition,source,generation,validation_report)
         values($1,$2,$3,$4,'json_import',$5,$6) returning *`,
-      [id, huntId, title, input, generation, { valid: validation.issues.length === 0, issues: validation.issues, fairness: validation.fairness }],
+      [id, huntId, title, normalizedInput, generation, { valid: validation.issues.length === 0, issues: validation.issues, fairness: validation.fairness }],
     )).rows[0];
   });
   return draftView(result);
@@ -636,12 +673,13 @@ export async function listV3Drafts() {
 export async function saveV3Draft(input: unknown, draftId: string, revision: number, generation: string) {
   if (!isV3Uuid(draftId) || !Number.isSafeInteger(revision) || revision < 1 || !isV3Uuid(generation)) throw new HttpError(400, 'Load the current draft before saving.');
   if (!isObject(input)) throw new HttpError(400, 'Draft JSON must be an object.');
-  const validation = validateV3Definition(input);
+  const normalizedInput = normalizeV3DraftInput(input) as ObjectValue;
+  const validation = validateV3Definition(normalizedInput);
   const row = (await transaction(async client => client.query(
     `update hunt_v3.drafts set title=$1,definition=$2,validation_report=$3,revision=revision+1,
       previewed_revision=null,previewed_generation=null,previewed_session_hash=null,previewed_at=null
       where id=$4 and revision=$5 and generation=$6 returning *`,
-    [typeof input.title === 'string' ? input.title.slice(0, 160) : 'V3 hunt', input,
+    [typeof normalizedInput.title === 'string' ? normalizedInput.title.slice(0, 160) : 'V3 hunt', normalizedInput,
       { valid: validation.issues.length === 0, issues: validation.issues, fairness: validation.fairness }, draftId, revision, generation],
   ))).rows[0];
   if (!row) throw new HttpError(409, 'This draft changed in another window. Reload before saving.');

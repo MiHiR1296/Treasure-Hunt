@@ -6,17 +6,49 @@ import { readFile } from 'node:fs/promises';
 import { getPool } from '../../lib/server/db';
 
 const enabled = Boolean(process.env.DATABASE_URL);
+const approvalMigrationHuntId = `v3-approval-migration-${randomUUID()}`;
+const pendingMigrationTeamId = randomUUID();
+const approvedMigrationTeamId = randomUUID();
 
 before(async () => {
   if (!enabled) return;
   const schema = await readFile(new URL('../../database/v3.sql', import.meta.url), 'utf8');
   await getPool().query(schema);
-  // The startup migration is deliberately repeatable.
+  await getPool().query(
+    `insert into hunt_v3.hunts(id,title,slug,settings)
+      values($1,'Approval migration fixture',$1,'{}')`,
+    [approvalMigrationHuntId],
+  );
+  await getPool().query(
+    `insert into hunt_v3.teams(
+      id,hunt_id,canonical_code,name_status,pin_hash,registration_source,approval_status,approval_method)
+      values($1,$3,'T-991','code_only',$4,'self_serve','pending',null),
+            ($2,$3,'T-992','code_only',$4,'self_serve','approved','organizer')`,
+    [pendingMigrationTeamId, approvedMigrationTeamId, approvalMigrationHuntId, 'm'.repeat(32)],
+  );
+  // Simulate the exact pre-column shape, including populated pending and
+  // approved rows, before exercising the repeatable startup migration.
+  await getPool().query('alter table hunt_v3.teams drop column approval_method cascade');
   await getPool().query(schema);
 });
 
 after(async () => {
   if (enabled) await getPool().end();
+});
+
+test('PostgreSQL V3: approval-method migration preserves legacy approval semantics', { skip: !enabled }, async () => {
+  assert.deepEqual(
+    (await getPool().query(
+      `select canonical_code,approval_status,approval_method from hunt_v3.teams
+        where id=any($1::uuid[]) order by canonical_code`,
+      [[pendingMigrationTeamId, approvedMigrationTeamId]],
+    )).rows,
+    [
+      { canonical_code: 'T-991', approval_status: 'pending', approval_method: null },
+      { canonical_code: 'T-992', approval_status: 'approved', approval_method: 'organizer' },
+    ],
+    'legacy pending teams remain pending while legacy approved teams retain organizer provenance',
+  );
 });
 
 test('PostgreSQL V3: run isolation, immutable evidence, score cache, recognition and media cleanup', { skip: !enabled }, async () => {
@@ -38,7 +70,10 @@ test('PostgreSQL V3: run isolation, immutable evidence, score cache, recognition
     await client.query(
       `insert into hunt_v3.hunt_versions(hunt_id,version,definition,content_hash,validation_report,fairness_report)
         values($1,1,$2,$3,'{}',$4)`,
-      [huntId, { schemaVersion: 3 }, 'a'.repeat(64), { valid: true, routes: [], issues: [] }],
+      [huntId, {
+        schemaVersion: 3,
+        settings: { integrityPolicy: { locationVerification: 'strict', selfServeApproval: 'organizer', rosterParticipation: 'freeze_at_run_start' } },
+      }, 'a'.repeat(64), { valid: true, routes: [], issues: [] }],
     );
     await client.query('update hunt_v3.hunts set latest_version=1 where id=$1', [huntId]);
     await client.query(

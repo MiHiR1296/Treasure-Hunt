@@ -12,6 +12,7 @@ import { aggregateContributions, calculateRecognitionResults, isRecognitionWindo
 import { getPool, transaction } from '../db';
 import { canonicalJson, digest, HttpError } from '../security';
 import { lockV3Hunt, lockV3Team } from './locking';
+import { assertPublishedIntegrityPolicy } from './runtime';
 import { isV3Uuid, rateLimitV3 } from './security';
 
 type RecognitionContext = {
@@ -36,14 +37,16 @@ async function context(client: PoolClient, teamId: string, runId: string, lock =
     [runId, teamId],
   )).rows[0];
   if (!row) throw new HttpError(404, 'Run not found.');
+  assertPublishedIntegrityPolicy((row.definition as V3Definition).settings);
   return { run: row, definition: row.definition, now: new Date(row.now).toISOString() };
 }
 
-async function runMembers(client: PoolClient, runId: string): Promise<TeamMemberIdentity[]> {
+async function runMembers(client: PoolClient, runId: string, contributionEligibleOnly = false): Promise<TeamMemberIdentity[]> {
   const { rows } = await client.query(
     `select member_id as "teamMemberId",member_name_snapshot as "displayName"
-      from hunt_v3.run_members where run_id=$1 order by joined_run_at,member_id`,
-    [runId],
+      from hunt_v3.run_members where run_id=$1 and (not $2::boolean or contribution_eligible)
+      order by joined_run_at,member_id`,
+    [runId, contributionEligibleOnly],
   );
   return rows;
 }
@@ -107,6 +110,8 @@ export function recognitionOptions(definition: V3Definition) {
 export async function recalculateRecognition(client: PoolClient, teamId: string, runId: string) {
   const ctx = await context(client, teamId, runId);
   const members = await runMembers(client, runId);
+  const eligibleMembers = await runMembers(client, runId, true);
+  const eligibleMemberIds = new Set(eligibleMembers.map(member => member.teamMemberId));
   const contributions = await contributionEvents(client, [runId]);
   const votes = await latestVotes(client, runId);
   const settings = ctx.definition.settings.recognition;
@@ -119,7 +124,7 @@ export async function recalculateRecognition(client: PoolClient, teamId: string,
     titleLibrary: settings.titleLibrary,
     allowedSubtypes: recognitionOptions(ctx.definition),
   });
-  for (const result of results) {
+  for (const result of results.filter(result => eligibleMemberIds.has(result.teamMemberId))) {
     const revision = Number((await client.query(
       'select coalesce(max(revision),0)+1 as revision from hunt_v3.recognition_results where run_id=$1 and member_id=$2',
       [runId, result.teamMemberId],
@@ -183,8 +188,9 @@ export async function privateRecognition(teamId: string, memberId: string, runId
     // disqualification cannot form a run -> team lock inversion through FKs.
     const ctx = await context(client, teamId, runId, true);
     const currentRunMembers = await runMembers(client, runId);
+    const recognitionEligibleMembers = await runMembers(client, runId, true);
     if (!currentRunMembers.some(member => member.teamMemberId === memberId)) {
-      throw new HttpError(409, 'This run is locked to its starting roster. You can take part in the team\'s next run.');
+      throw new HttpError(409, 'This contribution board belongs to the crew who played this run.');
     }
     if (ctx.run.status !== 'completed') throw new HttpError(409, 'Crew recognition opens when the run is complete.');
     const settings = ctx.definition.settings.recognition;
@@ -196,7 +202,7 @@ export async function privateRecognition(teamId: string, memberId: string, runId
       `select participant.member_id as "teamMemberId",
         (array_agg(participant.member_name_snapshot order by participant.joined_run_at desc))[1] as "displayName"
         from hunt_v3.run_members participant
-        where participant.run_id=any($1::uuid[])
+        where participant.run_id=any($1::uuid[]) and participant.contribution_eligible
         group by participant.member_id
         order by min(participant.joined_run_at),participant.member_id`,
       [runIds],
@@ -223,7 +229,7 @@ export async function privateRecognition(teamId: string, memberId: string, runId
         closesAt,
         ownVote,
         options: recognitionOptions(ctx.definition),
-        teammates: currentRunMembers.filter(member => member.teamMemberId !== memberId),
+        teammates: recognitionEligibleMembers.filter(member => member.teamMemberId !== memberId),
       },
     };
   });
@@ -264,9 +270,6 @@ export async function saveRecognitionVote(input: {
       if (receipt.payload_hash !== payloadHash) throw new HttpError(409, 'This request ID was already used for another action.');
       return { saved: true, voteRevision: receipt.response?.voteRevision, replayed: true } as const;
     };
-    const replay = await replayReceipt();
-    if (replay) return replay;
-
     const identity = (await client.query(
       'select hunt_id from hunt_v3.runs where id=$1 and team_id=$2',
       [input.runId, input.teamId],
@@ -277,13 +280,17 @@ export async function saveRecognitionVote(input: {
       throw new HttpError(404, 'Run not found.');
     }
     const ctx = await context(client, input.teamId, input.runId, true);
-    const concurrentReplay = await replayReceipt();
-    if (concurrentReplay) return concurrentReplay;
+    const replay = await replayReceipt();
+    if (replay) return replay;
     const settings = ctx.definition.settings.recognition;
     if (ctx.run.status !== 'completed' || !ctx.run.completed_at) throw new HttpError(409, 'Crew recognition opens when the run is complete.');
     if (!settings.enabled || !settings.peerVotingEnabled) throw new HttpError(409, 'Peer recognition is not enabled for this hunt.');
     if (!isRecognitionWindowOpen(ctx.run.completed_at, settings.votingWindowMinutes, ctx.now)) throw new HttpError(409, 'The crew recognition window has closed.');
     const members = await runMembers(client, input.runId);
+    const eligibleRecipients = await runMembers(client, input.runId, true);
+    if (!eligibleRecipients.some(member => member.teamMemberId === input.recipientMemberId)) {
+      throw new HttpError(400, 'Choose a teammate who is eligible for crew recognition in this run.');
+    }
     const previous = (await client.query(
       'select id,revision from hunt_v3.recognition_votes where run_id=$1 and voter_member_id=$2 order by revision desc,id desc limit 1',
       [input.runId, input.memberId],

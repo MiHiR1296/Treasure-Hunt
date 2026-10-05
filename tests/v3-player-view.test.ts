@@ -16,6 +16,11 @@ function definition(): V3Definition {
       mode: 'sequential',
       map: 'all',
       registrationMode: 'self-serve',
+      integrityPolicy: {
+        locationVerification: 'gps_only',
+        selfServeApproval: 'automatic',
+        rosterParticipation: 'flexible_fixed_scoring',
+      },
       runPolicy: { mode: 'unlimited' },
       leaderboardPolicy: {
         bestRunRule: 'score_then_time_then_completion',

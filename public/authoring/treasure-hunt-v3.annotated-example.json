@@ -3,7 +3,7 @@
   "id": "parallel-crew-demo",
   "version": 1,
   "title": "Parallel Crew Demo",
-  "description": "Annotated example: organizer-assigned registration keeps team creation controlled; a balanced two-variant plan deck avoids a repeat before both Crew Gate variants are used; official runs are capped at two; time is revealed only after a second eligible finish; the public board exposes team-level data only; recognition blends 70% verified actions with 30% private peer support; and each parallel gate requires three distinct authenticated starting-roster members inside 90 seconds, including fresh photo evidence. QR values below are import directives, not live secrets.",
+  "description": "Annotated competition example: organizer-assigned registration and a frozen starting roster keep participation controlled; strict location verification is selected; a balanced two-variant plan deck avoids a repeat before both Crew Gate variants are used; official runs are capped at two; time is revealed only after a second eligible finish; the public board exposes team-level data only; recognition blends 70% verified actions with 30% private peer support; and each parallel gate requires three distinct authenticated starting-roster members inside 90 seconds, including fresh photo evidence. QR values below are import directives, not live secrets.",
   "settings": {
     "mode": "sequential",
     "map": "none",
@@ -15,6 +15,11 @@
     "completionMessage": "You cleared the Crew Gate. Celebrate the teammates who made it happen, then try to improve your run.",
     "photoRetention": "after_verification",
     "registrationMode": "organizer-assigned",
+    "integrityPolicy": {
+      "locationVerification": "strict",
+      "selfServeApproval": "organizer",
+      "rosterParticipation": "freeze_at_run_start"
+    },
     "runPolicy": {
       "mode": "capped",
       "maxOfficialRuns": 2

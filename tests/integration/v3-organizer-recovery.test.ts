@@ -43,6 +43,7 @@ function definition(id: string, node: InteractiveNode, parallelMechanics: Parall
       registrationOpen: true,
       photoRetention: 'after_verification',
       registrationMode: 'organizer-assigned',
+      integrityPolicy: { locationVerification: 'strict', selfServeApproval: 'organizer', rosterParticipation: 'freeze_at_run_start' },
       runPolicy: { mode: 'capped', maxOfficialRuns: 1 },
       leaderboardPolicy: {
         bestRunRule: 'score_then_time_then_completion',
