@@ -1,0 +1,297 @@
+{
+  "schemaVersion": 3,
+  "id": "replace-with-hunt-id",
+  "version": 1,
+  "title": "Replace with your hunt title",
+  "description": "A balanced V3 starter with one seeded route stop, equal challenge variants, replay, private recognition, and no production secrets.",
+  "settings": {
+    "mode": "open",
+    "map": "none",
+    "rules": "Play fairly, stay with your team, respect each location, and ask the organizer for help when needed.",
+    "minTeamSize": 2,
+    "maxTeamSize": 4,
+    "sessionDurationSeconds": 3600,
+    "registrationOpen": true,
+    "completionMessage": "Great run. Check your crew contribution board, then decide whether to try again.",
+    "photoRetention": "after_verification",
+    "registrationMode": "self-serve",
+    "runPolicy": {
+      "mode": "unlimited"
+    },
+    "leaderboardPolicy": {
+      "bestRunRule": "score_then_time_then_completion",
+      "mainBoardEnabled": true,
+      "replayBoardEnabled": true,
+      "replayBoardPublic": false,
+      "timeVisibility": "after_second_eligible_run",
+      "showProgress": true
+    },
+    "publicBoard": {
+      "enabled": false,
+      "title": "Live Hunt Scoreboard",
+      "status": "live",
+      "teamIdentity": "code_and_name",
+      "columns": ["rank", "team_code", "team_name", "points", "progress"]
+    },
+    "socialShare": {
+      "enabled": false,
+      "organizerHandle": "@yourhandle",
+      "campaignHashtag": "#YourHunt",
+      "allowPersonalTitle": true
+    },
+    "recognition": {
+      "enabled": true,
+      "peerVotingEnabled": true,
+      "votingWindowMinutes": 60,
+      "dataWeight": 0.7,
+      "peerWeight": 0.3,
+      "titleLibrary": {
+        "trailblazer": "Trailblazer",
+        "puzzle_ace": "Puzzle Ace",
+        "codebreaker": "Codebreaker",
+        "eagle_eye": "Eagle Eye",
+        "clutch_player": "Clutch Player",
+        "team_spark": "Team Spark"
+      }
+    },
+    "routePlan": {
+      "startCheckpointId": "start",
+      "finaleCheckpointId": "finale",
+      "requiredCheckpointIds": [],
+      "choose": {
+        "count": 1,
+        "fromCheckpointIds": ["library", "park"]
+      },
+      "shuffleSelectedCheckpoints": false,
+      "avoidTransitions": [],
+      "checkpointEstimates": {
+        "start": { "durationMinutes": 1 },
+        "library": { "durationMinutes": 3 },
+        "park": { "durationMinutes": 3 },
+        "finale": { "durationMinutes": 1 }
+      },
+      "travelEstimates": []
+    },
+    "challengePools": {
+      "library": {
+        "id": "library-challenges",
+        "variants": [
+          {
+            "id": "library-observation",
+            "checkpointId": "library-observation",
+            "estimatedDurationMinutes": 3,
+            "difficulty": 2,
+            "scoreCeiling": 20,
+            "weight": 1
+          },
+          {
+            "id": "library-riddle",
+            "checkpointId": "library-riddle",
+            "estimatedDurationMinutes": 3,
+            "difficulty": 2,
+            "scoreCeiling": 20,
+            "weight": 1
+          }
+        ]
+      },
+      "park": {
+        "id": "park-challenges",
+        "variants": [
+          {
+            "id": "park-code",
+            "checkpointId": "park-code",
+            "estimatedDurationMinutes": 3,
+            "difficulty": 2,
+            "scoreCeiling": 20,
+            "weight": 1
+          },
+          {
+            "id": "park-choice",
+            "checkpointId": "park-choice",
+            "estimatedDurationMinutes": 3,
+            "difficulty": 2,
+            "scoreCeiling": 20,
+            "weight": 1
+          }
+        ]
+      }
+    },
+    "parallelMechanics": [],
+    "variableGenerators": {
+      "colour": {
+        "type": "choice",
+        "values": ["BLUE", "GREEN", "ORANGE", "PURPLE"]
+      },
+      "code": {
+        "type": "code",
+        "alphabet": "ABCDEFGHJKLMNPQRSTUVWXYZ23456789",
+        "length": 4
+      }
+    },
+    "fairnessPolicy": {
+      "durationToleranceMinutes": 1,
+      "maxResolvedRoutes": 10000,
+      "requireTravelEstimates": false,
+      "walkingSpeedMetersPerMinute": 72,
+      "minutesPerDifficultyPoint": 1.5
+    }
+  },
+  "theme": {
+    "primaryColor": "#047857",
+    "font": "system",
+    "feedback": true,
+    "buttonShape": "rounded",
+    "checkpointIconStyle": "numbers",
+    "successAnimation": "celebrate"
+  },
+  "checkpoints": [
+    {
+      "id": "start",
+      "title": "Start",
+      "basePoints": 0,
+      "required": true,
+      "flow": {
+        "startNodeId": "welcome",
+        "nodes": [
+          {
+            "id": "welcome",
+            "type": "show_text",
+            "text": "Welcome. Your private run code is {{code}}. Remember it for the finale.",
+            "next": "finish-start"
+          },
+          { "id": "finish-start", "type": "complete" }
+        ]
+      },
+      "hints": []
+    },
+    {
+      "id": "library-observation",
+      "title": "Library Observation",
+      "basePoints": 20,
+      "required": false,
+      "flow": {
+        "startNodeId": "observe-colour",
+        "nodes": [
+          {
+            "id": "observe-colour",
+            "type": "verify_answer",
+            "prompt": "Find the {{colour}} marker and enter its colour.",
+            "answers": ["{{colour}}"],
+            "caseSensitive": false,
+            "recordAnswerAttempts": true,
+            "next": "finish-library-observation"
+          },
+          { "id": "finish-library-observation", "type": "complete" }
+        ]
+      },
+      "hints": [
+        {
+          "id": "library-colour-hint",
+          "title": "Marker hint",
+          "cost": 2,
+          "content": { "type": "text", "text": "Look near the agreed public display area." },
+          "relevance": {
+            "nodeId": "observe-colour",
+            "unlockAfterAttempts": 1,
+            "expireWhenSolved": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "library-riddle",
+      "title": "Library Riddle",
+      "basePoints": 20,
+      "required": false,
+      "flow": {
+        "startNodeId": "solve-word",
+        "nodes": [
+          {
+            "id": "solve-word",
+            "type": "puzzle",
+            "prompt": "Solve the word clue to continue.",
+            "puzzle": {
+              "type": "text",
+              "prompt": "What word means a place where books are borrowed?",
+              "answers": ["library"],
+              "caseSensitive": false
+            },
+            "next": "finish-library-riddle"
+          },
+          { "id": "finish-library-riddle", "type": "complete" }
+        ]
+      },
+      "hints": []
+    },
+    {
+      "id": "park-code",
+      "title": "Park Code",
+      "basePoints": 20,
+      "required": false,
+      "flow": {
+        "startNodeId": "enter-code",
+        "nodes": [
+          {
+            "id": "enter-code",
+            "type": "verify_code",
+            "prompt": "Enter the four-character run code shown at Start.",
+            "code": "{{code}}",
+            "caseSensitive": false,
+            "next": "finish-park-code"
+          },
+          { "id": "finish-park-code", "type": "complete" }
+        ]
+      },
+      "hints": []
+    },
+    {
+      "id": "park-choice",
+      "title": "Park Choice",
+      "basePoints": 20,
+      "required": false,
+      "flow": {
+        "startNodeId": "pick-answer",
+        "nodes": [
+          {
+            "id": "pick-answer",
+            "type": "puzzle",
+            "prompt": "Choose the best answer.",
+            "puzzle": {
+              "type": "multiple_choice",
+              "prompt": "Which place is normally outdoors?",
+              "options": [
+                { "id": "park-option", "label": "Park" },
+                { "id": "library-option", "label": "Library" }
+              ],
+              "correctOptionId": "park-option"
+            },
+            "next": "finish-park-choice"
+          },
+          { "id": "finish-park-choice", "type": "complete" }
+        ]
+      },
+      "hints": []
+    },
+    {
+      "id": "finale",
+      "title": "Finale",
+      "basePoints": 0,
+      "required": true,
+      "flow": {
+        "startNodeId": "final-code",
+        "nodes": [
+          {
+            "id": "final-code",
+            "type": "verify_code",
+            "prompt": "Enter your private run code one final time.",
+            "code": "{{code}}",
+            "caseSensitive": false,
+            "next": "finish-hunt"
+          },
+          { "id": "finish-hunt", "type": "complete" }
+        ]
+      },
+      "hints": []
+    }
+  ]
+}

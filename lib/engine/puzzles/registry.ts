@@ -58,7 +58,7 @@ export const puzzleRegistry: Readonly<Record<PuzzleType, RegistryEntry>> = Objec
   }),
   word_search: createPuzzleModule('word_search', {
     initial: () => ({ type: 'word_search', foundWords: [] }),
-    public: definition => ({ type: 'word_search', grid: definition.grid.map(row => row.map(letter => letter.toUpperCase())), words: definition.words.map(word => word.toUpperCase()), ...(definition.minimumWords === undefined ? {} : { minimumWords: definition.minimumWords }), ...(definition.bonusPerExtraWord === undefined ? {} : { bonusPerExtraWord: definition.bonusPerExtraWord }) }),
+    public: definition => ({ type: 'word_search', grid: definition.grid.map(row => row.map(letter => letter.toUpperCase())), words: definition.words.map(word => word.toUpperCase()), ...(definition.minimumWords === undefined ? {} : { minimumWords: definition.minimumWords }), ...(definition.bonusPerExtraWord === undefined ? {} : { bonusPerExtraWord: definition.bonusPerExtraWord }), ...(definition.bonusRankingImpact === undefined ? {} : { bonusRankingImpact: definition.bonusRankingImpact }) }),
     update(definition, state, value) {
       const minimumWords = definition.minimumWords ?? definition.words.length
       if (record(value) && Object.keys(value).length === 1 && value.finish === true) {
@@ -78,7 +78,7 @@ export const puzzleRegistry: Readonly<Record<PuzzleType, RegistryEntry>> = Objec
       // Reward a fixed number of bonus slots, not particular words. A reset may
       // change discovery order, but it must never create more active awards than
       // the configured number of optional words.
-      const rewards = isNew && foundWords.length > minimumWords && bonus > 0 ? [{ id: `word-search:extra:${foundWords.length - minimumWords}`, amount: bonus, label: `Extra ingredient: ${found}` }] : undefined
+      const rewards = isNew && foundWords.length > minimumWords && bonus > 0 ? [{ id: `word-search:extra:${foundWords.length - minimumWords}`, amount: bonus, ...(definition.bonusRankingImpact === 'excluded' ? { countsForRanking: false } : {}), label: `Extra ingredient: ${found}` }] : undefined
       return { state: { type: 'word_search', foundWords }, completed: targetWords.every(word => foundWords.includes(word)), ...(rewards ? { rewards } : {}) }
     },
   }),
@@ -129,6 +129,7 @@ export const puzzleRegistry: Readonly<Record<PuzzleType, RegistryEntry>> = Objec
       type: 'quiz',
       minimumCorrect: definition.minimumCorrect,
       ...(definition.bonusPerAdditionalCorrect === undefined ? {} : { bonusPerAdditionalCorrect: definition.bonusPerAdditionalCorrect }),
+      ...(definition.bonusRankingImpact === undefined ? {} : { bonusRankingImpact: definition.bonusRankingImpact }),
       questions: definition.questions.map(question => ({
         id: question.id,
         prompt: question.prompt,
@@ -151,8 +152,11 @@ export const puzzleRegistry: Readonly<Record<PuzzleType, RegistryEntry>> = Objec
       const completed = false
       const rewards: PuzzleReward[] = []
       if (status === 'skipped' && question.skipPenalty) rewards.push({ id: `quiz:skip:${question.id}`, amount: -question.skipPenalty, kind: 'skip_penalty', label: `Skipped quiz question: ${question.id}` })
-      if (status === 'correct' && definition.bonusPerAdditionalCorrect && correctCount > definition.minimumCorrect) rewards.push({ id: `quiz:bonus:${correctCount - definition.minimumCorrect}`, amount: definition.bonusPerAdditionalCorrect, kind: 'action_points', label: `Extra correct quiz answer: ${question.id}` })
-      return { state: { type: 'quiz', responses, correctCount, finished: false }, completed, ...(rewards.length ? { rewards } : {}), message: skip ? question.skipPenalty ? `Question skipped. −${question.skipPenalty} points.` : 'Question skipped. Continue with the next one.' : status === 'correct' ? correctCount >= definition.minimumCorrect ? `Threshold met — finish now or answer another for a bonus.` : `Correct — ${correctCount} correct so far.` : 'That answer is not correct. This question is closed; continue with the next one.' }
+      if (status === 'correct' && definition.bonusPerAdditionalCorrect && correctCount > definition.minimumCorrect) rewards.push({ id: `quiz:bonus:${correctCount - definition.minimumCorrect}`, amount: definition.bonusPerAdditionalCorrect, kind: 'action_points', ...(definition.bonusRankingImpact === 'excluded' ? { countsForRanking: false } : {}), label: `Extra correct quiz answer: ${question.id}` })
+      const bonusMessage = definition.bonusRankingImpact === 'excluded'
+        ? 'Threshold met — finish now or answer another for extra points that do not change leaderboard score.'
+        : 'Threshold met — finish now or answer another for a bonus.'
+      return { state: { type: 'quiz', responses, correctCount, finished: false }, completed, ...(rewards.length ? { rewards } : {}), message: skip ? question.skipPenalty ? `Question skipped. −${question.skipPenalty} points.` : 'Question skipped. Continue with the next one.' : status === 'correct' ? correctCount >= definition.minimumCorrect ? bonusMessage : `Correct — ${correctCount} correct so far.` : 'That answer is not correct. This question is closed; continue with the next one.' }
     },
   }),
   matching: createPuzzleModule('matching', {

@@ -142,6 +142,49 @@ test('reset puzzle and reopening completed checkpoint never accept stale pre-res
   assert.throws(() => executeCommand(h, state, { type: 'save_puzzle', checkpointId: 'first', nodeId: 'puzzle', expectedRevision: 0, value: { order: ['a', 'b', 'c'] } }, now), code('puzzle_conflict'))
 })
 
+test('puzzle rewards remain earned when a team takes the configured fallback afterward', () => {
+  const h = hunt([cp('first', [
+    {
+      id: 'puzzle', type: 'puzzle', prompt: 'Find either word',
+      puzzle: {
+        type: 'word_search', grid: [['A', 'B'], ['B', 'A']], words: ['AB', 'BA'],
+        minimumWords: 1, bonusPerExtraWord: 100,
+      },
+      next: 'done', fallback: { nodeId: 'fallback-points', label: 'Use the alternate route', enabled: true },
+    },
+    { id: 'fallback-points', type: 'add_points', amount: 100, label: 'Alternate route', next: 'done' },
+    { id: 'done', type: 'complete' },
+  ])])
+  h.checkpoints[0].basePoints = 10
+  let state = createInitialState(h, 'team', now)
+  state = executeCommand(h, state, {
+    type: 'save_puzzle', checkpointId: 'first', nodeId: 'puzzle', expectedRevision: 0,
+    value: { path: [{ row: 0, column: 0 }, { row: 0, column: 1 }] },
+  }, now).state
+  state = executeCommand(h, state, {
+    type: 'save_puzzle', checkpointId: 'first', nodeId: 'puzzle', expectedRevision: 1,
+    value: { path: [{ row: 1, column: 0 }, { row: 1, column: 1 }] },
+  }, now).state
+  assert.equal(state.score, 100)
+  state = executeCommand(h, state, { type: 'use_fallback', checkpointId: 'first', nodeId: 'puzzle' }, now).state
+  assert.equal(state.status, 'completed')
+  assert.equal(state.score, 210, 'earned puzzle reward, fallback award, and checkpoint base all stack')
+})
+
+test('score mutations fail safely before either PostgreSQL integer cache can overflow', () => {
+  const h = hunt()
+  h.checkpoints[0].wrongAttemptPenalty = 1
+  const state = createInitialState(h, 'team', now)
+  state.ledger.push({
+    id: 'boundary', kind: 'organizer_adjustment', checkpointId: '', amount: -2_147_483_648,
+    at: now, reason: 'Boundary fixture',
+  })
+  state.score = -2_147_483_648
+  assert.throws(() => executeCommand(h, state, {
+    type: 'verify', checkpointId: 'first', nodeId: 'answer', value: 'wrong',
+  }, now), code('score_limit'))
+})
+
 test('word-search bonus slots stay capped across changed order, duplicate submissions, repeated resets and checkpoint reopening', () => {
   const h = bonusWordSearchHunt()
   const submit = (state: GameState, row: number) => executeCommand(h, state, { type: 'submit_puzzle', checkpointId: 'first', nodeId: 'puzzle', expectedRevision: state.checkpoints.first.nodes.puzzle.puzzle!.revision, value: wordPath(row) }, now).state
@@ -387,6 +430,50 @@ test('variables, conditions and point actions compose without exposing private s
   state = executeControl(h, state, { type: 'move_checkpoint', checkpointId: 'first', expectedRevision: state.revision, reason: 'Reset entire checkpoint' }, now).state
   assert.equal(state.score, 5)
   state = solve(h, state, 'first'); assert.equal(state.score, 25)
+})
+
+test('excluded bonus sources stay outside ranking and refunds retain their ledger classification', () => {
+  const h = hunt([cp('first', [
+    { id: 'delight', type: 'add_points', amount: 7, label: 'Secret flourish', rankingImpact: 'excluded', next: 'answer' },
+    { id: 'answer', type: 'verify_answer', prompt: 'Name the landmark', answers: ['gate'], next: 'done' },
+    { id: 'done', type: 'complete' },
+  ])])
+  h.checkpoints[0].timeBonus = { withinSeconds: 90, points: 5, rankingImpact: 'excluded' }
+  const ranked = (state: GameState) => state.ledger.reduce((total, entry) => total + (entry.countsForRanking === false ? 0 : entry.amount), 0)
+
+  let state = createInitialState(h, 'team', now)
+  assert.equal(state.score, 7)
+  assert.equal(ranked(state), 0)
+  state = solve(h, state, 'first')
+  assert.equal(state.score, 32)
+  assert.equal(ranked(state), 20)
+  assert.deepEqual(state.ledger.filter(entry => entry.kind === 'action_points' || entry.kind === 'time_bonus').map(entry => entry.countsForRanking), [false, false])
+
+  state = executeControl(h, state, { type: 'move_checkpoint', checkpointId: 'first', expectedRevision: state.revision, reason: 'Replay this checkpoint' }, later).state
+  assert.equal(state.score, 7, 'reopening compensates the old result and immediately reapplies the excluded automatic delight')
+  assert.equal(ranked(state), 0)
+  const excludedRefunds = state.ledger.filter(entry => entry.kind === 'refund' && entry.countsForRanking === false)
+  assert.equal(excludedRefunds.length, 2)
+})
+
+test('initial variables control the first automatic branch and automatic writes survive startup', () => {
+  const h = hunt([cp('first', [
+    { id: 'branch', type: 'branch', condition: { type: 'variable', key: 'generatedRoute', equals: 'BLUE' }, ifTrue: 'remember', ifFalse: 'wrong' },
+    { id: 'remember', type: 'set_variable', key: 'automaticMarker', value: 'kept', next: 'right' },
+    { id: 'right', type: 'show_text', text: 'Correct generated route', next: 'done' },
+    { id: 'wrong', type: 'show_text', text: 'Wrong route', next: 'done' },
+    { id: 'done', type: 'complete' },
+  ])])
+  const initialVariables = { generatedRoute: 'BLUE' }
+  const state = createInitialState(h, 'team', now, { initialVariables })
+  assert.equal(state.checkpoints.first.activeNodeId, 'right')
+  assert.deepEqual(state.variables, { generatedRoute: 'BLUE', automaticMarker: 'kept' })
+  assert.deepEqual(initialVariables, { generatedRoute: 'BLUE' }, 'initialization must not mutate the caller-owned plan')
+
+  const waiting = createInitialState(h, 'waiting-team', now, { waiting: true, initialVariables })
+  const started = executeCommand(h, waiting, { type: 'start_session', expectedRevision: 0 }, later).state
+  assert.equal(started.checkpoints.first.activeNodeId, 'right')
+  assert.deepEqual(started.variables, { generatedRoute: 'BLUE', automaticMarker: 'kept' })
 })
 
 test('daily time branches include overnight UTC windows and weighted random routes are deterministic per team', () => {

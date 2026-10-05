@@ -86,3 +86,18 @@ test('an optional word-search find shows its bonus without claiming the next clu
   assert.equal(presentation.cue?.points, 2);
   assert.equal(presentation.celebrate, true);
 });
+
+test('excluded puzzle rewards are described as extra points that do not change leaderboard score', () => {
+  const hunt: HuntDefinition = {
+    schemaVersion: 1, id: 'extra-feedback', version: 1, title: 'Extra feedback',
+    checkpoints: [{ id: 'ingredients', title: 'Ingredients', basePoints: 20, hints: [], flow: { startNodeId: 'words', nodes: [
+      { id: 'words', type: 'puzzle', prompt: 'Find ingredients.', puzzle: { type: 'word_search', grid: [['C', 'A', 'T'], ['O', 'W', 'L']], words: ['CAT', 'OWL'], minimumWords: 1, bonusPerExtraWord: 2, bonusRankingImpact: 'excluded' }, next: 'done' },
+      { id: 'done', type: 'complete' },
+    ] } }],
+  };
+  let state = createInitialState(hunt, 'extra-team', now);
+  state = executeCommand(hunt, state, { type: 'save_puzzle', checkpointId: 'ingredients', nodeId: 'words', expectedRevision: 0, value: { path: [0, 1, 2].map(column => ({ row: 0, column })) } }, now).state;
+  const result = executeCommand(hunt, state, { type: 'save_puzzle', checkpointId: 'ingredients', nodeId: 'words', expectedRevision: 1, value: { path: [0, 1, 2].map(column => ({ row: 1, column })) } }, now);
+  assert.match(result.feedback.message, /extra points \(not leaderboard score\)/i);
+  assert.equal(result.state.ledger.at(-1)?.countsForRanking, false);
+});

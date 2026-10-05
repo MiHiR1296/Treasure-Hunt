@@ -9,7 +9,7 @@ export interface HuntDefinition {
   title: string
   description?: string
   checkpoints: CheckpointDefinition[]
-  dudQrs?: { token: string; message: string; points?: number }[]
+  dudQrs?: { token: string; message: string; points?: number; rankingImpact?: RankingImpact }[]
   settings?: HuntSettings
   theme?: HuntTheme
 }
@@ -43,6 +43,7 @@ export interface HuntTheme {
 }
 export interface MapLocation { latitude: number; longitude: number; radiusMeters: number }
 export interface GPSRegion extends MapLocation { maxAccuracyMeters: number }
+export type RankingImpact = 'competitive' | 'excluded'
 export interface CheckpointDefinition {
   id: string
   title: string
@@ -53,7 +54,7 @@ export interface CheckpointDefinition {
   location?: MapLocation
   wrongAttemptPenalty?: number
   skipPenalty?: number
-  timeBonus?: { withinSeconds: number; points: number }
+  timeBonus?: { withinSeconds: number; points: number; rankingImpact?: RankingImpact }
   flow: { startNodeId: string; nodes: FlowNode[] }
   hints: HintDefinition[]
 }
@@ -81,7 +82,7 @@ export type FlowNode = InteractiveNode
   | { id: string; type: 'set_variable'; key: string; value: VariableValue; next: string }
   | { id: string; type: 'branch'; condition: Condition; ifTrue: string; ifFalse: string }
   | { id: string; type: 'random_branch'; choices: { next: string; weight: number }[] }
-  | { id: string; type: 'add_points'; amount: number; label: string; next: string }
+  | { id: string; type: 'add_points'; amount: number; label: string; rankingImpact?: RankingImpact; next: string }
   | { id: string; type: 'complete' }
 
 export type DisplayContent =
@@ -176,6 +177,8 @@ export interface ScoreEntry {
   nodeId?: string
   hintId?: string
   amount: number
+  /** Defaults to true. V3 persists excluded delight points separately from the official ranking score. */
+  countsForRanking?: boolean
   at: string
   reason?: string
   reverses?: string
@@ -220,6 +223,8 @@ export interface GameState {
   completedAt?: string
   routeAssignments?: RouteAssignment[]
   timer?: SessionTimer
+  /** Pause windows that affect elapsed ranking even when no personal countdown exists. */
+  clockPauses?: { startedAt: string; endedAt?: string; reason: 'organizer' | 'review'; sourceId?: string }[]
   startingRoster?: { id: string; name: string }[]
   resultReview?: ResultReview
 }

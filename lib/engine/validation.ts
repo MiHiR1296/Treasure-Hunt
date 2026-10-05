@@ -101,7 +101,7 @@ export function validateHunt(value: unknown): ValidationIssue[] {
     if (checkpoint.prerequisites !== undefined && array(checkpoint.prerequisites, `${path}.prerequisites`, 0, 100)) checkpoint.prerequisites.forEach((ref, i) => id(ref, `${path}.prerequisites[${i}]`))
     if (checkpoint.location !== undefined) region(checkpoint.location, `${path}.location`, false)
     for (const key of ['wrongAttemptPenalty', 'skipPenalty']) if (checkpoint[key] !== undefined) number(checkpoint[key], `${path}.${key}`, 0, 1000000, true)
-    if (checkpoint.timeBonus !== undefined && object(checkpoint.timeBonus, `${path}.timeBonus`, ['withinSeconds', 'points'])) { number(checkpoint.timeBonus.withinSeconds, `${path}.timeBonus.withinSeconds`, 1, 31536000, true); number(checkpoint.timeBonus.points, `${path}.timeBonus.points`, 0, 1000000, true) }
+    if (checkpoint.timeBonus !== undefined && object(checkpoint.timeBonus, `${path}.timeBonus`, ['withinSeconds', 'points', 'rankingImpact'])) { number(checkpoint.timeBonus.withinSeconds, `${path}.timeBonus.withinSeconds`, 1, 31536000, true); number(checkpoint.timeBonus.points, `${path}.timeBonus.points`, 0, 1000000, true); if (checkpoint.timeBonus.rankingImpact !== undefined) choice(checkpoint.timeBonus.rankingImpact, `${path}.timeBonus.rankingImpact`, ['competitive', 'excluded']) }
     if (object(checkpoint.flow, `${path}.flow`, ['startNodeId', 'nodes'])) {
       id(checkpoint.flow.startNodeId, `${path}.flow.startNodeId`)
       if (array(checkpoint.flow.nodes, `${path}.flow.nodes`, 1, 200)) checkpoint.flow.nodes.forEach((node, ni) => {
@@ -110,7 +110,7 @@ export function validateHunt(value: unknown): ValidationIssue[] {
         const fields: Record<string, string[]> = {
           show_text: ['text', 'next'], show_media: ['content', 'next'], verify_qr: ['prompt', 'clue', 'token', 'backupCode', 'next'], verify_code: ['prompt', 'clue', 'code', 'caseSensitive', 'recapAnswer', 'next'], verify_answer: ['prompt', 'clue', 'answers', 'caseSensitive', 'recapAnswer', 'recordAnswerAttempts', 'next'],
           verify_gps: ['prompt', 'clue', 'latitude', 'longitude', 'radiusMeters', 'maxAccuracyMeters', 'next'], choose_path: ['prompt', 'clue', 'choices'], puzzle: ['prompt', 'clue', 'puzzle', 'next'], camera_guide: ['prompt', 'clue', 'referenceImageUrl', 'latitude', 'longitude', 'next'], verify_organizer: ['prompt', 'clue', 'next'], verify_image: ['prompt', 'clue', 'referenceImages', 'location', 'next'],
-          set_variable: ['key', 'value', 'next'], branch: ['condition', 'ifTrue', 'ifFalse'], random_branch: ['choices'], add_points: ['amount', 'label', 'next'], complete: [],
+          set_variable: ['key', 'value', 'next'], branch: ['condition', 'ifTrue', 'ifFalse'], random_branch: ['choices'], add_points: ['amount', 'label', 'rankingImpact', 'next'], complete: [],
         }
         if (typeof node.type !== 'string' || !Object.hasOwn(fields, node.type)) { issue(`${np}.type`, 'Unsupported action type.'); return }
         const automatic = ['complete', 'set_variable', 'branch', 'random_branch', 'add_points'].includes(node.type)
@@ -134,7 +134,7 @@ export function validateHunt(value: unknown): ValidationIssue[] {
         if (node.type === 'choose_path' && array(node.choices, `${np}.choices`, 2, 20)) node.choices.forEach((option, i) => { const op = `${np}.choices[${i}]`; if (object(option, op, ['id', 'label', 'next'])) { id(option.id, `${op}.id`); string(option.label, `${op}.label`, 200); id(option.next, `${op}.next`) } })
         if (node.type === 'random_branch' && array(node.choices, `${np}.choices`, 2, 20)) node.choices.forEach((option, i) => { const op = `${np}.choices[${i}]`; if (object(option, op, ['next', 'weight'])) { id(option.next, `${op}.next`); number(option.weight, `${op}.weight`, 1, 10000, true) } })
         if (node.type === 'set_variable') { id(node.key, `${np}.key`); if (!variable(node.value)) issue(`${np}.value`, 'Use a bounded string, number or boolean.') }
-        if (node.type === 'add_points') { number(node.amount, `${np}.amount`, -1000000, 1000000, true); string(node.label, `${np}.label`, 200) }
+        if (node.type === 'add_points') { number(node.amount, `${np}.amount`, -1000000, 1000000, true); string(node.label, `${np}.label`, 200); if (node.rankingImpact !== undefined) choice(node.rankingImpact, `${np}.rankingImpact`, ['competitive', 'excluded']) }
         if (node.type === 'branch') {
           id(node.ifTrue, `${np}.ifTrue`); id(node.ifFalse, `${np}.ifFalse`)
           const c = node.condition, cp = `${np}.condition`
@@ -166,7 +166,7 @@ export function validateHunt(value: unknown): ValidationIssue[] {
       }
     })
   })
-  if (value.dudQrs !== undefined && array(value.dudQrs, 'hunt.dudQrs', 0, 1000)) value.dudQrs.forEach((dud, i) => { const dp = `hunt.dudQrs[${i}]`; if (object(dud, dp, ['token', 'message', 'points'])) { string(dud.token, `${dp}.token`, 2048); string(dud.message, `${dp}.message`, 1000); if (dud.points !== undefined) number(dud.points, `${dp}.points`, -1000000, 1000000, true) } })
+  if (value.dudQrs !== undefined && array(value.dudQrs, 'hunt.dudQrs', 0, 1000)) value.dudQrs.forEach((dud, i) => { const dp = `hunt.dudQrs[${i}]`; if (object(dud, dp, ['token', 'message', 'points', 'rankingImpact'])) { string(dud.token, `${dp}.token`, 2048); string(dud.message, `${dp}.message`, 1000); if (dud.points !== undefined) number(dud.points, `${dp}.points`, -1000000, 1000000, true); if (dud.rankingImpact !== undefined) choice(dud.rankingImpact, `${dp}.rankingImpact`, ['competitive', 'excluded']) } })
   if (issues.length) return issues
   const hunt = value as unknown as HuntDefinition
   const checkpointIds = new Set(hunt.checkpoints.map(cp => cp.id))

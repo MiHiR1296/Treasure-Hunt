@@ -1,0 +1,204 @@
+{
+  "schemaVersion": 3,
+  "id": "parallel-crew-demo",
+  "version": 1,
+  "title": "Parallel Crew Demo",
+  "description": "Annotated example: organizer-assigned registration keeps team creation controlled; the route has one fixed scored checkpoint; unlimited replays use a fresh private seed; time is revealed only after a second eligible finish; the public board exposes team-level data only; recognition blends 70% verified actions with 30% private peer support; and the parallel gate requires two distinct authenticated members inside 90 seconds. The QR value below is an import directive, not a live secret.",
+  "settings": {
+    "mode": "sequential",
+    "map": "none",
+    "rules": "Two different signed-in teammates must complete the two Crew Gate lanes within the same 90-second window.",
+    "minTeamSize": 2,
+    "maxTeamSize": 5,
+    "sessionDurationSeconds": 1800,
+    "registrationOpen": true,
+    "completionMessage": "You cleared the Crew Gate. Celebrate the teammates who made it happen, then try to improve your run.",
+    "photoRetention": "after_verification",
+    "registrationMode": "organizer-assigned",
+    "runPolicy": {
+      "mode": "unlimited"
+    },
+    "leaderboardPolicy": {
+      "bestRunRule": "score_then_time_then_completion",
+      "mainBoardEnabled": true,
+      "replayBoardEnabled": true,
+      "replayBoardPublic": true,
+      "timeVisibility": "after_second_eligible_run",
+      "showProgress": true
+    },
+    "publicBoard": {
+      "enabled": true,
+      "slug": "parallel-crew-demo",
+      "title": "Parallel Crew Demo — Live",
+      "status": "live",
+      "teamIdentity": "code_and_name",
+      "columns": ["rank", "team_code", "team_name", "points", "progress", "runs", "time"]
+    },
+    "socialShare": {
+      "enabled": true,
+      "organizerHandle": "@mrbtstudio",
+      "campaignHashtag": "#ParallelCrew",
+      "allowPersonalTitle": true
+    },
+    "recognition": {
+      "enabled": true,
+      "peerVotingEnabled": true,
+      "votingWindowMinutes": 30,
+      "dataWeight": 0.7,
+      "peerWeight": 0.3,
+      "titleLibrary": {
+        "trailblazer": "Route Opener",
+        "puzzle_ace": "Puzzle Ace",
+        "codebreaker": "Cipher Star",
+        "eagle_eye": "Eagle Eye",
+        "clutch_player": "Final-Moment Hero",
+        "team_spark": "Crew Catalyst"
+      }
+    },
+    "routePlan": {
+      "startCheckpointId": "start",
+      "finaleCheckpointId": "finale",
+      "requiredCheckpointIds": ["crew-gate-checkpoint"],
+      "choose": {
+        "count": 0,
+        "fromCheckpointIds": []
+      },
+      "shuffleSelectedCheckpoints": false,
+      "avoidTransitions": [],
+      "checkpointEstimates": {
+        "start": { "durationMinutes": 1 },
+        "crew-gate-checkpoint": { "durationMinutes": 4, "difficulty": 3 },
+        "finale": { "durationMinutes": 1 }
+      },
+      "travelEstimates": []
+    },
+    "challengePools": {},
+    "parallelMechanics": [
+      {
+        "id": "crew-gate-sync",
+        "checkpointId": "crew-gate-checkpoint",
+        "nodeId": "crew-gate",
+        "timeWindowSeconds": 90,
+        "lanes": [
+          {
+            "id": "east-marker",
+            "label": "Scan the east marker",
+            "type": "qr",
+            "token": "@server:generate:crew-gate-east"
+          },
+          {
+            "id": "west-code",
+            "label": "Enter the west code",
+            "type": "code",
+            "code": "{{laneCode}}",
+            "caseSensitive": false
+          }
+        ]
+      }
+    ],
+    "variableGenerators": {
+      "laneCode": {
+        "type": "code",
+        "alphabet": "ABCDEFGHJKLMNPQRSTUVWXYZ23456789",
+        "length": 4
+      }
+    },
+    "fairnessPolicy": {
+      "durationToleranceMinutes": 0,
+      "maxResolvedRoutes": 1000,
+      "requireTravelEstimates": false,
+      "walkingSpeedMetersPerMinute": 72,
+      "minutesPerDifficultyPoint": 1.5
+    }
+  },
+  "theme": {
+    "primaryColor": "#7C3AED",
+    "font": "system",
+    "feedback": true,
+    "buttonShape": "pill",
+    "checkpointIconStyle": "symbols",
+    "successAnimation": "celebrate"
+  },
+  "checkpoints": [
+    {
+      "id": "start",
+      "title": "Crew Briefing",
+      "basePoints": 0,
+      "required": true,
+      "flow": {
+        "startNodeId": "briefing",
+        "nodes": [
+          {
+            "id": "briefing",
+            "type": "show_text",
+            "text": "Stay signed in on separate devices. At the Crew Gate, two different members must finish one lane each.",
+            "next": "finish-start"
+          },
+          { "id": "finish-start", "type": "complete" }
+        ]
+      },
+      "hints": []
+    },
+    {
+      "id": "crew-gate-checkpoint",
+      "title": "Crew Gate",
+      "basePoints": 30,
+      "required": true,
+      "prerequisites": ["start"],
+      "flow": {
+        "startNodeId": "gate-instructions",
+        "nodes": [
+          {
+            "id": "gate-instructions",
+            "type": "show_text",
+            "text": "Choose separate lanes. Your west-lane code is {{laneCode}}. Once the first lane is confirmed, the other member has 90 seconds.",
+            "next": "crew-gate"
+          },
+          {
+            "id": "crew-gate",
+            "type": "verify_organizer",
+            "prompt": "Complete both linked lanes. This gate opens only after two distinct members provide valid evidence.",
+            "next": "finish-crew-gate"
+          },
+          { "id": "finish-crew-gate", "type": "complete" }
+        ]
+      },
+      "hints": [
+        {
+          "id": "crew-gate-help",
+          "title": "Lane reminder",
+          "cost": 0,
+          "content": {
+            "type": "text",
+            "text": "Use two signed-in team devices. One member cannot claim both lanes. Ask the organizer if a marker is damaged."
+          },
+          "relevance": {
+            "nodeId": "crew-gate",
+            "unlockAfterSeconds": 30,
+            "expireWhenSolved": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "finale",
+      "title": "Finish",
+      "basePoints": 0,
+      "required": true,
+      "prerequisites": ["crew-gate-checkpoint"],
+      "flow": {
+        "startNodeId": "finish-message",
+        "nodes": [
+          {
+            "id": "finish-message",
+            "type": "show_text",
+            "text": "Crew Gate complete. Continue to see your run result, private contribution board, recognition flow, and replay option.",
+            "next": "finish-hunt"
+          },
+          { "id": "finish-hunt", "type": "complete" }
+        ]
+      },
+      "hints": []
+    }
+  ]
+}

@@ -69,7 +69,7 @@ export async function handle(work: () => Promise<unknown>) {
     const known = error instanceof HttpError || error instanceof EngineError;
     const status = error instanceof HttpError ? error.status : error instanceof EngineError
       ? (error.code === 'invalid_command' || error.code === 'invalid_definition' ? 400 : 409) : 503;
-    if (!known) console.error('V2 request failed', error instanceof Error ? error.name : 'Unknown error');
+    if (!known) console.error('API request failed', error instanceof Error ? error.name : 'Unknown error');
     return NextResponse.json({ error: known ? error.message : 'The event server is unavailable. Your saved progress is safe. Please try again.',
       code: error instanceof EngineError ? error.code : ({ 400: 'invalid_request', 401: 'session_required', 403: 'forbidden', 404: 'not_found', 409: 'conflict', 413: 'too_large', 415: 'unsupported_media_type', 429: 'rate_limited' } as Record<number, string>)[status] ?? 'server_unavailable',
       ...(error instanceof HttpError && error.details?.issues ? { issues: error.details.issues } : {}) }, { status, headers: { 'Cache-Control': 'no-store' } });

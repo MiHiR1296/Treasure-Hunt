@@ -21,6 +21,9 @@ export default function WordSearch({ definition, state, disabled, onChange }: Pu
   const columns = definition.grid[0].length
   const minimumWords = definition.minimumWords ?? definition.words.length
   const bonus = definition.bonusPerExtraWord ?? 0
+  const bonusDescription = definition.bonusRankingImpact === 'excluded'
+    ? ` Each extra ingredient adds +${bonus} extra points for fun; it does not change leaderboard score.`
+    : ` Each extra ingredient is worth +${bonus} points.`
   const foundCells = new Set<string>()
   const foundPaths = definition.words.flatMap((word, index) => {
     if (!state.foundWords.includes(word)) return []
@@ -91,7 +94,7 @@ export default function WordSearch({ definition, state, disabled, onChange }: Pu
   const expandedWidth = columns * 44 + Math.max(0, columns - 1) * 2
   return <div>
     <p className="mb-1 text-sm font-semibold text-stone-800">Find at least {minimumWords} of {definition.words.length} ingredients.</p>
-    <p className="mb-3 text-sm text-stone-600">Words may run forward, backward, up, down, or diagonally.{bonus > 0 && minimumWords < definition.words.length ? ` Each extra ingredient is worth +${bonus} points.` : ''}</p>
+    <p className="mb-3 text-sm text-stone-600">Words may run forward, backward, up, down, or diagonally.{bonus > 0 && minimumWords < definition.words.length ? bonusDescription : ''}</p>
     <p id="word-search-instructions" role="note" className="mb-4 rounded-xl border-2 border-amber-300 bg-amber-50 px-4 py-3 text-sm font-semibold leading-relaxed text-amber-950 shadow-sm"><span className="font-extrabold">How to play:</span> Press the first letter, drag a straight line across the word, then release. You can also tap its first and last letters.</p>
     <ul aria-label="Words to find" className="mb-4 flex flex-wrap gap-2">{orderedWords.map(word => {
       const found = state.foundWords.includes(word)
