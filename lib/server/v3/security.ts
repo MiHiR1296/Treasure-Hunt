@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import type { PoolClient } from 'pg';
 import { getPool } from '../db';
 import {
   ADMIN_SESSION_SECONDS,
@@ -11,6 +12,20 @@ import {
 
 export const V3_TEAM_COOKIE = 'hunt_v3_team';
 export const V3_ADMIN_COOKIE = 'hunt_v3_admin';
+
+// PostgreSQL accepts the canonical 8-4-4-4-12 UUID text form regardless of
+// version. Keep this check aligned with the database type while rejecting the
+// formerly accepted arbitrary arrangements of 36 hex characters and dashes.
+const V3_UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+
+export function isV3Uuid(value: unknown): value is string {
+  return typeof value === 'string' && V3_UUID.test(value);
+}
+
+export function requireV3Uuid(value: unknown, message = 'A valid identifier is required.'): string {
+  if (!isV3Uuid(value)) throw new HttpError(400, message);
+  return value;
+}
 
 export type V3TeamSession = {
   role: 'team';
@@ -110,8 +125,12 @@ export async function createV3AdminSession(password: string, organizerName = 'Or
 }
 
 /** Shared database throttling works across serverless instances and restarts. */
-export async function rateLimitV3(key: string, maximum = 15) {
-  const { rows } = await getPool().query(
+export async function rateLimitV3(
+  key: string,
+  maximum = 15,
+  database: PoolClient | ReturnType<typeof getPool> = getPool(),
+) {
+  const { rows } = await database.query(
     `insert into hunt_v3.rate_limits(key,attempts) values($1,1)
       on conflict(key) do update set
         attempts=case when hunt_v3.rate_limits.window_start<now()-interval '15 minutes' then 1 else hunt_v3.rate_limits.attempts+1 end,
@@ -120,6 +139,50 @@ export async function rateLimitV3(key: string, maximum = 15) {
     [digest(key)],
   );
   if (rows[0].attempts > maximum) throw new HttpError(429, 'Too many attempts. Please try again in 15 minutes.');
+}
+
+/**
+ * Reserve one immutable competitive attempt for an entire run. Unlike the
+ * generic rate limiter this never resets while the run exists, and the same
+ * idempotency request/payload consumes only one slot under concurrency.
+ */
+export async function reserveV3RunAttempt(client: PoolClient, input: {
+  scope: string;
+  runId: string;
+  teamId: string;
+  requestId: string;
+  payloadHash: string;
+  maximum: number;
+}) {
+  const scopeKey = digest(input.scope);
+  // Hash collisions only serialize unrelated scopes; identity is still
+  // checked by the full SHA-256 scope key stored in the table. Callers invoke
+  // this after locking the run and before executing the authoritative command.
+  await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))', [scopeKey]);
+  const existing = (await client.query(
+    `select payload_hash from hunt_v3.run_attempt_reservations
+      where scope_key=$1 and request_id=$2`,
+    [scopeKey, input.requestId],
+  )).rows[0];
+  if (existing) {
+    if (existing.payload_hash !== input.payloadHash) throw new HttpError(409, 'This request ID was already used for another action.');
+    return;
+  }
+  const budget = (await client.query(
+    `select
+      (select count(*)::int from hunt_v3.run_attempt_reservations where scope_key=$1) as attempts,
+      (select coalesce(sum(additional_attempts),0)::int from hunt_v3.run_attempt_allowances where scope_key=$1) as allowance`,
+    [scopeKey],
+  )).rows[0];
+  const attempts = Number(budget.attempts);
+  const maximum = input.maximum + Number(budget.allowance);
+  if (attempts >= maximum) throw new HttpError(429, 'Too many attempts for this task. Ask the organizer for help.');
+  await client.query(
+    `insert into hunt_v3.run_attempt_reservations(
+      scope_key,request_id,payload_hash,run_id,team_id,ordinal)
+      values($1,$2,$3,$4,$5,$6)`,
+    [scopeKey, input.requestId, input.payloadHash, input.runId, input.teamId, attempts + 1],
+  );
 }
 
 export { createSessionToken, digest, SESSION_SECONDS };

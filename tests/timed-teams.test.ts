@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createInitialState, executeCommand, executeControl, getPlayerView, validateHunt } from '../lib/engine';
 import { EngineError, type HuntDefinition, type GameState } from '../lib/engine/types';
-import { assertStartWindow, beginReviewClockPause, elapsedMilliseconds, endReviewClockPause, pauseSession, playability, resumeSession, timerRemaining } from '../lib/engine/session';
+import { assertStartWindow, beginReviewClockPause, discardReviewClockPause, elapsedMilliseconds, endReviewClockPause, pauseSession, playability, resumeSession, timerRemaining } from '../lib/engine/session';
 import { assignRoutes } from '../lib/server/routes';
 import { validateRosterNames, parseCommand } from '../lib/engine/validation';
 import { resultsCsv } from '../lib/engine/reporting';
@@ -122,6 +122,19 @@ test('keyed review waits freeze clocks without blocking play and credit overlapp
   assert.equal(elapsedMilliseconds(state, at(), at(180)), 100000);
   assert.equal(getPlayerView(h, state, at(180)).timer?.paused, false);
   assert.deepEqual(endReviewClockPause(state, 'photo-a', at(190)), state, 'closing the same review twice is idempotent');
+});
+
+test('discarding a rejected review wait resumes clocks without granting time credit', () => {
+  const h = hunt();
+  let state = createInitialState(h, 'team', at());
+  const deadline = state.timer!.deadlineAt;
+  state = beginReviewClockPause(state, 'rejected-photo', at(30));
+  assert.equal(timerRemaining(state, at(90)), 90, 'pending moderation provisionally freezes the countdown');
+  state = discardReviewClockPause(state, 'rejected-photo');
+  assert.equal(state.timer!.deadlineAt, deadline, 'rejection does not extend the deadline');
+  assert.equal(timerRemaining(state, at(90)), 30);
+  assert.equal(elapsedMilliseconds(state, at(), at(90)), 90_000, 'the rejected wait remains competitive elapsed time');
+  assert.deepEqual(discardReviewClockPause(state, 'rejected-photo'), state, 'discarding the same wait twice is idempotent');
 });
 
 test('extension adds allowance, reopen starts from now, neither deducts elapsed time or waiting', () => {

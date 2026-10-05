@@ -6,7 +6,7 @@ import { readFile } from 'node:fs/promises';
 import type { PoolClient } from 'pg';
 import { getPool } from '../../lib/server/db';
 import { publicLeaderboard, teamLeaderboards } from '../../lib/server/v3/leaderboards';
-import { freezePublicBoard } from '../../lib/server/v3/operations';
+import { freezePublicBoard, setHuntLifecycle } from '../../lib/server/v3/operations';
 
 const enabled = Boolean(process.env.DATABASE_URL);
 
@@ -101,7 +101,7 @@ test('PostgreSQL V3 leaderboards project one best/first/count row per team and s
         started_at,completed_at,elapsed_ms)
         values($1,$2,$3,1,$4,$5,$6,$7,'{}',$8,'completed',$9,$10,$11,$12,
           $13::timestamptz-($14::bigint*interval '1 millisecond'),$13::timestamptz,$14)`,
-      [runId, team.id, huntId, input.runNumber, randomUUID().replaceAll('-', ''), 'b'.repeat(64),
+      [runId, team.id, huntId, input.runNumber, randomUUID().replaceAll('-', ''), randomUUID().replaceAll('-', '').repeat(2),
         { routeCheckpointIds: ['start', 'middle', 'finish'], checkpointIds: ['start', 'middle', 'finish'] },
         { privatePayload: 'must-never-cross-the-leaderboard-boundary' }, practice, eligible, input.score,
         input.progress ?? 1, input.completedAt, input.elapsed],
@@ -143,8 +143,8 @@ test('PostgreSQL V3 leaderboards project one best/first/count row per team and s
   assert.equal(privateBoard.main.entries.find(entry => entry.teamCode === 'T-002')?.isOwnTeam, false);
   assert.deepEqual(
     Object.fromEntries(privateBoard.main.entries.map(entry => [entry.teamCode, entry.rank])),
-    { 'T-003': 1, 'T-004': 1, 'T-005': 3, 'T-002': 4, 'T-001': 5 },
-    'score, elapsed time, and full-microsecond completion time determine competition ranks',
+    { 'T-003': 1, 'T-004': 2, 'T-005': 3, 'T-002': 4, 'T-001': 5 },
+    'score, elapsed time, full-microsecond completion time, and canonical code produce one deterministic winner',
   );
   assert.deepEqual(privateBoard.main.entries.find(entry => entry.teamCode === 'T-003')?.progress, { completed: 2, total: 3 });
   assert.equal(privateBoard.main.entries.find(entry => entry.teamCode === 'T-002')?.visibleElapsedMilliseconds, undefined);
@@ -205,6 +205,138 @@ test('PostgreSQL V3 leaderboards project one best/first/count row per team and s
       where schemaname='hunt_v3' and indexname in ('runs_official_team_best','runs_official_team_first')`,
   )).rows.map(row => row.indexname).sort();
   assert.deepEqual(indexes, ['runs_official_team_best', 'runs_official_team_first']);
+});
+
+test('PostgreSQL V3 leaderboard fields come only from eligible completed official runs once a team has one', { skip: !enabled }, async () => {
+  const suffix = randomUUID().slice(0, 8);
+  const huntId = `v3-leaderboard-source-${suffix}`;
+  const boardSlug = `${huntId}-board`;
+  const teamId = randomUUID();
+  const policy = {
+    bestRunRule: 'score_then_time_then_completion',
+    mainBoardEnabled: true,
+    replayBoardEnabled: true,
+    replayBoardPublic: true,
+    timeVisibility: 'after_second_eligible_run',
+    showProgress: true,
+  } as const;
+  const definition = {
+    schemaVersion: 3,
+    id: huntId,
+    version: 1,
+    title: 'Leaderboard source isolation test',
+    settings: { leaderboardPolicy: policy },
+    checkpoints: [],
+  };
+  await getPool().query(
+    `insert into hunt_v3.hunts(id,title,slug,status,registration_mode,settings,latest_version)
+      values($1,'Leaderboard source isolation test',$1,'live','self_serve','{}',1)`,
+    [huntId],
+  );
+  await getPool().query(
+    `insert into hunt_v3.hunt_versions(hunt_id,version,definition,content_hash,validation_report,fairness_report)
+      values($1,1,$2,$3,'{}',$4)`,
+    [huntId, definition, 'b'.repeat(64), { valid: true, issues: [], routes: [] }],
+  );
+  await getPool().query(
+    `insert into hunt_v3.public_boards(
+      hunt_id,slug,enabled,title,event_status,visible_columns,main_board_visible,replay_board_visible,team_name_mode)
+      values($1,$2,true,'Source-isolated leaderboard','live',$3,true,true,'display_name')`,
+    [huntId, boardSlug, ['rank', 'team_code', 'points', 'progress', 'runs', 'time', 'completion_status']],
+  );
+  await getPool().query(
+    `insert into hunt_v3.teams(
+      id,hunt_id,canonical_code,display_name,name_key,name_status,pin_hash,registration_source,approval_status,status)
+      values($1,$2,'T-091','Source Team',$3,'approved',$4,'self_serve','approved','active')`,
+    [teamId, huntId, `source-team-${suffix}`, 'p'.repeat(32)],
+  );
+
+  const addRun = async (input: {
+    runNumber: number;
+    status: 'active' | 'completed';
+    score: number;
+    progress: number;
+    elapsed?: number;
+    completedAt?: string;
+    practice?: boolean;
+    eligible?: boolean;
+  }) => {
+    const completed = input.status === 'completed';
+    const practice = input.practice ?? false;
+    const eligible = input.eligible ?? !practice;
+    await getPool().query(
+      `insert into hunt_v3.runs(
+        id,team_id,hunt_id,hunt_version,run_number,private_seed,seed_commitment,
+        route_plan,resolved_variables,engine_state,status,practice,eligible,score,progress,
+        started_at,completed_at,elapsed_ms)
+        values($1,$2,$3,1,$4,$5,$6,$7,'{}','{}',$8,$9,$10,$11,$12,$13,$14,$15)`,
+      [randomUUID(), teamId, huntId, input.runNumber, randomUUID().replaceAll('-', ''),
+        randomUUID().replaceAll('-', '').repeat(2),
+        { checkpointIds: ['start', 'middle', 'finish'] }, input.status, practice, eligible,
+        input.score, input.progress, '2026-10-03T09:00:00.000001Z',
+        completed ? input.completedAt : null, completed ? input.elapsed : null],
+    );
+  };
+
+  await addRun({
+    runNumber: 1, status: 'completed', score: 100, progress: 1 / 3,
+    elapsed: 700_000, completedAt: '2026-10-03T10:00:00.000001Z',
+  });
+  await addRun({
+    runNumber: 2, status: 'completed', score: 120, progress: 2 / 3,
+    elapsed: 600_000, completedAt: '2026-10-03T11:00:00.000001Z',
+  });
+  await addRun({
+    runNumber: 3, status: 'completed', score: 9_999, progress: 1,
+    elapsed: 1, completedAt: '2026-10-03T12:00:00.000001Z', practice: true,
+  });
+  await addRun({
+    runNumber: 4, status: 'completed', score: 8_888, progress: 1,
+    elapsed: 2, completedAt: '2026-10-03T13:00:00.000001Z', eligible: false,
+  });
+  await addRun({ runNumber: 5, status: 'active', score: 7_777, progress: 1, eligible: true });
+
+  const privateBoard = await teamLeaderboards(huntId, teamId, getPool());
+  const privateMain = privateBoard.main.entries[0];
+  assert.deepEqual({
+    score: privateMain?.score,
+    progress: privateMain?.progress,
+    time: privateMain?.visibleElapsedMilliseconds,
+    eligibleCompletedRuns: privateMain?.eligibleCompletedRuns,
+    runCount: privateMain?.runCount,
+    status: privateMain?.status,
+  }, {
+    score: 120,
+    progress: { completed: 2, total: 3 },
+    time: 600_000,
+    eligibleCompletedRuns: 2,
+    runCount: 2,
+    status: 'completed',
+  }, 'the team board projects every displayed result field from eligible completed official history');
+  assert.equal(privateBoard.replay.entries[0]?.runCount, 2);
+
+  const publicBoard = await publicLeaderboard(boardSlug, getPool()) as {
+    main: Array<Record<string, unknown>>;
+    replay: Array<Record<string, unknown>>;
+  };
+  assert.deepEqual(publicBoard.main[0], {
+    rank: 1,
+    teamCode: 'T-091',
+    points: 120,
+    progress: { completed: 2, total: 3 },
+    runs: 2,
+    elapsedMilliseconds: 600_000,
+    status: 'completed',
+  });
+  assert.deepEqual(publicBoard.replay[0], {
+    rank: 1,
+    teamCode: 'T-091',
+    points: 120,
+    progress: { completed: 2, total: 3 },
+    runs: 2,
+    elapsedMilliseconds: 600_000,
+    status: 'completed',
+  });
 });
 
 test('PostgreSQL V3 live Main board includes provisional teams while Final and Replay remain completed-only', { skip: !enabled }, async () => {
@@ -291,9 +423,25 @@ test('PostgreSQL V3 live Main board includes provisional teams while Final and R
         route_plan,resolved_variables,engine_state,status,practice,eligible,score,progress,
         started_at,completed_at,elapsed_ms)
         values($1,$2,$3,1,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
-      [id, team.id, huntId, input.runNumber, randomUUID().replaceAll('-', ''), 'd'.repeat(64),
+      [id, team.id, huntId, input.runNumber, randomUUID().replaceAll('-', ''), randomUUID().replaceAll('-', '').repeat(2),
         { checkpointIds: ['start', 'middle', 'finish'], privateRouteMarker: 'never-public' },
-        { privateVariable: 'never-public' }, { privatePayload: 'never-public' }, input.status,
+        { privateVariable: 'never-public' }, {
+          schemaVersion: 1,
+          definitionId: huntId,
+          definitionVersion: 1,
+          teamId: team.id,
+          revision: 0,
+          status: input.status,
+          activeCheckpointId: null,
+          checkpoints: {},
+          hintUsage: {},
+          ledger: [],
+          events: [],
+          score: input.score,
+          ...(startedAt ? { startedAt } : {}),
+          clockPauses: [],
+          privatePayload: 'never-public',
+        }, input.status,
         practice, eligible, input.score, input.progress, startedAt, completedAt,
         input.status === 'completed' ? input.elapsed ?? 3_600_000 : null],
     );
@@ -388,10 +536,123 @@ test('PostgreSQL V3 live Main board includes provisional teams while Final and R
     `update hunt_v3.public_boards set event_status='live',current_snapshot_id=null,frozen_at=null where hunt_id=$1`,
     [huntId],
   );
+  await setHuntLifecycle(huntId, 'ended', 1, 'leaderboard test');
   await freezePublicBoard(huntId, true, 'leaderboard test');
   const final = await publicLeaderboard(boardSlug) as { status: string; main: Array<Record<string, unknown>>; replay: Array<Record<string, unknown>> };
   assert.equal(final.status, 'final');
   assert.deepEqual(final.main.map(row => row.teamCode), ['T-103'], 'Final contains official completed selections only');
   assert.equal(final.main[0]?.status, 'completed');
   assert.deepEqual(final.replay, []);
+});
+
+test('PostgreSQL V3 live reads terminalize an expired timed run even when the team sends no later request', { skip: !enabled }, async () => {
+  const suffix = randomUUID().slice(0, 8);
+  const huntId = `v3-timeout-sweep-${suffix}`;
+  const boardSlug = `${huntId}-board`;
+  const teamId = randomUUID();
+  const runId = randomUUID();
+  // Derive fixture time from PostgreSQL as well as measuring expiry there.
+  // A container clock can trail the host clock by a few milliseconds, which
+  // otherwise makes the exact two-minute elapsed assertion intermittently
+  // report 119,99x ms despite correct timeout behavior.
+  const fixtureClock = (await getPool().query(
+    `select
+      clock_timestamp() - interval '2 minutes' as started_at,
+      clock_timestamp() - interval '1 minute' as deadline_at`,
+  )).rows[0];
+  const startedAt = new Date(fixtureClock.started_at).toISOString();
+  const deadlineAt = new Date(fixtureClock.deadline_at).toISOString();
+  const definition = {
+    schemaVersion: 3,
+    id: huntId,
+    version: 1,
+    title: 'Timed expiry projection test',
+    settings: {
+      leaderboardPolicy: {
+        bestRunRule: 'score_then_time_then_completion',
+        mainBoardEnabled: true,
+        replayBoardEnabled: false,
+        replayBoardPublic: false,
+        timeVisibility: 'after_second_eligible_run',
+        showProgress: true,
+      },
+    },
+    checkpoints: [],
+  };
+  await getPool().query(
+    `insert into hunt_v3.hunts(id,title,slug,status,registration_mode,settings,latest_version)
+      values($1,'Timed expiry projection test',$1,'live','organizer_assigned','{}',1)`,
+    [huntId],
+  );
+  await getPool().query(
+    `insert into hunt_v3.hunt_versions(hunt_id,version,definition,content_hash,validation_report,fairness_report)
+      values($1,1,$2,$3,'{}',$4)`,
+    [huntId, definition, 'e'.repeat(64), { valid: true, issues: [], routes: [] }],
+  );
+  await getPool().query(
+    `insert into hunt_v3.public_boards(
+      hunt_id,slug,enabled,title,event_status,visible_columns,main_board_visible,replay_board_visible,team_name_mode)
+      values($1,$2,true,'Timed live board','live',$3,true,false,'code_only')`,
+    [huntId, boardSlug, ['rank', 'team_code', 'points', 'progress', 'completion_status']],
+  );
+  await getPool().query(
+    `insert into hunt_v3.teams(
+      id,hunt_id,canonical_code,name_status,pin_hash,registration_source,approval_status,status)
+      values($1,$2,'T-401','code_only',$3,'organizer_assigned','approved','active')`,
+    [teamId, huntId, 'p'.repeat(32)],
+  );
+  const state = {
+    schemaVersion: 1,
+    definitionId: huntId,
+    definitionVersion: 1,
+    teamId: runId,
+    revision: 3,
+    status: 'active',
+    activeCheckpointId: null,
+    checkpoints: {},
+    hintUsage: {},
+    ledger: [],
+    events: [],
+    score: 777,
+    startedAt,
+    timer: { durationSeconds: 60, deadlineAt, pauses: [], extensions: [] },
+  };
+  await getPool().query(
+    `insert into hunt_v3.runs(
+      id,team_id,hunt_id,hunt_version,run_number,private_seed,seed_commitment,
+      route_plan,resolved_variables,engine_state,status,practice,eligible,score,progress,started_at)
+      values($1,$2,$3,1,1,$4,$5,$6,'{}',$7,'active',false,true,777,0.5,$8)`,
+    [runId, teamId, huntId, randomUUID().replaceAll('-', ''), 'f'.repeat(64),
+      { routeCheckpointIds: ['start', 'finish'], checkpointIds: ['start', 'finish'] }, state, startedAt],
+  );
+
+  const board = await publicLeaderboard(boardSlug) as { main: Array<Record<string, unknown>> };
+  assert.deepEqual(
+    board.main.find(row => row.teamCode === 'T-401'),
+    { rank: 1, teamCode: 'T-401', points: 0, status: 'registered' },
+    'the expired provisional score is removed before the live projection is returned',
+  );
+  const run = (await getPool().query(
+    'select status,eligible,elapsed_ms from hunt_v3.runs where id=$1',
+    [runId],
+  )).rows[0];
+  assert.equal(run.status, 'abandoned');
+  assert.equal(run.eligible, false);
+  assert.ok(Number(run.elapsed_ms) >= 120_000);
+  assert.equal(Number((await getPool().query(
+    `select count(*)::int as count from hunt_v3.run_events
+      where run_id=$1 and event_type='run_timed_out'`,
+    [runId],
+  )).rows[0].count), 1, 'the timeout has one immutable audit event');
+  assert.equal((await getPool().query(
+    'select run_status,active_run_id from hunt_v3.live_team_rollups where team_id=$1',
+    [teamId],
+  )).rows[0].active_run_id, null, 'the live rollup no longer points at an expired active run');
+
+  await publicLeaderboard(boardSlug);
+  assert.equal(Number((await getPool().query(
+    `select count(*)::int as count from hunt_v3.run_events
+      where run_id=$1 and event_type='run_timed_out'`,
+    [runId],
+  )).rows[0].count), 1, 'repeated live reads are idempotent');
 });

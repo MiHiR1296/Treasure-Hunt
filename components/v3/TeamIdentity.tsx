@@ -13,6 +13,7 @@ export default function TeamIdentity({ summary, view, onLeave, busy }: {
         <p className="text-xs font-extrabold uppercase tracking-[0.2em] text-emerald-800">{summary.hunt.title}</p>
         <h1 className="mt-2 truncate text-2xl font-black tracking-tight text-stone-950">{summary.team.label}</h1>
         <p className="mt-1 text-sm text-stone-600">Playing as <strong>{summary.member.name}</strong>{view ? ` · Run ${view.runNumber}${view.practice ? ' · Practice' : ''}` : ''}</p>
+        {summary.team.approvalStatus === 'pending' && <p className="mt-2 inline-flex rounded-full bg-amber-100 px-3 py-1 text-xs font-black uppercase tracking-wide text-amber-900">Awaiting organizer approval</p>}
       </div>
       <button type="button" onClick={onLeave} disabled={busy} className="min-h-11 shrink-0 px-2 text-sm font-bold text-stone-500 underline decoration-stone-300 underline-offset-4 disabled:opacity-50">Leave</button>
     </div>

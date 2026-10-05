@@ -8,6 +8,7 @@ import type {
   V3Definition,
 } from './types'
 import { enumerateEligibleRoutes } from './planning'
+import { acceptedTemplatesUseSingleStrongRunCode, usesStrongRunCodeTemplate } from './variables'
 
 class CheckpointGraphError extends Error {}
 
@@ -121,7 +122,7 @@ function checkpointScoreCacheBounds(checkpoint: CheckpointDefinition): ScoreCach
     visiting.add(nodeId)
     const destinations = primaryDestinations(node).map(visit)
     const continuations = [...destinations]
-    if ('fallback' in node && node.fallback) continuations.push(visit(node.fallback.nodeId))
+    if ('fallback' in node && node.fallback && node.fallback.enabled !== false) continuations.push(visit(node.fallback.nodeId))
     const continuation = continuations.length ? maxScoreCacheBounds(...continuations) : emptyScoreCacheBounds()
     const total = addScoreCacheBounds(nodeScoreCacheBounds(node), continuation)
     visiting.delete(nodeId)
@@ -156,6 +157,63 @@ interface CheckpointScoreAnalysis {
   }>
 }
 
+function hasUncorroboratedVerifierPath(
+  checkpoint: CheckpointDefinition,
+  isShareableVerifier: (node: FlowNode) => boolean,
+  automaticOrganizerGateIds: ReadonlySet<string>,
+  initiallyNeedsCompanionEvidence = false,
+): boolean {
+  const nodes = new Map(checkpoint.flow.nodes.map(node => [node.id, node]))
+  const memo = new Map<string, boolean>()
+  const visit = (nodeId: string, needsCompanionEvidence: boolean): boolean => {
+    const key = `${nodeId}\u0000${needsCompanionEvidence}`
+    const cached = memo.get(key)
+    if (cached !== undefined) return cached
+    const node = nodes.get(nodeId)
+    if (!node) return false
+    // A verify_organizer node used as a parallel-mechanic gate is completed by
+    // the linked lane engine, not by an organizer. It cannot corroborate its
+    // own QR/GPS evidence. Only a standalone organizer gate or reviewed photo
+    // is an independent proof source.
+    const isIndependentEvidence = node.type === 'verify_image' ||
+      (node.type === 'verify_organizer' && !automaticOrganizerGateIds.has(node.id))
+    // Evidence has to follow the shareable/spoofable verifier. A marshal gate
+    // before a QR scan cannot corroborate what happens after that gate.
+    const nextNeedsEvidence = isShareableVerifier(node)
+      ? true
+      : isIndependentEvidence
+        ? false
+        : needsCompanionEvidence
+    if (node.type === 'complete') {
+      const unsafe = nextNeedsEvidence
+      memo.set(key, unsafe)
+      return unsafe
+    }
+    // The engine validator separately rejects cycles. Setting a provisional
+    // value keeps this proof bounded even for an already-invalid graph.
+    memo.set(key, false)
+    const destinations = primaryDestinations(node)
+    if ('fallback' in node && node.fallback && node.fallback.enabled !== false) destinations.push(node.fallback.nodeId)
+    const unsafe = destinations.some(destination => visit(destination, nextNeedsEvidence))
+    memo.set(key, unsafe)
+    return unsafe
+  }
+  return visit(checkpoint.flow.startNodeId, initiallyNeedsCompanionEvidence)
+}
+
+function isShareablePuzzle(puzzle: PuzzleDefinition, definition: V3Definition): boolean {
+  return puzzle.type !== 'text' ||
+    !acceptedTemplatesUseSingleStrongRunCode(puzzle.answers, definition.settings.variableGenerators)
+}
+
+function isShareableAnswerVerifier(node: FlowNode, definition: V3Definition): boolean {
+  const generators = definition.settings.variableGenerators
+  if (node.type === 'verify_code') return !usesStrongRunCodeTemplate(node.code, generators)
+  if (node.type === 'verify_answer') return !acceptedTemplatesUseSingleStrongRunCode(node.answers, generators)
+  if (node.type === 'puzzle') return isShareablePuzzle(node.puzzle, definition)
+  return false
+}
+
 function analyzeCheckpointScore(checkpoint: CheckpointDefinition): CheckpointScoreAnalysis {
   if (!Number.isFinite(checkpoint.basePoints)) throw new CheckpointGraphError('Checkpoint base points must be finite.')
   const nodes = new Map(checkpoint.flow.nodes.map(node => [node.id, node]))
@@ -186,7 +244,7 @@ function analyzeCheckpointScore(checkpoint: CheckpointDefinition): CheckpointSco
       })
     }
     const continuationScores = [...destinationScores]
-    if ('fallback' in node && node.fallback) continuationScores.push(visit(node.fallback.nodeId))
+    if ('fallback' in node && node.fallback && node.fallback.enabled !== false) continuationScores.push(visit(node.fallback.nodeId))
     const bestContinuation = continuationScores.length ? Math.max(...continuationScores) : 0
     const total = nodeAward(node) + bestContinuation
     visiting.delete(nodeId)
@@ -299,6 +357,28 @@ export function validateFairness(definition: V3Definition): FairnessReport {
   }
   const policy = definition.settings.fairnessPolicy
 
+  if (!Number.isSafeInteger(policy.minimumDistinctPlans) || policy.minimumDistinctPlans < 1 || policy.minimumDistinctPlans > 100_000) {
+    addIssue({
+      code: 'insufficient_route_variation',
+      path: 'settings.fairnessPolicy.minimumDistinctPlans',
+      message: 'A bounded positive minimum structural plan count is required.',
+    })
+  }
+  if (policy.durationToleranceMinutes !== 0) {
+    addIssue({
+      code: 'unsafe_duration_tiebreak',
+      path: 'settings.fairnessPolicy.durationToleranceMinutes',
+      message: 'Time breaks score ties, so competitive route duration tolerance must be exactly 0 minutes.',
+    })
+  }
+  if (!policy.requireTravelEstimates) {
+    addIssue({
+      code: 'unsafe_duration_tiebreak',
+      path: 'settings.fairnessPolicy.requireTravelEstimates',
+      message: 'Time breaks score ties, so every eligible route transition needs an explicit travel estimate.',
+    })
+  }
+
   // A dud token can only be submitted while a verify_qr action is active. V3
   // does not yet bind dud opportunities to every possible internal flow path,
   // so a competitive award cannot be proven route-neutral. Keep these delight
@@ -319,6 +399,13 @@ export function validateFairness(definition: V3Definition): FairnessReport {
   // be non-ranking. Flow-node puzzle rewards remain eligible for the normal
   // exhaustive checkpoint/route ceiling proof below.
   definition.checkpoints.forEach((checkpoint, checkpointIndex) => {
+    if (checkpoint.timeBonus && checkpoint.timeBonus.points !== 0 && checkpoint.timeBonus.rankingImpact !== 'excluded') {
+      addIssue({
+        code: 'non_neutral_competitive_bonus',
+        path: `checkpoints[${checkpointIndex}].timeBonus.rankingImpact`,
+        message: 'A competitive time bonus has condition-dependent attainability that route score ceilings cannot prove. Set rankingImpact to "excluded" so it cannot change official score or rank.',
+      })
+    }
     checkpoint.hints.forEach((hint, hintIndex) => {
       if (hint.content.type !== 'puzzle' || puzzleGrossMaximumBonus(hint.content.puzzle) <= 0) return
       const puzzle = hint.content.puzzle
@@ -356,6 +443,13 @@ export function validateFairness(definition: V3Definition): FairnessReport {
   }
 
   const checkpoints = new Map(definition.checkpoints.map(checkpoint => [checkpoint.id, checkpoint]))
+  const automaticOrganizerGates = new Map<string, Set<string>>()
+  for (const mechanic of definition.settings.parallelMechanics ?? []) {
+    if (mechanic.lanes.some(lane => lane.type === 'photo')) continue
+    const gates = automaticOrganizerGates.get(mechanic.checkpointId) ?? new Set<string>()
+    gates.add(mechanic.nodeId)
+    automaticOrganizerGates.set(mechanic.checkpointId, gates)
+  }
   const scoreCache = new Map<string, number>()
   const scoreCacheBounds = new Map<string, ScoreCacheBounds>()
   const checkpointIndexes = new Map(definition.checkpoints.map((checkpoint, index) => [checkpoint.id, index]))
@@ -373,6 +467,67 @@ export function validateFairness(definition: V3Definition): FairnessReport {
       const score = analysis.maximumScore
       scoreCache.set(checkpointId, score)
       scoreCacheBounds.set(checkpointId, cacheBounds)
+      const automaticGates = automaticOrganizerGates.get(checkpoint.id) ?? new Set<string>()
+      if (hasUncorroboratedVerifierPath(checkpoint, node => node.type === 'verify_gps', automaticGates)) {
+        addIssue({
+          code: 'gps_requires_companion_evidence',
+          path: `checkpoints[${checkpointIndexes.get(checkpointId)}].flow`,
+          message: 'Browser GPS can be spoofed. Every completion path containing GPS must also require photo review or an organizer verification gate.',
+        })
+      }
+      if (hasUncorroboratedVerifierPath(checkpoint, node => node.type === 'verify_qr', automaticGates)) {
+        addIssue({
+          code: 'qr_requires_companion_evidence',
+          path: `checkpoints[${checkpointIndexes.get(checkpointId)}].flow`,
+          message: 'A QR value can be shared remotely. Every completion path containing QR verification must also require fresh photo review or a standalone organizer verification gate.',
+        })
+      }
+      if (hasUncorroboratedVerifierPath(checkpoint, node => isShareableAnswerVerifier(node, definition), automaticGates)) {
+        addIssue({
+          code: 'shareable_verifier_requires_companion_evidence',
+          path: `checkpoints[${checkpointIndexes.get(checkpointId)}].flow`,
+          message: 'Static codes, accepted answers, and reusable puzzle solutions can be shared across teams; independently generated answer alternatives also weaken guessing resistance. Every completion path containing one must also require fresh photo review or a standalone organizer verification gate. Without companion evidence, code/text-answer aliases must all derive from one high-entropy run-scoped code variable.',
+        })
+      }
+      checkpoint.hints.forEach((hint, hintIndex) => {
+        if (hint.enabled === false || hint.content.type !== 'puzzle' || !isShareablePuzzle(hint.content.puzzle, definition)) return
+        if (hasUncorroboratedVerifierPath(checkpoint, () => false, automaticGates, true)) {
+          addIssue({
+            code: 'shareable_verifier_requires_companion_evidence',
+            path: `checkpoints[${checkpointIndexes.get(checkpointId)}].hints[${hintIndex}].content.puzzle`,
+            message: 'A reusable hint-puzzle solution can be shared to reveal this run\'s hint without solving it. Every checkpoint completion path containing such a hint must require fresh photo review or a standalone organizer gate. A text hint whose accepted aliases all derive from one high-entropy run-code variable is the only exception.',
+          })
+        }
+      })
+      for (const [nodeIndex, node] of checkpoint.flow.nodes.entries()) {
+        if (node.type === 'random_branch' || node.type === 'choose_path') {
+          addIssue({
+            code: 'unmodeled_internal_variation',
+            path: `checkpoints[${checkpointIndexes.get(checkpointId)}].flow.nodes[${nodeIndex}]`,
+            message: `${node.type === 'choose_path' ? 'Player-selected paths' : 'Seeded branches'} hide task-duration differences inside one checkpoint estimate. Move meaningful alternatives into a challenge pool so every variant has an explicit estimate.`,
+          })
+        }
+        if (node.type === 'branch') {
+          const variableKey = node.condition.type === 'variable' ? node.condition.key : undefined
+          const generator = node.condition.type === 'variable'
+            ? definition.settings.variableGenerators[node.condition.key]
+            : undefined
+          const mutableVariable = variableKey !== undefined && definition.checkpoints.some(candidate =>
+            candidate.flow.nodes.some(candidateNode => candidateNode.type === 'set_variable' && candidateNode.key === variableKey))
+          if (node.condition.type !== 'variable' || !generator || generator.type !== 'literal' || mutableVariable) addIssue({
+            code: 'unmodeled_internal_variation',
+            path: `checkpoints[${checkpointIndexes.get(checkpointId)}].flow.nodes[${nodeIndex}]`,
+            message: `${node.condition.type === 'variable' ? 'Generated or mutable-variable' : node.condition.type.replaceAll('_', '-')} branches hide task-duration differences inside one checkpoint estimate. Use a challenge pool with explicit variant estimates.`,
+          })
+        }
+        if ('fallback' in node && node.fallback?.enabled !== false) {
+          addIssue({
+            code: 'competitive_fallback_not_allowed',
+            path: `checkpoints[${checkpointIndexes.get(checkpointId)}].flow.nodes[${nodeIndex}].fallback`,
+            message: 'Immediate player fallbacks can bypass competitive verification. Disable the fallback and use an audited organizer recovery action.',
+          })
+        }
+      }
       if ((checkpoint.wrongAttemptPenalty ?? 0) > 0 && checkpoint.flow.nodes.some(node =>
         node.type === 'verify_answer' || node.type === 'verify_code' || node.type === 'verify_qr')) {
         addIssue({
@@ -418,6 +573,9 @@ export function validateFairness(definition: V3Definition): FairnessReport {
     if (new Set(pool.variants.map(variant => variant.id)).size !== pool.variants.length) {
       addIssue({ code: 'invalid_route_plan', path: `${path}.variants`, message: `Challenge pool "${pool.id}" has duplicate variant IDs.` })
     }
+    if (new Set(pool.variants.map(variant => variant.checkpointId)).size !== pool.variants.length) {
+      addIssue({ code: 'invalid_route_plan', path: `${path}.variants`, message: `Challenge pool "${pool.id}" must use a different checkpoint for every meaningful variant.` })
+    }
     const variantScores = pool.variants.map((variant, index) => {
       if (variant.weight !== undefined && (!Number.isFinite(variant.weight) || variant.weight <= 0)) {
         addIssue({ code: 'invalid_route_plan', path: `${path}.variants[${index}].weight`, message: 'Challenge variant weight must be a finite positive number.' })
@@ -428,6 +586,14 @@ export function validateFairness(definition: V3Definition): FairnessReport {
       }
       return score
     })
+    const weights = pool.variants.map(variant => variant.weight ?? 1)
+    if (new Set(weights).size > 1) {
+      addIssue({
+        code: 'unequal_variant_weights',
+        path: `${path}.variants`,
+        message: 'Competitive challenge variants must use equal weights; official assignment is balanced across the validated plan deck.',
+      })
+    }
     if (new Set(variantScores).size > 1) {
       addIssue({ code: 'unequal_variant_scores', path: `${path}.variants`, message: `Challenge variants at "${routeCheckpointId}" have different score ceilings (${variantScores.join(', ')}).` })
     }
@@ -508,6 +674,16 @@ export function validateFairness(definition: V3Definition): FairnessReport {
     }
   }
   if (productTruncated) addIssue({ code: 'route_limit_exceeded', path: 'settings.fairnessPolicy.maxResolvedRoutes', message: 'Resolved route and challenge combinations exceed the configured proof limit; publishing cannot prove fairness.' })
+
+  const requiredPlanCount = Math.max(1, Number(policy.minimumDistinctPlans) || 0)
+  if (routes.length < requiredPlanCount) {
+    addIssue({
+      code: 'insufficient_route_variation',
+      path: 'settings.fairnessPolicy.minimumDistinctPlans',
+      message: `The hunt produces ${routes.length} distinct structural plan${routes.length === 1 ? '' : 's'}, below the required ${requiredPlanCount}. Add route choices or challenge-pool variants.`,
+      routeKeys: routes.map(route => route.routeKey),
+    })
+  }
 
   const distinctScores = new Map<number, string[]>()
   for (const route of routes) distinctScores.set(route.maximumScore, [...(distinctScores.get(route.maximumScore) ?? []), route.routeKey])

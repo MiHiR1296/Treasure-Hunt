@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { handle, jsonBody, textField } from '@/lib/server/http';
 import { HttpError } from '@/lib/server/security';
 import { pendingPhotoReviews, reviewPhoto } from '@/lib/server/v3/operations';
-import { requireV3Session } from '@/lib/server/v3/security';
+import { requireV3Session, requireV3Uuid } from '@/lib/server/v3/security';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -22,10 +22,10 @@ export async function POST(request: NextRequest) {
     const body = await jsonBody(request);
     if (body.action !== 'review' || typeof body.approved !== 'boolean') throw new HttpError(400, 'Choose approve or reject.');
     return reviewPhoto({
-      mediaId: textField(body, 'mediaId'),
+      mediaId: requireV3Uuid(textField(body, 'mediaId'), 'Choose a valid photo.'),
       approved: body.approved,
       reason: textField(body, 'reason', 500),
-      requestId: textField(body, 'requestId'),
+      requestId: requireV3Uuid(textField(body, 'requestId'), 'Choose a valid photo review request.'),
       actor: session.organizerName,
     });
   });

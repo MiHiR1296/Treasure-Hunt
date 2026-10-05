@@ -27,6 +27,7 @@ test('PostgreSQL V3: run isolation, immutable evidence, score cache, recognition
   const memberTwo = randomUUID();
   const runId = randomUUID();
   const mediaId = randomUUID();
+  const taskEpoch = '2026-10-05T12:00:00.000Z';
   try {
     await client.query('begin');
     await client.query(
@@ -57,6 +58,15 @@ test('PostgreSQL V3: run isolation, immutable evidence, score cache, recognition
         values($1,$2,$3,1,1,$4,$5,$6,'{}',$7,'active',clock_timestamp())`,
       [runId, teamId, huntId, 's'.repeat(32), 'b'.repeat(64), { routeCheckpointIds: ['start', 'finish'] }, {
         revision: 0,
+        status: 'active',
+        activeCheckpointId: 'start',
+        checkpoints: {
+          start: {
+            status: 'active',
+            activeNodeId: 'photo',
+            nodes: { photo: { status: 'active', startedAt: taskEpoch } },
+          },
+        },
         routeAssignments: [{
           checkpointId: 'start',
           nodeId: 'seeded-branch',
@@ -72,6 +82,30 @@ test('PostgreSQL V3: run isolation, immutable evidence, score cache, recognition
       `insert into hunt_v3.run_members(run_id,team_id,member_id,member_name_snapshot) values
         ($1,$2,$3,'Aarav'),($1,$2,$4,'Priya')`,
       [runId, teamId, memberOne, memberTwo],
+    );
+    await client.query('savepoint duplicate_seed');
+    await assert.rejects(
+      client.query(
+        `insert into hunt_v3.runs(
+          id,team_id,hunt_id,hunt_version,run_number,private_seed,seed_commitment,
+          route_plan,resolved_variables,engine_state,status,started_at)
+          values($1,$2,$3,1,2,$4,$5,$6,'{}',$7,'abandoned',clock_timestamp())`,
+        [randomUUID(), teamId, huntId, 's'.repeat(32), 'b'.repeat(64),
+          { routeCheckpointIds: ['start', 'finish'] }, {
+            revision: 0, status: 'active', activeCheckpointId: 'start', checkpoints: {}, routeAssignments: [],
+          }],
+      ),
+      /runs_hunt_seed_commitment_unique/i,
+      'a hunt can never persist two runs derived from the same private seed',
+    );
+    await client.query('rollback to savepoint duplicate_seed');
+    assert.match(
+      String((await client.query(
+        `select pg_get_constraintdef(oid) as definition from pg_constraint
+          where conrelid='hunt_v3.runs'::regclass and conname='runs_team_plan_cycle_unique'`,
+      )).rows[0].definition),
+      /practice/i,
+      'official and practice plan/cycle allocations use distinct uniqueness namespaces',
     );
     const event = (await client.query(
       `insert into hunt_v3.run_events(
@@ -159,14 +193,35 @@ test('PostgreSQL V3: run isolation, immutable evidence, score cache, recognition
     await client.query(
       `insert into hunt_v3.media(
         id,hunt_id,team_id,run_id,member_id,checkpoint_id,node_id,kind,
-        content_type,bytes,content_hash,storage_key,review_status,reviewed_at)
-        values($1,$2,$3,$4,$5,'start','photo','photo','image/jpeg',100,$6,$7,'approved',clock_timestamp())`,
-      [mediaId, huntId, teamId, runId, memberOne, 'c'.repeat(64), `v3/test/${mediaId}.jpg`],
+        content_type,bytes,content_hash,storage_key,review_status,reviewed_at,task_started_at)
+        values($1,$2,$3,$4,$5,'start','photo','photo','image/jpeg',100,$6,$7,'approved',clock_timestamp(),$8::timestamptz)`,
+      [mediaId, huntId, teamId, runId, memberOne, 'c'.repeat(64), `v3/test/${mediaId}.jpg`, taskEpoch],
     );
+    await client.query('savepoint duplicate_photo_evidence');
+    await assert.rejects(
+      client.query(
+        `insert into hunt_v3.media(
+          id,hunt_id,team_id,run_id,member_id,checkpoint_id,node_id,kind,
+          content_type,bytes,content_hash,storage_key,review_status,reviewed_at,task_started_at)
+          values($1,$2,$3,$4,$5,'start','photo','photo','image/jpeg',100,$6,$7,'approved',clock_timestamp(),$8::timestamptz)`,
+        [randomUUID(), huntId, teamId, runId, memberTwo, 'c'.repeat(64), `v3/test/${randomUUID()}.jpg`, taskEpoch],
+      ),
+      /exact photo was already used/i,
+      'the database rejects service regressions that reuse an exact photo hash within one hunt',
+    );
+    await client.query('rollback to savepoint duplicate_photo_evidence');
     await client.query('delete from hunt_v3.media where id=$1', [mediaId]);
     assert.equal(
       (await client.query('select count(*)::int as count from hunt_v3.media_deletions where storage_key=$1', [`v3/test/${mediaId}.jpg`])).rows[0].count,
       1,
+    );
+    assert.equal(
+      (await client.query(
+        'select count(*)::int as count from hunt_v3.photo_evidence_hashes where hunt_id=$1 and content_hash=$2',
+        [huntId, 'c'.repeat(64)],
+      )).rows[0].count,
+      1,
+      'deleting retained bytes does not erase the anti-reuse digest',
     );
 
     await client.query('savepoint immutable_event');
@@ -182,6 +237,14 @@ test('PostgreSQL V3: run isolation, immutable evidence, score cache, recognition
       /route.*immutable/i,
     );
     await client.query('rollback to savepoint immutable_plan');
+
+    await client.query('savepoint immutable_practice_classification');
+    await assert.rejects(
+      client.query('update hunt_v3.runs set practice=true,eligible=false where id=$1', [runId]),
+      /run identity.*immutable/i,
+      'a persisted allocation cannot move between official and practice namespaces',
+    );
+    await client.query('rollback to savepoint immutable_practice_classification');
 
     await client.query(
       `update hunt_v3.runs

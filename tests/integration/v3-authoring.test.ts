@@ -31,8 +31,9 @@ test('PostgreSQL V3 authoring: server preview receipt and versioned private QR p
     nodes: [
       {
         id: 'scan-start', type: 'verify_qr', prompt: 'Scan the private start marker.',
-        token: '@server:generate:start-marker', backupCode: '@server:generate:start-backup', next: 'finish-start',
+        token: '@server:generate:start-marker', backupCode: '@server:generate:start-backup', next: 'photo-start',
       },
+      { id: 'photo-start', type: 'verify_image', prompt: 'Take a fresh marker photo.', referenceImages: [], next: 'finish-start' },
       { id: 'finish-start', type: 'complete' },
     ],
   };

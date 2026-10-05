@@ -87,10 +87,9 @@ test('PostgreSQL V3 operations: lifecycle revisions and public-board settings ro
   );
   await setHuntLifecycle(huntId, 'paused', 2, 'Integration organizer');
   await setHuntLifecycle(huntId, 'live', 3, 'Integration organizer');
-  await setHuntLifecycle(huntId, 'ended', 4, 'Integration organizer');
   assert.deepEqual(
     (await getPool().query('select status,lifecycle_revision from hunt_v3.hunts where id=$1', [huntId])).rows[0],
-    { status: 'ended', lifecycle_revision: 5 },
+    { status: 'live', lifecycle_revision: 4 },
   );
 
   await getPool().query('update hunt_v3.hunts set latest_version=99 where id=$1', [huntId]);
@@ -208,18 +207,32 @@ test('PostgreSQL V3 operations: lifecycle revisions and public-board settings ro
     [randomUUID(), huntId, teamId, runId, memberId],
   );
   await transaction(client => updateLiveRollup(client, runId));
-  await setHuntLifecycle(huntId, 'live', 5, 'Integration organizer');
-  await setHuntLifecycle(huntId, 'ended', 6, 'Integration organizer');
+  await setHuntLifecycle(huntId, 'paused', 4, 'Integration organizer');
   assert.equal(
     ((await getPool().query('select engine_state from hunt_v3.runs where id=$1', [runId])).rows[0].engine_state.clockPauses as Array<{ endedAt?: string }>).some(pause => !pause.endedAt),
     true,
-    'ending a live event pauses active run clocks',
+    'pausing a live event pauses active run clocks',
   );
-  await setHuntLifecycle(huntId, 'live', 7, 'Integration organizer');
+  await assert.rejects(
+    setHuntLifecycle(huntId, 'archived', 5, 'Integration organizer'),
+    /cannot move directly from paused to archived/i,
+    'a paused hunt with an open run cannot be irreversibly archived',
+  );
+  assert.deepEqual(
+    (await getPool().query(
+      `select hunt.status,hunt.lifecycle_revision,run.status as run_status,run.eligible
+        from hunt_v3.hunts hunt join hunt_v3.runs run on run.hunt_id=hunt.id
+        where hunt.id=$1 and run.id=$2`,
+      [huntId, runId],
+    )).rows[0],
+    { status: 'paused', lifecycle_revision: 5, run_status: 'active', eligible: true },
+    'a rejected archive leaves both lifecycle and active-run eligibility unchanged',
+  );
+  await setHuntLifecycle(huntId, 'live', 5, 'Integration organizer');
   assert.equal(
     ((await getPool().query('select engine_state from hunt_v3.runs where id=$1', [runId])).rows[0].engine_state.clockPauses as Array<{ endedAt?: string }>).some(pause => !pause.endedAt),
     false,
-    'reopening an ended event resumes its active run clocks',
+    'resuming a paused event resumes its active run clocks',
   );
 
   const live = await liveOperations(huntId);
@@ -230,6 +243,46 @@ test('PostgreSQL V3 operations: lifecycle revisions and public-board settings ro
   const filtered = await liveOperations(huntId, 'not-a-real-team');
   assert.equal(filtered.teams.length, 0);
   assert.deepEqual(filtered.alerts, { help: 1, photos: 0, stalled: 0, fairness: 0 }, 'global alerts are independent of search and row limits');
+
+  await setHuntLifecycle(huntId, 'ended', 6, 'Integration organizer');
+  assert.deepEqual(
+    (await getPool().query('select status,eligible,ineligibility_reason from hunt_v3.runs where id=$1', [runId])).rows[0],
+    { status: 'abandoned', eligible: false, ineligibility_reason: 'Hunt ended by organizer' },
+    'ending is irreversible and terminalizes every open attempt',
+  );
+  await assert.rejects(
+    setHuntLifecycle(huntId, 'live', 7, 'Integration organizer'),
+    /cannot move directly from ended to live/i,
+    'an ended hunt cannot be reopened; paused is the reversible operator state',
+  );
+  await assert.rejects(
+    setHuntLifecycle(huntId, 'archived', 7, 'Integration organizer'),
+    /cannot move directly from ended to archived/i,
+    'ending cannot be used as the first step of an archive-reset-reopen chain',
+  );
+  await getPool().query("update hunt_v3.hunts set status='archived' where id=$1", [huntId]);
+  await assert.rejects(
+    setHuntLifecycle(huntId, 'ready', 7, 'Integration organizer'),
+    /cannot move directly from archived to ready/i,
+    'an archived hunt identity is terminal; a reset requires a new hunt identity',
+  );
+
+  const unusedHuntId = `v3-unused-archive-${suffix}`;
+  await getPool().query(
+    `insert into hunt_v3.hunts(id,title,slug,status,registration_mode,settings)
+      values($1,'Unused archive',$1,'ready','self_serve','{}')`,
+    [unusedHuntId],
+  );
+  await setHuntLifecycle(unusedHuntId, 'archived', 1, 'Integration organizer');
+  assert.deepEqual(
+    (await getPool().query('select status,lifecycle_revision from hunt_v3.hunts where id=$1', [unusedHuntId])).rows[0],
+    { status: 'archived', lifecycle_revision: 2 },
+    'an unused ready hunt can be archived without creating ghost runs',
+  );
+  await assert.rejects(
+    setHuntLifecycle(unusedHuntId, 'ready', 2, 'Integration organizer'),
+    /cannot move directly from archived to ready/i,
+  );
 });
 
 test('PostgreSQL V3 analytics: only the exact score/time/completion key is an exact tie', { skip: !enabled }, async () => {

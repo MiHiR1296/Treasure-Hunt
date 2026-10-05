@@ -5,10 +5,11 @@ import { assertSessionPlayable, beginReviewClockPause, elapsedMilliseconds } fro
 import type { ParallelLane, ParallelMechanic, ResolvedRunPlan, V3Definition } from '../../v3/types';
 import { getPool, transaction } from '../db';
 import { canonicalJson, digest, HttpError } from '../security';
+import { lockV3Hunt, lockV3Team } from './locking';
 import { materializeRunDefinition, materializeRunParallelMechanics } from './runtime';
 import { currentRunView, databaseNow, stateProgress, updateLiveRollup } from './runs';
 import { recalculateRecognition } from './recognition';
-import { rateLimitV3 } from './security';
+import { isV3Uuid, rateLimitV3, reserveV3RunAttempt } from './security';
 
 type ParallelEvidence = { value?: unknown; location?: unknown; mediaId?: unknown };
 type EvidenceStatus = 'accepted' | 'rejected' | 'pending_review';
@@ -23,7 +24,7 @@ async function evidenceMatches(
   mechanicId: string,
   lane: ParallelLane,
   evidence: ParallelEvidence,
-  identity: { runId: string; teamId: string; memberId: string },
+  identity: { runId: string; teamId: string; memberId: string; taskStartedAt: string },
 ) : Promise<EvidenceStatus> {
   if (lane.type === 'qr') return textEvidence(evidence.value) === lane.token ? 'accepted' : 'rejected';
   if (lane.type === 'code') {
@@ -41,13 +42,14 @@ async function evidenceMatches(
     return accuracy <= lane.location.maxAccuracyMeters &&
       distanceMeters(latitude, longitude, lane.location.latitude, lane.location.longitude) <= lane.location.radiusMeters ? 'accepted' : 'rejected';
   }
-  if (typeof evidence.mediaId !== 'string' || !/^[0-9a-f-]{36}$/i.test(evidence.mediaId)) throw new HttpError(400, 'Submit a reviewed photo for this lane.');
+  if (!isV3Uuid(evidence.mediaId)) throw new HttpError(400, 'Submit a reviewed photo for this lane.');
   const media = (await client.query(
     `select id,review_status from hunt_v3.media where id=$1 and run_id=$2 and team_id=$3 and member_id=$4
       and parallel_mechanic_id=$5 and parallel_lane_id=$6
+      and task_started_at=$7::timestamptz
       and kind='photo' and (expires_at is null or expires_at>now()
         or (review_status='pending' and submitted_at is not null))`,
-    [evidence.mediaId, identity.runId, identity.teamId, identity.memberId, mechanicId, lane.id],
+    [evidence.mediaId, identity.runId, identity.teamId, identity.memberId, mechanicId, lane.id, identity.taskStartedAt],
   )).rows[0];
   if (!media || media.review_status === 'rejected') return 'rejected';
   return media.review_status === 'approved' ? 'accepted' : 'pending_review';
@@ -72,14 +74,16 @@ async function pauseForSoleReviewBlockers(
   mechanic: ParallelMechanic,
   completedLaneIds: Set<string>,
   now: string,
+  taskStartedAt: string,
 ) {
   const unresolved = mechanic.lanes.filter(lane => !completedLaneIds.has(lane.id));
   if (!unresolved.length) return run.engine_state;
   const pending = (await client.query(
     `select id,parallel_lane_id from hunt_v3.media
       where run_id=$1 and parallel_mechanic_id=$2 and review_status='pending' and submitted_at is not null
+        and task_started_at=$3::timestamptz
       order by submitted_at,id`,
-    [run.id, mechanic.id],
+    [run.id, mechanic.id, taskStartedAt],
   )).rows as Array<{ id: string; parallel_lane_id: string }>;
   const pendingByLane = new Map(pending.map(media => [media.parallel_lane_id, media]));
   // Review time is excluded only when every unfinished lane is waiting on the
@@ -175,7 +179,7 @@ export async function submitParallelLane(input: {
   laneId: string;
   evidence: ParallelEvidence;
 }) {
-  if (![input.runId, input.requestId, input.memberId].every(value => /^[0-9a-f-]{36}$/i.test(value))) throw new HttpError(400, 'Invalid parallel action identity.');
+  if (![input.teamId, input.runId, input.requestId, input.memberId].every(isV3Uuid)) throw new HttpError(400, 'Invalid parallel action identity.');
   const payloadHash = digest(canonicalJson({ operation: 'parallel_lane', mechanicId: input.mechanicId, laneId: input.laneId, evidence: input.evidence }));
   const scopeKey = `run:${input.runId}:parallel`;
   const preflightReceipt = (await getPool().query(
@@ -204,6 +208,14 @@ export async function submitParallelLane(input: {
     }
   }
   const response = await transaction(async client => {
+    const identity = (await client.query(
+      'select hunt_id from hunt_v3.runs where id=$1 and team_id=$2',
+      [input.runId, input.teamId],
+    )).rows[0];
+    if (!identity || !await lockV3Hunt(client, identity.hunt_id) ||
+      !await lockV3Team(client, identity.hunt_id, input.teamId)) {
+      throw new HttpError(404, 'Run not found.');
+    }
     const run = (await client.query(
       `select r.*,v.definition,h.status as hunt_status from hunt_v3.runs r
         join hunt_v3.hunt_versions v on v.hunt_id=r.hunt_id and v.version=r.hunt_version
@@ -232,28 +244,71 @@ export async function submitParallelLane(input: {
     if (run.engine_state.activeCheckpointId !== mechanic.checkpointId || run.engine_state.checkpoints[mechanic.checkpointId]?.activeNodeId !== mechanic.nodeId) {
       throw new HttpError(409, 'Your team has moved to another task. Refresh to continue.');
     }
+    if (lane.type === 'code' || lane.type === 'qr') {
+      await reserveV3RunAttempt(client, {
+        scope: `parallel-lane:aggregate:${input.teamId}:${input.runId}:${mechanic.id}:${lane.id}`,
+        runId: run.id,
+        teamId: input.teamId,
+        requestId: input.requestId,
+        payloadHash,
+        maximum: 6,
+      });
+    }
     const now = await databaseNow(client);
     assertSessionPlayable(materializeRunDefinition(run.definition, run.route_plan), run.engine_state, run.hunt_status, now);
-    const mechanicStartedAt = run.engine_state.checkpoints[mechanic.checkpointId]?.startedAt ?? run.engine_state.startedAt ?? now;
+    const mechanicProgress = run.engine_state.checkpoints[mechanic.checkpointId];
+    const mechanicStartedAt = mechanicProgress?.nodes[mechanic.nodeId]?.startedAt ?? mechanicProgress?.startedAt ?? run.engine_state.startedAt ?? now;
     const recent = (await client.query(
       `select id,actor_member_id,details,occurred_at from hunt_v3.run_events
         where run_id=$1 and event_type='parallel_lane_completed' and details->>'mechanicId'=$2
-        and occurred_at>=$3::timestamptz order by occurred_at,id`,
-      [run.id, mechanic.id, mechanicStartedAt],
+        and occurred_at>=$3::timestamptz
+        and revision>=coalesce((
+          select max(reset.revision) from hunt_v3.run_events reset
+          where reset.run_id=$1 and reset.event_type='attempt_budget_reset'
+            and reset.checkpoint_id=$4 and reset.node_id=$5
+        ),0)
+        order by occurred_at,id`,
+      [run.id, mechanic.id, mechanicStartedAt, mechanic.checkpointId, mechanic.nodeId],
     )).rows;
     const active = recent.filter(event => elapsedMilliseconds(run.engine_state, new Date(event.occurred_at).toISOString(), now) <= mechanic.timeWindowSeconds * 1000);
     if (active.some(event => event.details.laneId === lane.id)) throw new HttpError(409, 'That lane is already complete in the current window.');
     if (active.some(event => event.actor_member_id === input.memberId)) throw new HttpError(409, 'A different teammate must complete the next lane.');
-    const evidenceStatus = await evidenceMatches(client, mechanic.id, lane, input.evidence, { runId: run.id, teamId: input.teamId, memberId: input.memberId });
+    const evidenceStatus = await evidenceMatches(client, mechanic.id, lane, input.evidence, {
+      runId: run.id,
+      teamId: input.teamId,
+      memberId: input.memberId,
+      taskStartedAt: mechanicStartedAt,
+    });
+    if (lane.type === 'photo' && evidenceStatus === 'accepted') {
+      const consumed = await client.query(
+        `select 1 from hunt_v3.run_events event
+          where event.run_id=$1 and event.event_type='parallel_lane_completed'
+            and event.checkpoint_id=$2 and event.node_id=$3
+            and event.details->>'mechanicId'=$4 and event.details->>'laneId'=$5
+            and event.details->>'mediaId'=$6
+            and event.occurred_at>=$7::timestamptz
+            and event.revision>=coalesce((
+              select max(reset.revision) from hunt_v3.run_events reset
+              where reset.run_id=event.run_id and reset.event_type='attempt_budget_reset'
+                and reset.checkpoint_id=$2 and reset.node_id=$3
+            ),0)
+          limit 1`,
+        [run.id, mechanic.checkpointId, mechanic.nodeId, mechanic.id, lane.id, input.evidence.mediaId, mechanicStartedAt],
+      );
+      if (consumed.rowCount) {
+        throw new HttpError(409, 'That approved photo was already used for this task. Take and review a fresh photo.');
+      }
+    }
     if (evidenceStatus === 'pending_review') {
       const saved = { accepted: false, status: evidenceStatus, mechanicCompleted: false, runCompleted: false, remaining: mechanic.lanes.length - new Set(active.map(item => item.details.laneId)).size };
       const submitted = lane.type === 'photo' ? await client.query(
         `update hunt_v3.media set submitted_at=$1
           where id=$2 and run_id=$3 and team_id=$4 and member_id=$5
             and parallel_mechanic_id=$6 and parallel_lane_id=$7
+            and task_started_at=$8::timestamptz
             and kind='photo' and review_status='pending' and submitted_at is null
           returning id,submitted_at`,
-        [now, input.evidence.mediaId, run.id, input.teamId, input.memberId, mechanic.id, lane.id],
+        [now, input.evidence.mediaId, run.id, input.teamId, input.memberId, mechanic.id, lane.id, mechanicStartedAt],
       ) : { rowCount: 0, rows: [] as Array<{ id: string; submitted_at: string }> };
       if (submitted.rowCount) {
         const ordinal = await nextOrdinal(client, run.id, run.engine_state.revision);
@@ -272,6 +327,7 @@ export async function submitParallelLane(input: {
         mechanic,
         new Set(active.map(item => String(item.details.laneId))),
         now,
+        mechanicStartedAt,
       );
       await updateLiveRollup(client, run.id);
       await client.query(
@@ -288,7 +344,12 @@ export async function submitParallelLane(input: {
         values($1,$2,$3,$4,$5,'member',$6,$7,$8,$9,$10,$11) returning id`,
       [run.id, run.team_id, run.engine_state.revision, ordinal, input.requestId, input.memberId,
         accepted ? 'parallel_lane_completed' : 'parallel_lane_failed', mechanic.checkpointId, mechanic.nodeId,
-        { mechanicId: mechanic.id, laneId: lane.id, laneType: lane.type }, now],
+        {
+          mechanicId: mechanic.id,
+          laneId: lane.id,
+          laneType: lane.type,
+          ...(lane.type === 'photo' ? { mediaId: input.evidence.mediaId } : {}),
+        }, now],
     )).rows[0];
     let mechanicCompleted = false, runCompleted = false;
     const successful = accepted ? [...active, { actor_member_id: input.memberId, details: { laneId: lane.id } }] : active;
@@ -311,7 +372,7 @@ export async function submitParallelLane(input: {
         mechanicCompleted = true;
         runCompleted = await finishMechanic(client, run, mechanic, input.memberId, input.requestId, now);
       } else {
-        await pauseForSoleReviewBlockers(client, run, mechanic, completeLanes, now);
+        await pauseForSoleReviewBlockers(client, run, mechanic, completeLanes, now, mechanicStartedAt);
       }
     }
     const remaining = accepted
@@ -338,7 +399,7 @@ export async function parallelPhotoReviewStatus(input: {
   mechanicId: string;
   laneId: string;
 }) {
-  if (![input.runId, input.mediaId, input.memberId].every(value => /^[0-9a-f-]{36}$/i.test(value))) {
+  if (![input.teamId, input.runId, input.mediaId, input.memberId].every(isV3Uuid)) {
     throw new HttpError(400, 'Invalid parallel photo identity.');
   }
   if (![input.mechanicId, input.laneId].every(value => typeof value === 'string' && value.length > 0 && value.length <= 160)) {

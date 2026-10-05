@@ -40,12 +40,6 @@ export function compareCompletedRuns(left: CompletedRunRecord, right: CompletedR
     left.runId.localeCompare(right.runId)
 }
 
-function sameRank(left: CompletedRunRecord, right: CompletedRunRecord): boolean {
-  return left.score === right.score &&
-    left.elapsedMilliseconds === right.elapsedMilliseconds &&
-    completionOrderKey(left) === completionOrderKey(right)
-}
-
 export function selectBestRuns(runs: readonly CompletedRunRecord[]): BestRunSelection[] {
   const byTeam = new Map<string, CompletedRunRecord[]>()
   for (const run of runs) {
@@ -71,13 +65,13 @@ export function selectBestRuns(runs: readonly CompletedRunRecord[]): BestRunSele
 
 function rankSelections(selections: readonly BestRunSelection[]): Array<BestRunSelection & { rank: number }> {
   const ordered = [...selections].sort((left, right) =>
-    compareCompletedRuns(left.bestRun, right.bestRun) || left.teamCode.localeCompare(right.teamCode),
+    right.bestRun.score - left.bestRun.score ||
+    left.bestRun.elapsedMilliseconds - right.bestRun.elapsedMilliseconds ||
+    compareCompletion(left.bestRun, right.bestRun) ||
+    left.teamCode.localeCompare(right.teamCode) ||
+    left.bestRun.runId.localeCompare(right.bestRun.runId),
   )
-  let currentRank = 0
-  return ordered.map((selection, index) => {
-    if (index === 0 || !sameRank(selection.bestRun, ordered[index - 1].bestRun)) currentRank = index + 1
-    return { ...selection, rank: currentRank }
-  })
+  return ordered.map((selection, index) => ({ ...selection, rank: index + 1 }))
 }
 
 function visibleTime(selection: BestRunSelection, policy: LeaderboardPolicy): number | undefined {
@@ -100,7 +94,7 @@ function mainEntry(selection: BestRunSelection & { rank: number }, policy: Leade
     runCount: selection.eligibleCompletedRuns,
     status: 'completed',
     provisional: false,
-    ...(selection.bestRun.progress ? { progress: selection.bestRun.progress } : {}),
+    ...(policy.showProgress && selection.bestRun.progress ? { progress: selection.bestRun.progress } : {}),
     ...(time !== undefined ? { visibleElapsedMilliseconds: time } : {}),
   }
 }

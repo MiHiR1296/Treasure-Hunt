@@ -8,6 +8,7 @@ V3 is a clean runtime replacement for V2. The final V2 implementation remains av
 
 - Self-serve, organizer-assigned, and rostered registration with canonical team codes and visible crew rosters.
 - Deterministic run seeds, replay policies, run-scoped variables, challenge pools, constrained routes, and publication-time score/duration fairness checks.
+- Organizer-approved competition entry, frozen starting rosters, balanced non-repeating plan allocation, aggregate attempt budgets, and audited disqualification controls.
 - Best-run scoreboards, an optional replay board, and an organizer-controlled public board that exposes team-level data only.
 - Private, server-backed crew contributions and optional teammate recognition, with a named organizer audit and reasoned overrides.
 - Parallel multi-member mechanics backed by authenticated member identities and idempotent commands.
@@ -43,6 +44,7 @@ PostgreSQL and private media use named persistent volumes. Normal phone browsers
 - [Versioned JSON Schema](public/authoring/treasure-hunt-v3.schema.json)
 - [Starter hunt](public/authoring/treasure-hunt-v3.starter.json)
 - [Annotated parallel-mechanics example](public/authoring/treasure-hunt-v3.annotated-example.json)
+- [Adversarial integrity and release gate](docs/v3-adversarial-release-gate.md)
 
 The kit is intentionally provider-independent. It never includes production seeds, QR secrets, or production-only identifiers.
 

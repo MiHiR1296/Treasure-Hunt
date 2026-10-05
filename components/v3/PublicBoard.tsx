@@ -20,7 +20,26 @@ function BoardTable({ rows, columns }: { rows: PublicBoardRow[]; columns: string
   const showTime = hasField(rows, 'elapsedMilliseconds');
   const showStatus = hasField(rows, 'status');
   if (!rows.length) return <div className="rounded-3xl border border-dashed border-white/25 bg-white/5 px-6 py-16 text-center text-emerald-50/70"><span aria-hidden="true" className="text-4xl">⌛</span><p className="mt-3 font-bold">Registered teams will appear here.</p></div>;
-  return <div className="overflow-x-auto rounded-3xl border border-white/15 bg-white/[0.07] shadow-2xl backdrop-blur-sm">
+  return <>
+    <div className="space-y-3 sm:hidden">
+      {rows.map((row, index) => {
+        const identity = [showTeamCode ? row.teamCode : undefined, showTeamName ? row.teamName : undefined].filter(Boolean).join(' · ') || `Team ${index + 1}`;
+        return <article key={`${row.teamCode ?? row.rank ?? 'row'}:${index}`} aria-label={`Leaderboard result for ${identity}`} className="rounded-3xl border border-white/15 bg-white/[0.07] p-5 shadow-2xl backdrop-blur-sm">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">{showTeamCode && <p className="font-mono text-xs font-black tracking-[0.12em] text-emerald-200">{row.teamCode}</p>}{showTeamName && row.teamName && <p className="mt-1 break-words text-xl font-black text-white">{row.teamName}</p>}</div>
+            {showRank && <p className="shrink-0 text-3xl font-black tabular-nums text-emerald-200">#{row.rank}</p>}
+          </div>
+          <dl className="mt-5 grid grid-cols-2 gap-3 text-sm">
+            {showPoints && <div className="rounded-2xl bg-white/[0.06] p-3"><dt className="text-xs font-bold uppercase tracking-wider text-emerald-100/60">Points</dt><dd className="mt-1 text-2xl font-black tabular-nums text-white">{row.points ?? '—'}</dd></div>}
+            {showProgress && <div className="rounded-2xl bg-white/[0.06] p-3"><dt className="text-xs font-bold uppercase tracking-wider text-emerald-100/60">Progress</dt><dd className="mt-1 font-black tabular-nums text-white">{row.progress ? `${row.progress.completed}/${row.progress.total}` : '—'}</dd></div>}
+            {showRuns && <div className="rounded-2xl bg-white/[0.06] p-3"><dt className="text-xs font-bold uppercase tracking-wider text-emerald-100/60">Runs</dt><dd className="mt-1 font-black tabular-nums text-white">{row.runs ?? '—'}</dd></div>}
+            {showTime && <div className="rounded-2xl bg-white/[0.06] p-3"><dt className="text-xs font-bold uppercase tracking-wider text-emerald-100/60">Time</dt><dd className="mt-1 font-mono font-black tabular-nums text-white">{formatDuration(row.elapsedMilliseconds)}</dd></div>}
+            {showStatus && <div className="col-span-2 rounded-2xl bg-white/[0.06] p-3"><dt className="text-xs font-bold uppercase tracking-wider text-emerald-100/60">Status</dt><dd className="mt-1 font-black capitalize text-white">{row.status ?? '—'}</dd></div>}
+          </dl>
+        </article>;
+      })}
+    </div>
+    <div className="hidden overflow-x-auto rounded-3xl border border-white/15 bg-white/[0.07] shadow-2xl backdrop-blur-sm sm:block">
     <table className="w-full min-w-[38rem] text-left">
       <thead className="border-b border-white/15 text-xs uppercase tracking-[0.16em] text-emerald-100/65"><tr>{showRank && <th className="px-5 py-4 sm:px-7">Rank</th>}{(showTeamCode || showTeamName) && <th className="px-5 py-4 sm:px-7">Team</th>}{showPoints && <th className="px-5 py-4 text-right sm:px-7">Points</th>}{showProgress && <th className="px-5 py-4 text-right sm:px-7">Progress</th>}{showRuns && <th className="px-5 py-4 text-right sm:px-7">Runs</th>}{showTime && <th className="px-5 py-4 text-right sm:px-7">Time</th>}{showStatus && <th className="px-5 py-4 text-right sm:px-7">Status</th>}</tr></thead>
       <tbody>{rows.map((row, index) => <tr key={`${row.teamCode ?? row.rank ?? 'row'}:${index}`} className="border-b border-white/10 last:border-0">
@@ -33,7 +52,8 @@ function BoardTable({ rows, columns }: { rows: PublicBoardRow[]; columns: string
         {showStatus && <td className="px-5 py-5 text-right text-sm font-bold capitalize text-emerald-50 sm:px-7">{row.status ?? '—'}</td>}
       </tr>)}</tbody>
     </table>
-  </div>;
+    </div>
+  </>;
 }
 
 export default function PublicBoard({ slug }: { slug: string }) {

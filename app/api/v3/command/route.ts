@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { handle, jsonBody, textField } from '@/lib/server/http';
 import { HttpError } from '@/lib/server/security';
 import { applyRunCommand } from '@/lib/server/v3/runs';
-import { requireV3Session } from '@/lib/server/v3/security';
+import { requireV3Session, requireV3Uuid } from '@/lib/server/v3/security';
 
 export const runtime = 'nodejs';
 
@@ -14,8 +14,8 @@ export async function POST(request: NextRequest) {
     return applyRunCommand(
       session.teamId,
       session.memberId,
-      textField(body, 'runId'),
-      textField(body, 'requestId'),
+      requireV3Uuid(textField(body, 'runId'), 'Invalid run.'),
+      requireV3Uuid(textField(body, 'requestId'), 'A valid request ID is required.'),
       body.command,
     );
   });

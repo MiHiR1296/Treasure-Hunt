@@ -59,15 +59,17 @@ function useTimer(view: V3PlayerView | null) {
 function RunLobby({ summary, busy, onStart }: { summary: TeamSessionSummary; busy: boolean; onStart: (practice: boolean) => Promise<void> }) {
   const policy = summary.settings.runPolicy;
   const firstRun = summary.officialAttemptCount === 0;
-  const capped = policy.mode === 'capped' && summary.remainingOfficialRuns === 0;
-  const disabled = !firstRun && (policy.mode === 'disabled' || capped);
-  const practice = !firstRun && policy.mode === 'practice-only';
+  const officialSlotAvailable = summary.remainingOfficialRuns === null || summary.remainingOfficialRuns > 0;
+  const capped = policy.mode === 'capped' && !officialSlotAvailable;
+  const approvalPending = summary.team.approvalStatus !== 'approved';
+  const practice = !firstRun && (summary.hasPracticeRun || (policy.mode === 'practice-only' && summary.officialAttemptSlotsUsed > 0) || capped);
+  const disabled = approvalPending || (!practice && policy.mode === 'disabled' && !officialSlotAvailable);
   return <section className={`${cardStyle} mt-2`}>
-    <p className="text-xs font-extrabold uppercase tracking-[0.18em] text-emerald-800">{firstRun ? 'Crew ready' : 'Your run history is safe'}</p>
-    <h2 className="mt-2 text-3xl font-black tracking-tight">{firstRun ? 'Start when everyone is ready.' : 'Ready for another route?'}</h2>
-    <p className="mt-3 text-sm leading-relaxed text-stone-600">{firstRun ? 'The timer and your private seeded route begin when you tap below.' : practice ? 'This replay is practice-only. It records crew achievements but does not change competitive ranking.' : 'A replay creates a separate run. It never resets or overwrites an earlier result.'}</p>
+    <p className="text-xs font-extrabold uppercase tracking-[0.18em] text-emerald-800">{approvalPending ? 'Registration received' : firstRun ? 'Crew ready' : 'Your run history is safe'}</p>
+    <h2 className="mt-2 text-3xl font-black tracking-tight">{approvalPending ? 'Your team is waiting for approval.' : firstRun ? 'Start when everyone is ready.' : 'Ready for another route?'}</h2>
+    <p className="mt-3 text-sm leading-relaxed text-stone-600">{approvalPending ? `Your crew is registered as ${summary.team.code}. The organizer must approve it before an official run can start. You can keep this page open; status refreshes automatically.` : firstRun ? 'The timer and your private seeded route begin when you tap below.' : practice ? summary.hasPracticeRun ? 'This team identity has entered practice, so every later replay stays practice-only. Ask the organizer if your registration needs correction; players cannot create an official restart.' : 'This replay is practice-only and reuses a structural route your crew already received. Fresh generated values keep it fun without revealing another competition route.' : 'A replay creates a separate run. It never resets or overwrites an earlier result.'}</p>
     {summary.bestRun && <div className="mt-5 rounded-2xl bg-emerald-50 p-4"><span className="text-xs font-bold uppercase tracking-wide text-emerald-700">Current best</span><p className="mt-1 text-2xl font-black text-emerald-950">{summary.bestRun.score} points</p></div>}
-    {!disabled ? <button type="button" disabled={busy} onClick={() => void onStart(practice)} className={`${primaryButton} mt-5`}>{busy ? 'Building your route…' : firstRun ? 'Start Run 1' : practice ? 'Start practice run' : 'Start a new run'}</button> : <p className="mt-5 rounded-2xl bg-stone-100 p-4 text-sm text-stone-600">{policy.mode === 'disabled' ? 'The organizer has limited this hunt to one official attempt.' : `Your crew has used all ${policy.maxOfficialRuns ?? 1} official attempts.`}</p>}
+    {!disabled ? <button type="button" disabled={busy} onClick={() => void onStart(practice)} className={`${primaryButton} mt-5`}>{busy ? 'Building your route…' : firstRun ? 'Start Run 1' : practice ? 'Start practice run' : 'Start a new run'}</button> : <p className="mt-5 rounded-2xl bg-stone-100 p-4 text-sm text-stone-600">{approvalPending ? 'Waiting for the organizer. This team cannot enter the competition yet.' : 'The organizer has limited this hunt to one run.'}</p>}
   </section>;
 }
 

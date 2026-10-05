@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { getPool, transaction } from '../db';
 import { canonicalJson, digest, HttpError } from '../security';
-import { rateLimitV3 } from './security';
+import { lockV3Hunt, lockV3Team } from './locking';
+import { isV3Uuid, rateLimitV3 } from './security';
 
-const uuid = (value: string) => /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value);
 const helpKinds = new Set(['help', 'camera', 'gps', 'network', 'puzzle', 'photo']);
 
 export async function playerSupport(teamId: string, memberId: string) {
@@ -54,7 +54,7 @@ export async function submitHelp(input: {
   checkpointId?: string;
   nodeId?: string;
 }) {
-  if (!uuid(input.requestId) || (input.runId && !uuid(input.runId))) throw new HttpError(400, 'A valid help request ID is required.');
+  if (!isV3Uuid(input.requestId) || (input.runId && !isV3Uuid(input.runId))) throw new HttpError(400, 'A valid help request ID is required.');
   if (!helpKinds.has(input.kind)) throw new HttpError(400, 'Choose a supported help category.');
   const message = input.message.normalize('NFKC').trim();
   if (!message || message.length > 1000) throw new HttpError(400, 'Describe what your team needs in 1 to 1000 characters.');
@@ -74,6 +74,13 @@ export async function submitHelp(input: {
     await rateLimitV3(`support:${input.teamId}:${input.memberId}`, 20);
   }
   return transaction(async client => {
+    const identity = (await client.query(
+      'select hunt_id from hunt_v3.teams where id=$1',
+      [input.teamId],
+    )).rows[0];
+    if (!identity || !await lockV3Hunt(client, identity.hunt_id)) {
+      throw new HttpError(401, 'Your team membership changed. Sign in again.');
+    }
     const team = (await client.query(
       `select team.hunt_id from hunt_v3.teams team
         join hunt_v3.team_members member on member.team_id=team.id and member.id=$2 and member.status='active'
@@ -144,11 +151,29 @@ export async function adminSupport(huntId: string) {
 }
 
 export async function resolveHelp(input: { requestId: string; response: string; actor: string }) {
-  if (!uuid(input.requestId)) throw new HttpError(400, 'Choose a valid help request.');
+  if (!isV3Uuid(input.requestId)) throw new HttpError(400, 'Choose a valid help request.');
   const response = input.response.normalize('NFKC').trim();
   if (!response || response.length > 2000) throw new HttpError(400, 'Write a response in 1 to 2000 characters.');
   return transaction(async client => {
-    const request = (await client.query('select * from hunt_v3.help_requests where id=$1 for update', [input.requestId])).rows[0];
+    const identity = (await client.query(
+      'select hunt_id,team_id,run_id from hunt_v3.help_requests where id=$1',
+      [input.requestId],
+    )).rows[0];
+    if (!identity) throw new HttpError(404, 'Help request not found.');
+    if (!await lockV3Hunt(client, identity.hunt_id)) throw new HttpError(404, 'Hunt not found.');
+    if (!await lockV3Team(client, identity.hunt_id, identity.team_id)) throw new HttpError(404, 'Team not found.');
+    if (identity.run_id) {
+      const run = await client.query(
+        'select id from hunt_v3.runs where id=$1 and team_id=$2 and hunt_id=$3 for share',
+        [identity.run_id, identity.team_id, identity.hunt_id],
+      );
+      if (!run.rowCount) throw new HttpError(404, 'Run not found.');
+    }
+    const request = (await client.query(
+      `select * from hunt_v3.help_requests
+        where id=$1 and hunt_id=$2 and team_id=$3 and run_id is not distinct from $4::uuid for update`,
+      [input.requestId, identity.hunt_id, identity.team_id, identity.run_id],
+    )).rows[0];
     if (!request) throw new HttpError(404, 'Help request not found.');
     if (request.status === 'resolved') throw new HttpError(409, 'This help request is already resolved.');
     const resolvedAt = new Date((await client.query('select clock_timestamp() as at')).rows[0].at).toISOString();
@@ -166,13 +191,14 @@ export async function resolveHelp(input: { requestId: string; response: string; 
 }
 
 export async function sendOrganizerMessage(input: { huntId: string; teamId?: string | null; message: string; actor: string }) {
+  if (input.teamId && !isV3Uuid(input.teamId)) throw new HttpError(400, 'Choose a valid team.');
   const message = input.message.normalize('NFKC').trim();
   if (!message || message.length > 2000) throw new HttpError(400, 'Write a message in 1 to 2000 characters.');
   return transaction(async client => {
-    const hunt = (await client.query('select id from hunt_v3.hunts where id=$1', [input.huntId])).rows[0];
+    const hunt = await lockV3Hunt(client, input.huntId);
     if (!hunt) throw new HttpError(404, 'Hunt not found.');
     if (input.teamId) {
-      const team = (await client.query('select id from hunt_v3.teams where id=$1 and hunt_id=$2', [input.teamId, input.huntId])).rows[0];
+      const team = await lockV3Team(client, input.huntId, input.teamId);
       if (!team) throw new HttpError(404, 'Team not found in this hunt.');
     }
     const id = randomUUID();

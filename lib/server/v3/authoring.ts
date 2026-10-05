@@ -2,14 +2,21 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import Ajv, { type ErrorObject } from 'ajv';
 import addFormats from 'ajv-formats';
 import { validateHunt } from '../../engine';
+import type { PuzzleDefinition } from '../../engine/puzzles';
 import type { HuntDefinition, ValidationIssue } from '../../engine/types';
 import { validateFairness } from '../../v3/fairness';
 import { validateParallelMechanics } from '../../v3/planning';
 import type { FairnessReport, FairnessRouteResult, ResolvedRunPlan, V3Definition, VariableGenerator } from '../../v3/types';
-import { renderVariableTemplate, resolveVariables } from '../../v3/variables';
+import {
+  generatedCodeEntropyBits,
+  MINIMUM_GENERATED_CODE_ENTROPY_BITS,
+  renderVariableTemplate,
+  resolveVariables,
+} from '../../v3/variables';
 import { transaction } from '../db';
 import { canonicalJson, digest, HttpError } from '../security';
 import { materializeRunDefinition, materializeRunParallelMechanics } from './runtime';
+import { isV3Uuid } from './security';
 import v3AuthoringSchema from '../../../public/authoring/treasure-hunt-v3.schema.json';
 
 type ObjectValue = Record<string, unknown>;
@@ -394,7 +401,7 @@ function validateEveryMaterialization(
         parallelMechanics: materializeRunParallelMechanics(definition, { variables }),
       },
     };
-    for (const parallelIssue of validateParallelMechanics(parallelDefinition)) {
+    for (const parallelIssue of validateParallelMechanics(parallelDefinition, definition)) {
       add(`hunt.${parallelIssue.path}`, `A possible generated value is invalid: ${parallelIssue.message}`);
     }
     for (const route of fairness.routes) {
@@ -414,6 +421,97 @@ function validateEveryMaterialization(
   }
 }
 
+const MINIMUM_STATIC_CODE_LENGTH = 8;
+
+function validateVerifierStrength(definition: V3Definition, issues: ValidationIssue[]) {
+  const weakGeneratorKeys = new Set<string>();
+  for (const [key, generator] of Object.entries(definition.settings.variableGenerators)) {
+    if (generator.type !== 'code') continue;
+    const entropyBits = generatedCodeEntropyBits(generator);
+    if (!Number.isFinite(entropyBits) || entropyBits < MINIMUM_GENERATED_CODE_ENTROPY_BITS) {
+      weakGeneratorKeys.add(key);
+      issues.push({
+        path: `hunt.settings.variableGenerators.${key}`,
+        message: `Generated verifier codes need at least ${MINIMUM_GENERATED_CODE_ENTROPY_BITS} bits of comparison-stable outcome space; this generator provides ${Number.isFinite(entropyBits) ? entropyBits.toFixed(1) : '0'} bits. Use unique ASCII letters/digits (counting case-insensitively) and increase the alphabet or length.`,
+      });
+    }
+  }
+
+  const verifyCode = (value: string, path: string, allowServerGeneratedDirective = false) => {
+    const references = [...value.matchAll(TEMPLATE_REFERENCE)].map(match => match[1]);
+    if (references.length) {
+      for (const key of references) {
+        const generator = definition.settings.variableGenerators[key];
+        if (!generator || generator.type !== 'code') {
+          issues.push({ path, message: `Verifier code placeholder "${key}" must use a code generator, not a small literal or choice set.` });
+        } else if (weakGeneratorKeys.has(key)) {
+          issues.push({ path, message: `Verifier code placeholder "${key}" does not have enough generated outcome entropy.` });
+        }
+      }
+      return;
+    }
+    if (value.startsWith('@server:generate:')) {
+      if (!allowServerGeneratedDirective) {
+        issues.push({ path, message: 'Server-generated directives are supported only for QR tokens and QR backup codes. Use a run-scoped code variable here.' });
+      }
+      return;
+    }
+    if (Array.from(value.trim()).length < MINIMUM_STATIC_CODE_LENGTH) {
+      issues.push({ path, message: `Static verifier codes need at least ${MINIMUM_STATIC_CODE_LENGTH} characters. Prefer a server-generated QR or a run-scoped code variable.` });
+    }
+  };
+
+  definition.checkpoints.forEach((checkpoint, checkpointIndex) => {
+    checkpoint.flow.nodes.forEach((node, nodeIndex) => {
+      const path = `hunt.checkpoints[${checkpointIndex}].flow.nodes[${nodeIndex}]`;
+      if (node.type === 'verify_code') verifyCode(node.code, `${path}.code`);
+      if (node.type === 'verify_qr') {
+        if (node.backupCode) verifyCode(node.backupCode, `${path}.backupCode`, true);
+        if (!node.token.startsWith('@server:generate:') && Array.from(node.token).length < 16) {
+          issues.push({ path: `${path}.token`, message: 'Static QR verifier tokens need at least 16 characters. Prefer a server-generated QR directive.' });
+        }
+      }
+    });
+  });
+  (definition.settings.parallelMechanics ?? []).forEach((mechanic, mechanicIndex) => {
+    mechanic.lanes.forEach((lane, laneIndex) => {
+      const path = `hunt.settings.parallelMechanics[${mechanicIndex}].lanes[${laneIndex}]`;
+      if (lane.type === 'code') verifyCode(lane.code, `${path}.code`);
+      if (lane.type === 'qr' && !lane.token.startsWith('@server:generate:') && Array.from(lane.token).length < 16) {
+        issues.push({ path: `${path}.token`, message: 'Static QR verifier tokens need at least 16 characters. Prefer a server-generated QR directive.' });
+      }
+    });
+  });
+}
+
+function validatePuzzleSearchStrength(definition: V3Definition, issues: ValidationIssue[]) {
+  const inspect = (puzzle: PuzzleDefinition, path: string) => {
+    if (puzzle.type === 'jigsaw' && puzzle.pieces.length < 6) {
+      issues.push({ path, message: 'Competitive jigsaws need at least 6 pieces so the official move budget cannot enumerate a material share of all layouts.' });
+    }
+    if (puzzle.type === 'matching' && puzzle.left.length < 5) {
+      issues.push({ path, message: 'Competitive matching puzzles need at least 5 pairs so the official move budget covers less than 10% of all pairings.' });
+    }
+    if (puzzle.type === 'sequence' && puzzle.items.length < 6) {
+      issues.push({ path, message: 'Competitive sequence puzzles need at least 6 items so the official move budget covers less than 3% of all orders.' });
+    }
+    if (puzzle.type === 'rotation') {
+      const rotated = puzzle.tiles.filter(tile => tile.correctRotation !== 0).length;
+      if (puzzle.tiles.length < 6 || rotated < 5) {
+        issues.push({ path, message: 'Competitive rotation puzzles need at least 6 tiles with at least 5 non-zero target rotations so the official move budget cannot sweep the meaningful states.' });
+      }
+    }
+  };
+  definition.checkpoints.forEach((checkpoint, checkpointIndex) => {
+    checkpoint.flow.nodes.forEach((node, nodeIndex) => {
+      if (node.type === 'puzzle') inspect(node.puzzle, `hunt.checkpoints[${checkpointIndex}].flow.nodes[${nodeIndex}].puzzle`);
+    });
+    checkpoint.hints.forEach((hint, hintIndex) => {
+      if (hint.content.type === 'puzzle') inspect(hint.content.puzzle, `hunt.checkpoints[${checkpointIndex}].hints[${hintIndex}].content.puzzle`);
+    });
+  });
+}
+
 export function validateV3Definition(input: unknown, options: { externalAuthoring?: boolean } = {}): { definition?: V3Definition; issues: ValidationIssue[]; fairness?: FairnessReport } {
   const issues: ValidationIssue[] = [];
   const issue = (path: string, message: string) => issues.push({ path, message });
@@ -429,6 +527,9 @@ export function validateV3Definition(input: unknown, options: { externalAuthorin
   if (!isObject(input.settings)) issue('hunt.settings', 'V3 settings are required.');
   else {
     for (const key of Object.keys(input.settings)) if (!settingKeys.has(key)) issue(`hunt.settings.${key}`, 'Unsupported V3 setting.');
+    if (input.settings.mode !== undefined && input.settings.mode !== 'sequential') {
+      issue('hunt.settings.mode', 'V3 route plans execute sequentially. Use "sequential" or omit mode; open and dependency modes are not supported.');
+    }
     if (!['self-serve', 'organizer-assigned', 'rostered'].includes(String(input.settings.registrationMode))) issue('hunt.settings.registrationMode', 'Choose self-serve, organizer-assigned, or rostered.');
     const runPolicy = input.settings.runPolicy;
     if (!isObject(runPolicy) || !['disabled', 'capped', 'unlimited', 'practice-only'].includes(String(runPolicy.mode))) issue('hunt.settings.runPolicy', 'Choose a supported replay policy.');
@@ -441,6 +542,15 @@ export function validateV3Definition(input: unknown, options: { externalAuthorin
       if (![data, peer].every(Number.isFinite) || data < 0 || peer < 0 || Math.abs(data + peer - 1) > 1e-9) issue('hunt.settings.recognition', 'Recognition dataWeight and peerWeight must be non-negative and total 1.');
     }
   }
+  if (Array.isArray(input.checkpoints)) input.checkpoints.forEach((checkpoint, checkpointIndex) => {
+    if (!isObject(checkpoint)) return;
+    if (checkpoint.required === false) {
+      issue(`hunt.checkpoints[${checkpointIndex}].required`, 'Every checkpoint selected by a V3 route is required. Remove this field or set it to true.');
+    }
+    if (Array.isArray(checkpoint.prerequisites) && checkpoint.prerequisites.length) {
+      issue(`hunt.checkpoints[${checkpointIndex}].prerequisites`, 'V3 derives checkpoint prerequisites from the private sequential route. Remove authored prerequisites.');
+    }
+  });
 
   // The existing engine validator remains authoritative for every checkpoint,
   // action, puzzle, private answer, hint, and graph edge.
@@ -452,10 +562,19 @@ export function validateV3Definition(input: unknown, options: { externalAuthorin
   if (issues.length) return { issues };
 
   const definition = JSON.parse(JSON.stringify(input)) as V3Definition;
+  validateVerifierStrength(definition, issues);
+  validatePuzzleSearchStrength(definition, issues);
   let fairness: FairnessReport | undefined;
   try {
     fairness = validateFairness(definition);
     issues.push(...fairness.issues.map(item => ({ path: `hunt.${item.path}`, message: item.message })));
+    if (definition.settings.runPolicy.mode === 'capped' &&
+      (definition.settings.runPolicy.maxOfficialRuns ?? 1) > fairness.routes.length) {
+      issue(
+        'hunt.settings.runPolicy.maxOfficialRuns',
+        `This hunt has ${fairness.routes.length} validated structural plan${fairness.routes.length === 1 ? '' : 's'}; official attempts cannot exceed that deck because repeats create a rehearsal advantage.`,
+      );
+    }
   } catch (error) {
     issue('hunt.settings.fairnessPolicy', error instanceof Error ? error.message : 'Fairness validation failed.');
   }
@@ -515,7 +634,7 @@ export async function listV3Drafts() {
 }
 
 export async function saveV3Draft(input: unknown, draftId: string, revision: number, generation: string) {
-  if (!/^[0-9a-f-]{36}$/i.test(draftId) || !Number.isSafeInteger(revision) || revision < 1 || !/^[0-9a-f-]{36}$/i.test(generation)) throw new HttpError(400, 'Load the current draft before saving.');
+  if (!isV3Uuid(draftId) || !Number.isSafeInteger(revision) || revision < 1 || !isV3Uuid(generation)) throw new HttpError(400, 'Load the current draft before saving.');
   if (!isObject(input)) throw new HttpError(400, 'Draft JSON must be an object.');
   const validation = validateV3Definition(input);
   const row = (await transaction(async client => client.query(
@@ -530,8 +649,8 @@ export async function saveV3Draft(input: unknown, draftId: string, revision: num
 }
 
 export async function previewV3Draft(input: { draftId: string; revision: number; generation: string; adminSessionHash: string }) {
-  if (!/^[0-9a-f-]{36}$/i.test(input.draftId) || !Number.isSafeInteger(input.revision) || input.revision < 1 ||
-    !/^[0-9a-f-]{36}$/i.test(input.generation) || !/^[0-9a-f]{64}$/i.test(input.adminSessionHash)) {
+  if (!isV3Uuid(input.draftId) || !Number.isSafeInteger(input.revision) || input.revision < 1 ||
+    !isV3Uuid(input.generation) || !/^[0-9a-f]{64}$/i.test(input.adminSessionHash)) {
     throw new HttpError(400, 'Load the current draft before previewing.');
   }
   return transaction(async client => {
@@ -583,6 +702,11 @@ function materializeServerSecrets<T>(value: T): { value: T; artifacts: QrSecretA
 }
 
 export async function publishV3Draft(input: { draftId: string; revision: number; generation: string; expectedVersion?: number; adminSessionHash: string }) {
+  if (!isV3Uuid(input.draftId) || !isV3Uuid(input.generation) || !Number.isSafeInteger(input.revision) || input.revision < 1 ||
+    !/^[0-9a-f]{64}$/i.test(input.adminSessionHash) ||
+    (input.expectedVersion !== undefined && (!Number.isSafeInteger(input.expectedVersion) || input.expectedVersion < 1))) {
+    throw new HttpError(400, 'Load, save, and preview a valid current draft before publishing.');
+  }
   return transaction(async client => {
     const draft = (await client.query('select * from hunt_v3.drafts where id=$1 for update', [input.draftId])).rows[0];
     if (!draft || draft.revision !== input.revision || draft.generation !== input.generation) throw new HttpError(409, 'Save and load the latest draft before publishing.');

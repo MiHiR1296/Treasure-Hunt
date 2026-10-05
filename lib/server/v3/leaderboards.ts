@@ -12,6 +12,7 @@ import type {
 import type { PoolClient } from 'pg';
 import { getPool } from '../db';
 import { HttpError } from '../security';
+import { terminalizeExpiredV3Runs } from './runs';
 
 type Queryable = Pick<PoolClient, 'query'>;
 
@@ -129,7 +130,7 @@ async function leaderboardProjection(
       order by r.run_number desc,r.created_at desc,r.id asc
       limit 1
     ) current on true
-    where t.hunt_id=$1 and t.status='active'
+    where t.hunt_id=$1 and t.status='active' and t.approval_status='approved'
     order by t.canonical_code asc`,
     [huntId],
   );
@@ -172,7 +173,10 @@ async function leaderboardProjection(
         runId: bestRun.runId,
         attemptNumber: bestRun.attemptNumber,
         eligibleCompletedRuns,
-        runCount,
+        // Once an official result exists, every displayed result field belongs
+        // to eligible completed history. A waiting/active replay must not make
+        // the completed leaderboard row claim an additional finished run.
+        runCount: eligibleCompletedRuns,
         status: 'completed',
         provisional: false,
         ...(bestRun.progress ? { progress: bestRun.progress } : {}),
@@ -236,17 +240,15 @@ function buildOperationalMainEntries(
   if (!policy.mainBoardEnabled) return [];
   const ordered = [...selections].sort((left, right) =>
     compareOperationalCore(left, right) ||
-    (left.runId ?? '').localeCompare(right.runId ?? '') ||
-    left.teamCode.localeCompare(right.teamCode),
+    left.teamCode.localeCompare(right.teamCode) ||
+    (left.runId ?? '').localeCompare(right.runId ?? ''),
   );
-  let rank = 0;
   return ordered.map((selection, index) => {
-    if (index === 0 || compareOperationalCore(selection, ordered[index - 1]) !== 0) rank = index + 1;
     const revealTime = !selection.provisional && selection.elapsedMilliseconds !== undefined &&
       (policy.timeVisibility === 'always' ||
         (policy.timeVisibility === 'after_second_eligible_run' && selection.eligibleCompletedRuns >= 2));
     return {
-      rank,
+      rank: index + 1,
       teamId: selection.teamId,
       teamCode: selection.teamCode,
       ...(selection.teamName ? { teamName: selection.teamName } : {}),
@@ -257,7 +259,7 @@ function buildOperationalMainEntries(
       runCount: selection.runCount,
       status: selection.status,
       provisional: selection.provisional,
-      ...(selection.progress ? { progress: selection.progress } : {}),
+      ...(policy.showProgress && selection.progress ? { progress: selection.progress } : {}),
       ...(revealTime ? { visibleElapsedMilliseconds: selection.elapsedMilliseconds } : {}),
     };
   });
@@ -282,6 +284,7 @@ function privateRows<T extends { teamId: string; bestRunId?: string }>(entries: 
 }
 
 export async function teamLeaderboards(huntId: string, viewerTeamId: string, suppliedDatabase?: Queryable) {
+  if (!suppliedDatabase) await terminalizeExpiredV3Runs(huntId);
   const database = suppliedDatabase ?? getPool();
   const hunt = await huntLeaderboardContext(huntId, database);
   const policy = hunt.definition.settings.leaderboardPolicy;
@@ -468,6 +471,14 @@ export async function publicLeaderboard(
     [slug],
   )).rows[0] as PublicBoardRecord | undefined;
   if (!board) throw new HttpError(404, 'Public board not found.');
+  if (!suppliedDatabase && board.event_status !== 'frozen' && board.event_status !== 'final') {
+    const swept = await terminalizeExpiredV3Runs(board.hunt_id);
+    if (swept.expired) {
+      for (const key of liveProjectionCache.keys()) {
+        if (key.startsWith(`${board.hunt_id}:`)) liveProjectionCache.delete(key);
+      }
+    }
+  }
   if ((board.event_status === 'frozen' || board.event_status === 'final') && board.snapshot_rows) {
     const snapshot = Array.isArray(board.snapshot_rows) ? board.snapshot_rows as Array<Record<string, unknown>> : [];
     return {

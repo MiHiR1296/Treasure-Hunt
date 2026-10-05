@@ -42,6 +42,8 @@ export interface TeamSessionSummary {
     displayName: string | null;
     label: string;
     status: string;
+    approvalStatus: 'pending' | 'approved';
+    competitionRevision: number;
     registrationSource: RegistrationMode;
   };
   member: { id: string; name: string };
@@ -52,7 +54,11 @@ export interface TeamSessionSummary {
   completedOfficialRuns: number;
   /** All non-practice attempts, including timed-out or abandoned runs. */
   officialAttemptCount: number;
-  /** Null means the organizer configured no official-attempt limit. */
+  /** Policy slots used after audited disqualification replacements. */
+  officialAttemptSlotsUsed: number;
+  /** Practice is a one-way boundary: this identity can never become official again. */
+  hasPracticeRun: boolean;
+  /** Null means unlimited official attempts; practice-locked identities report zero. */
   remainingOfficialRuns: number | null;
   settings: {
     minTeamSize: number;

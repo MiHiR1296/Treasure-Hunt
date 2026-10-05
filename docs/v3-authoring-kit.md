@@ -67,7 +67,7 @@ The following V3 fields are required so imports do not silently inherit competit
 | `variableGenerators` | Resolves deterministic per-run values from the private run seed. |
 | `fairnessPolicy` | Sets proof limits, duration tolerance, travel assumptions, and bonus treatment. |
 
-`parallelMechanics` is optional. Existing runtime-compatible fields remain available: `mode`, `map`, `rules`, `minTeamSize`, `maxTeamSize`, `sessionDurationSeconds`, `registrationOpen`, `startsAt`, `endsAt`, `completionMessage`, and `photoRetention`.
+`parallelMechanics` is optional. Existing runtime-compatible fields remain available: `map`, `rules`, `minTeamSize`, `maxTeamSize`, `sessionDurationSeconds`, `registrationOpen`, `startsAt`, `endsAt`, `completionMessage`, and `photoRetention`. If `mode` is present it must be `sequential`: the private V3 `routePlan` is the sole source of checkpoint order.
 
 ### Registration and team identity
 
@@ -87,10 +87,15 @@ Supported modes are:
 
 - `disabled`: one official run; no replay creation.
 - `capped`: at most `maxOfficialRuns`, counting the first run.
-- `unlimited`: every completed replay can remain eligible.
+- `unlimited`: every completed replay can remain eligible. This is the V3 default.
 - `practice-only`: the initial official run remains competitive and later runs are practice.
 
 A replay always creates a new run. It never resets or overwrites an earlier run.
+Official allocation uses every validated structural plan for a team before repeating one, while balancing plan use across the event. Unlimited mode therefore remains official even after the first pass through the deck. For capped mode, `maxOfficialRuns` cannot exceed the validated structural-plan count.
+
+Practice is deliberately not an early scouting switch. In `practice-only` mode it begins after the first official attempt; in `capped` mode it unlocks only after the full official allowance is used; and in `unlimited` mode it is unavailable because every replay is official. A practice run reuses one of that same team's previously seen official structures (including internal seeded branches), resolves fresh run variables, and never changes official plan-allocation counts.
+
+Entering practice is irreversible for that team/hunt identity. Disqualification restoration cannot convert a rehearsed identity back to an official slot. Players are not offered a way around that boundary; a legitimate correction requires an organizer-issued replacement registration after the organizer verifies the people involved.
 
 ### Leaderboard policy
 
@@ -156,7 +161,7 @@ A run receives a private server-generated seed. Route selection, challenge choic
 | Literal | `{ "type": "literal", "value": "BLUE" }` | Fixed value. Useful for a branch that must not reroll. |
 | Choice | `{ "type": "choice", "values": ["BLUE", "GREEN"] }` | One of 1–10,000 unique bounded string/number/boolean values. |
 | Integer | `{ "type": "integer", "minimum": 10, "maximum": 90, "step": 10 }` | Inclusive safe-integer range; at most one million possible values. |
-| Code | `{ "type": "code", "alphabet": "ABCDEFGHJKLMNPQRSTUVWXYZ23456789", "length": 4 }` | Two to 128 unique characters and a length from four to 64. Shorter verifier codes fail publication. |
+| Code | `{ "type": "code", "alphabet": "ABCDEFGHJKLMNPQRSTUVWXYZ23456789", "length": 7 }` | Use unique ASCII letters/digits and 4–64 characters. Publication requires at least 32 effective bits after verifier normalization; Unicode lookalikes, punctuation, whitespace, and case-folding duplicates make the generator ineligible as a strong verifier code. |
 
 Use only a simple placeholder:
 
@@ -169,9 +174,11 @@ Whitespace inside braces is accepted. Expressions, filters, function calls, prop
 
 The importer allow-lists template-bearing, run-scoped fields. Placeholders are supported in the run description/theme, checkpoint titles and content (including prompts, answers, verifier codes, hints, and media content), run rules/completion text, dud-QR display content, and parallel lane labels/codes. Structural IDs and routing fields are never templated. The hunt title and event-level configuration such as `publicBoard`, `socialShare`, `recognition`, `routePlan`, `challengePools`, `fairnessPolicy`, registration, and replay policy also cannot contain placeholders because those values do not vary per run. The starter demonstrates supported use in `show_text.text`, action/puzzle prompts, `verify_answer.answers`, `verify_code.code`, and a parallel code lane.
 
+A companion-free `verify_answer` or text puzzle may offer wording aliases such as `{{code}}` and `CODE-{{code}}`, but every accepted alias must derive from the same single strong code variable. Listing independently generated alternatives multiplies the accepted search space, so publication requires fresh photo review or a standalone organizer gate on that path.
+
 A placeholder is resolved once for a run and then stored in that run's immutable resolved plan; adding another generator later must not reroll existing values. Publication checks every eligible route and challenge variant. It exhaustively checks generator outcomes when they can alter URL, puzzle-semantic, colour, or unique-token validity, and fails closed when that proof would exceed the bounded safety limit. Ordinary text/code fields use conservative length and non-whitespace proofs across the generator's full domain.
 
-Generated values must not change score ceilings or difficulty. A branch driven by a non-literal generated variable must have equal reachable score ceilings on both sides.
+Generated values must not change score ceilings or difficulty. Competitive publication rejects player-choice paths, random branches, time/hint/checkpoint branches, and generated or mutable-variable branches because one checkpoint estimate cannot prove their duration equality. A branch over an immutable literal generator is the only branch exception; put meaningful alternatives in challenge pools with explicit duration estimates.
 
 ## Route plans
 
@@ -215,7 +222,7 @@ Rules:
 - Every location in an eligible route needs a checkpoint or challenge pool.
 - Every location or chosen variant needs either a duration estimate or difficulty estimate.
 - A travel entry can supply explicit `durationMinutes` or `distanceMeters`; distance uses `walkingSpeedMetersPerMinute`.
-- When `requireTravelEstimates` is true, every possible consecutive route pair needs an explicit or bidirectional travel entry.
+- Every possible consecutive route pair needs an explicit or bidirectional travel entry. Competitive V3 requires `requireTravelEstimates: true` because raw elapsed time breaks score ties.
 
 The resolver enumerates eligible routes. It does not sample a few routes and assume the rest are fair. If the possible route × challenge-variant space exceeds `maxResolvedRoutes` or the hard 100,000-combination bound, publication fails closed.
 
@@ -249,7 +256,7 @@ A pool key is a physical location in the route plan. Each variant points to a co
 }
 ```
 
-`scoreCeiling` is an optional author assertion, not trusted scoring data. The fairness validator calculates the real ceiling from the referenced checkpoint and rejects a mismatch. `weight` changes selection frequency only; even a low-weight variant must be fair because any team may receive it.
+`scoreCeiling` is an optional author assertion, not trusted scoring data. The fairness validator calculates the real ceiling from the referenced checkpoint and rejects a mismatch. Competitive variants use equal weights. Runtime assigns from a balanced private plan deck, preferring plans the team has not yet seen and then the least-used event-wide plans; independent weighted sampling is not used for official runs.
 
 Use separate checkpoint definitions for meaningfully different variants. Do not hide an unrelated variant in client code or switch expected answers after the run begins.
 
@@ -260,7 +267,7 @@ The fairness validator evaluates every eligible physical route and every challen
 The calculated competitive maximum for a checkpoint includes:
 
 - checkpoint `basePoints`;
-- positive `timeBonus.points` unless that source is explicitly excluded;
+- excluded `timeBonus.points` are tracked as extra points only; competitive time bonuses fail publication because threshold attainability is not provable from a route ceiling;
 - reachable `add_points` awards unless that source is explicitly excluded;
 - maximum word-search extra-word and threshold-quiz extra-correct bonuses unless that puzzle bonus is explicitly excluded;
 - profitable puzzle-hint bonuses after hint cost.
@@ -269,21 +276,29 @@ Penalties do not reduce the maximum ceiling. A route cannot be made fair by assu
 
 Publication fails when:
 
+- fewer structural plans exist than `minimumDistinctPlans`;
 - random branches have different reachable score ceilings;
+- any player-choice, seeded, time/hint/checkpoint, generated-variable, or mutable-variable branch hides duration behind one checkpoint estimate;
 - a generated-variable branch has different reachable score ceilings;
+- challenge variants use unequal weights;
 - variants in the same challenge pool have different calculated ceilings;
 - a declared variant ceiling differs from its calculated ceiling;
 - complete eligible routes have different maximum competitive scores;
 - required duration/travel data is missing;
-- longest minus shortest estimated duration exceeds `durationToleranceMinutes`;
+- estimated route durations differ at all (`durationToleranceMinutes` is fixed at `0` while time is a tie-break);
+- a travel estimate is missing;
+- a GPS or QR completion path lacks photo or standalone organizer-confirmed companion evidence;
+- a static/reusable `verify_code` or `verify_answer` completion path lacks that same independent companion evidence;
+- a checkpoint time bonus can change competitive score instead of being marked `rankingImpact: "excluded"`;
+- an immediate player fallback could bypass a competitive verifier;
 - a graph/reference is invalid; or
 - the route space cannot be exhaustively proven within the limit.
 
-Bonus treatment is bound directly to the authoritative scoring source; there is no detached bonus declaration to drift away from runtime behavior. Omitted impact defaults to `competitive`. Set `rankingImpact: "excluded"` on a checkpoint `timeBonus` or `add_points` node, and set `bonusRankingImpact: "excluded"` on a word-search or quiz bonus, to record it as an extra delight point without changing official score, rank, or the competitive route proof. The run ledger and player result keep those excluded points visible in a separate extra-points total. Any competitive source remains in the calculated ceiling, so a route-specific competitive bonus will make publication fail unless every eligible route has the same maximum.
+Bonus treatment is bound directly to the authoritative scoring source; there is no detached bonus declaration to drift away from runtime behavior. Omitted impact defaults to `competitive`. Set `rankingImpact: "excluded"` on a checkpoint `timeBonus` or `add_points` node, and set `bonusRankingImpact: "excluded"` on a word-search or quiz bonus, to record it as an extra delight point without changing official score, rank, or the competitive route proof. The run ledger and player result keep those excluded points visible in a separate extra-points total. Competitive time bonuses always fail closed: matching maximums do not prove that different thresholds or tasks make the award equally attainable.
 
-Two optional sources are always required to be excluded in V3: non-zero dud-QR awards and positive puzzle bonuses embedded inside hints. A dud token can only be tried while a QR verifier is active, and hint availability can depend on disabled flags, prerequisite hints, node paths, attempts, timing, and solve expiry. Until those opportunity paths are explicitly bound and proven, publication fails closed instead of pretending those points are attainable on every route. Put the same puzzle in the normal checkpoint flow if its reward must be competitive.
+Three conditional sources are always required to be excluded in V3: checkpoint time bonuses, non-zero dud-QR awards, and positive puzzle bonuses embedded inside hints. A time threshold's attainability depends on actual task difficulty, a dud token can only be tried while a QR verifier is active, and hint availability can depend on disabled flags, prerequisite hints, node paths, attempts, timing, and solve expiry. Until those opportunity paths are explicitly bound and proven, publication fails closed instead of pretending those points are attainable on every route. Put the same puzzle in the normal checkpoint flow if its reward must be competitive.
 
-Publication also proves that the positive and negative magnitudes of both official score and excluded extra points fit the PostgreSQL score caches for every resolved route. The proof uses integer arithmetic and includes base points, time awards, flow actions, puzzle rewards and quiz skips, hint costs, checkpoint skips, and dud discoveries. A puzzle reward earned before choosing its fallback is counted together with the fallback continuation. Scored wrong attempts are rejected in V3 because retries have no lifetime cap; failed attempts are still captured in run events and analytics without changing score. Runtime enforces the same cache boundary before accepting any score mutation.
+Publication also proves that the positive and negative magnitudes of both official score and excluded extra points fit the PostgreSQL score caches for every resolved route. The proof uses integer arithmetic and includes base points, time awards, flow actions, puzzle rewards and quiz skips, hint costs, checkpoint skips, and dud discoveries. Immediate competitive fallbacks are rejected because a player could otherwise skip the intended proof. Scored wrong attempts are rejected in V3 because abuse-control limits are not a fair scoring mechanic; failed attempts are still captured in run events and analytics without changing score. Runtime enforces the same cache boundary before accepting any score mutation.
 
 Fairness proves configured score ceilings and estimated durations. It cannot prove that two riddles feel equally difficult to real players. Pilot variants, review per-route completion times, and revise estimates using analytics.
 
@@ -310,23 +325,28 @@ Parallel mechanics require two or more distinct authenticated members to complet
       "type": "code",
       "code": "{{laneCode}}",
       "caseSensitive": false
+    },
+    {
+      "id": "fresh-proof",
+      "label": "Take a fresh marker photo",
+      "type": "photo"
     }
   ]
 }
 ```
 
-`checkpointId` must exist, and `nodeId` must identify a `verify_organizer` gate in that checkpoint flow. A mechanic needs two to twenty unique lanes. Lane types are:
+`checkpointId` must exist, and `nodeId` must identify a `verify_organizer` gate in that checkpoint flow. Only one mechanic may target a checkpoint/node gate. A mechanic needs two to twenty unique lanes, and its lane count cannot exceed either `minTeamSize` or `maxTeamSize`, because every lane requires a distinct starting-roster member. Lane types are:
 
-- `qr`: private `token`; external files use an `@server:generate:<logical-name>` directive only.
-- `code`: private `code`, preferably a run variable placeholder instead of a reusable static secret.
-- `gps`: a private `location` with latitude, longitude, radius, and maximum accepted accuracy.
+- `qr`: private `token`; external files use an `@server:generate:<logical-name>` directive only. Because a QR value can be forwarded, any mechanic containing a QR lane also needs a photo lane.
+- `code`: private `code`. A static code is remotely shareable and therefore requires a photo lane; only a high-entropy run-scoped `code` variable may omit that lane.
+- `gps`: a private `location` with latitude, longitude, radius, and maximum accepted accuracy. Browser coordinates are only a proximity signal; a GPS lane also needs a photo lane.
 - `photo`: optional private GPS region plus photo review evidence.
 
 The command layer must make lane claims idempotent, start the window with the first accepted lane, require a different authenticated `team_member_id` per lane, and record contribution events. Public projection contains only lane ID, label, and type—never tokens, codes, or target coordinates.
 
 ## Checkpoint and flow contract
 
-A checkpoint includes `id`, `title`, integer `basePoints`, `flow`, and `hints`. Optional fields are `required`, `prerequisites`, `group`, public map `location`, `wrongAttemptPenalty`, `skipPenalty`, and `timeBonus`.
+A checkpoint includes `id`, `title`, integer `basePoints`, `flow`, and `hints`. Optional fields are `group`, public map `location`, `wrongAttemptPenalty`, `skipPenalty`, and `timeBonus`. Every checkpoint selected into a V3 route is required and receives its predecessor from that immutable route, so `required` may only be `true` and authored `prerequisites` must be empty or omitted; use `routePlan` for progression.
 
 Every flow has a `startNodeId` and 1–200 nodes. Node IDs are unique within that checkpoint. Every referenced destination must exist. Flows are directed and acyclic; a wrong answer retries the active verifier and does not require a graph cycle.
 
@@ -336,22 +356,22 @@ Every flow has a `startNodeId` and 1–200 nodes. Node IDs are unique within tha
 | --- | --- |
 | `show_text` | `text`, `next`. Show story or instructions. |
 | `show_media` | `content`, `next`. Content can be text, image, map, audio, video, or camera guidance. |
-| `verify_qr` | `prompt`, private generation-directive `token`, `next`; optional generated `backupCode`. |
-| `verify_code` | `prompt`, private `code`, `next`; optional case sensitivity and safe recap. |
-| `verify_answer` | `prompt`, one or more private `answers`, `next`; optional case sensitivity, recap, and bounded attempt recording. |
-| `verify_gps` | `prompt`, latitude, longitude, radius, maximum accuracy, `next`. Use an approximate safe region. |
-| `choose_path` | `prompt`, two to twenty `{id,label,next}` choices. This is a player choice, not seeded route assignment. |
-| `puzzle` | `prompt`, one supported private puzzle definition, `next`. |
+| `verify_qr` | `prompt`, private generation-directive `token`, `next`; optional generated `backupCode`. Every completion path containing QR must later require `verify_image` or a standalone, human-approved `verify_organizer` gate. |
+| `verify_code` | `prompt`, private `code`, `next`; optional case sensitivity and safe recap. A static code must later require `verify_image` or a standalone human-approved `verify_organizer`; a high-entropy run-scoped `code` variable is the only exception. |
+| `verify_answer` | `prompt`, one or more private `answers`, `next`; optional case sensitivity, recap, and bounded attempt recording. Every accepted static answer makes the path shareable and requires the same downstream companion evidence. |
+| `verify_gps` | `prompt`, latitude, longitude, radius, maximum accuracy, `next`. Browser GPS is spoofable, so every completion path that uses it must also require `verify_image` or `verify_organizer`. |
+| `choose_path` | Base-engine shape: `prompt`, two to twenty `{id,label,next}` choices. Competitive V3 publication rejects it because choice-specific duration is not modeled; use a challenge pool. |
+| `puzzle` | `prompt`, one supported private puzzle definition, `next`. Reusable puzzle solutions require downstream fresh photo or a genuine organizer gate. |
 | `camera_guide` | `prompt`, `next`; optional reference image and paired latitude/longitude. Guidance is not automatic verification. |
 | `verify_organizer` | `prompt`, `next`. Wait for server-authorized approval; also serves as a parallel-mechanic gate. |
 | `verify_image` | `prompt`, zero to thirty organizer reference images, optional private GPS region, `next`. Player evidence remains pending until review. |
 | `set_variable` | Typed literal `key`/`value`, `next`. Sets flow state; it is distinct from seeded run generators. |
-| `branch` | A bounded condition plus `ifTrue`/`ifFalse`. Conditions support variable equality, completed checkpoint, used hint, or UTC time interval. |
-| `random_branch` | Two to twenty weighted destinations. Assignment is deterministic and immutable for the run. |
+| `branch` | A bounded condition plus `ifTrue`/`ifFalse`. Competitive V3 accepts only an immutable literal-variable condition; time, hint, checkpoint, generated-variable, and flow-mutated-variable branches hide duration and fail publication. |
+| `random_branch` | Supported by the base engine but rejected for competitive V3 publication because one checkpoint estimate cannot prove branch-duration equality. Put meaningful alternatives in challenge pools. |
 | `add_points` | Integer `amount`, audit `label`, `next`. All seeded alternatives must keep equal competitive ceilings. |
 | `complete` | Terminal node. It is the only normal path that completes a checkpoint and awards base points. |
 
-Interactive nodes may include a configured `fallback` with `nodeId`, player-facing `label`, and initial `enabled` state. Verification/gameplay prompts may include a `clue`. Recovery still travels through the same engine and is recorded.
+The base engine supports interactive fallbacks, but competitive V3 publication requires them disabled. Recovery must be an audited organizer action so using it cannot silently preserve official eligibility. Verification/gameplay prompts may include a `clue`.
 
 ### Display content
 
@@ -367,18 +387,18 @@ Use uploaded media references rather than embedding bytes or data URLs. Provide 
 
 | Puzzle | Private authoring fields | Key semantic checks |
 | --- | --- | --- |
-| `jigsaw` | 2–8 rows/columns, image pieces, solution order | Exactly rows × columns unique pieces; solution is a full permutation. |
+| `jigsaw` | 2–8 rows/columns, at least 6 image pieces, solution order | Exactly rows × columns unique pieces; solution is a full permutation. Tiny layouts are rejected because the move budget could enumerate too much of the solution space. |
 | `sudoku` | size 4, 6, or 9; `givens` grid using `0` for blanks | Exact dimensions, valid values, at least one blank, and a supported solvable board. |
 | `word_search` | 2×2 to 25×25 letter grid, 1–50 words, optional threshold/bonus | Rectangular grid; unique words occur in a straight line; threshold is in range. |
 | `crossword` | 2–30 rows/columns and 1–100 entries | Letter-only answers fit, intersections agree, and IDs/starting directions are unique. |
-| `rotation` | 1–8 columns and image tiles with 0/90/180/270 correct rotation | Unique tiles and at least one tile that is not already at zero. |
+| `rotation` | 1–8 columns and at least 6 image tiles with 0/90/180/270 correct rotation | Unique tiles; at least 5 targets must be non-zero so the official move budget cannot sweep the meaningful states. |
 | `text` | prompt, one or more accepted answers, optional case sensitivity | Private accepted answers stay server-side. |
 | `multiple_choice` | prompt, 2–30 labeled options, correct option ID | Correct ID references one unique option. |
 | `quiz` | 1–50 questions, required correct threshold, optional skip/extra bonuses | Unique question IDs, valid correct options, bounded threshold and scoring. |
-| `matching` | two 2–30 item lists and solution pairs | Equal list sizes and a complete one-to-one solution. |
-| `sequence` | 2–30 labeled items and solution order | Solution is a full permutation of item IDs. |
+| `matching` | two 5–30 item lists and solution pairs | Equal list sizes and a complete one-to-one solution; the minimum keeps the official move budget below 10% of all pairings. |
+| `sequence` | 6–30 labeled items and solution order | Solution is a full permutation of item IDs; the minimum keeps the official move budget below 3% of all orders. |
 
-Solutions and expected answers belong in the private draft because the server needs them. They must be removed from player projections, public boards, analytics, and share assets.
+Solutions and expected answers belong in the private draft because the server needs them. They must be removed from player projections, public boards, analytics, and share assets. A reusable flow or hint puzzle can still be forwarded after one team solves it, so every containing checkpoint path must require fresh photo review or a genuine organizer gate. A text puzzle whose accepted aliases all derive from one 32-bit-or-stronger run-code variable is the only puzzle exception.
 
 ## Hints
 
@@ -400,7 +420,9 @@ Never put any of the following in a file sent to an external AI or bundled in th
 - production database/media IDs or expiring signed media URLs;
 - production-only internal identifiers copied from logs or backups.
 
-For QR fields, use only `@server:generate:<logical-name>`. Import must replace each directive with an independent cryptographically random private value and retain the logical name only as non-secret audit context. Never reuse a generated QR or static code across events.
+For QR token and QR backup-code fields, use only `@server:generate:<logical-name>`. The directive is rejected in ordinary code-lane and `verify_code` fields because those fields are run-materialized instead. Import must replace each QR directive with an independent cryptographically random private value and retain the logical name only as non-secret audit context. Never reuse a generated QR or static code across events.
+
+Length prevents blind guessing; it does not prevent forwarding. Prefer a `{{runCode}}` placeholder backed by a comparison-stable `code` generator with at least 32 effective bits. If a physical clue intentionally has a fixed answer, follow it with fresh photo review or a genuine organizer check. Every reusable flow puzzle requires the same companion evidence. Challenge pools and run-variable content add variety, but a finite authored deck still repeats after exhaustion.
 
 An expected answer or puzzle solution may be AI-authored, but it becomes private server configuration at import. Do not use an answer that is also a credential or a real-world secret.
 
@@ -476,24 +498,31 @@ OUTPUT CONTRACT
 - Expected answers and puzzle solutions may be present because this is a private
   draft, but they must never be repeated in player-facing text.
 - Keep start/finale/fixed/selectable route IDs disjoint and references valid.
+- Keep mode sequential; do not author optional checkpoints or prerequisite graphs because routePlan derives required sequential progression.
 - Every route location must resolve to a checkpoint or challenge-pool key.
 - Give every checkpoint/pool variant a duration or difficulty estimate and every
   required travel edge an estimate.
 - Calculate each checkpoint and route maximum. Make every challenge variant and
   every eligible competitive route exactly equal in maximum score.
-- Keep estimated route durations within fairnessPolicy.durationToleranceMinutes.
-- Treat every weighted alternative as eligible regardless of weight.
+- Set `fairnessPolicy.minimumDistinctPlans` to the event's meaningful official-plan capacity (at least two).
+- Set duration tolerance to zero, require every travel edge, and make all route estimates equal.
+- Use equal challenge-variant weights; official allocation is balanced, not independent roulette.
+- Do not hide alternatives in `choose_path`, `random_branch`, time/hint/checkpoint branches, or generated/mutable-variable branches; use challenge pools with explicit estimates.
+- Pair every GPS or QR completion path with fresh photo or standalone organizer evidence; never describe browser GPS or a scanned token as cheat-proof.
+- Keep fallbacks disabled for competitive flows and handle recovery through audited organizer controls.
 - Bind every bonus at its real score source. Omitted impact is competitive; use
   rankingImpact/bonusRankingImpact = excluded only for points that must never
   influence official score, rank, or the competitive route-ceiling proof.
 - Always mark non-zero dud-QR awards and positive puzzle bonuses inside hints as
   excluded; V3 cannot prove those optional opportunities route-neutral.
-- Do not configure wrongAttemptPenalty in V3. Retries are intentionally
-  unbounded; use failure analytics rather than an unbounded ranking penalty.
+- Do not configure wrongAttemptPenalty in V3. The service bounds verifier
+  attempts for abuse control, but the route proof deliberately does not turn
+  failed guesses into a ranking strategy; use failure analytics instead.
 - Keep every route's official and excluded positive/negative score magnitude
   inside a signed 32-bit cache. The publication report rejects overflow.
 - Parallel mechanics need 2–20 lanes, a verify_organizer gate, a bounded window,
-  and no real verifier secret. Distinct-member enforcement is server-side.
+  and no real verifier secret. A QR/GPS lane requires a photo lane;
+  distinct-member enforcement is server-side.
 - Public-board configuration must contain team-level data only.
 - AI output is a draft only; do not add any field that claims it is published.
 

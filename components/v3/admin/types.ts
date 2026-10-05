@@ -31,8 +31,13 @@ export interface LiveRun {
   score: number;
   elapsedMilliseconds: number | null;
   progress: number | null;
+  revision?: number | null;
+  timed?: boolean;
   currentCheckpointId?: string | null;
   currentCheckpointLabel?: string | null;
+  currentNodeId?: string | null;
+  currentNodeType?: string | null;
+  parallelMechanic?: boolean;
   routeVariant?: string | null;
   challengeVariant?: string | null;
   completedAt?: string | null;
@@ -44,6 +49,9 @@ export interface LiveTeam {
   teamId: string;
   code: string;
   displayName: string | null;
+  status: 'active' | 'disabled' | 'disqualified' | 'archived' | string;
+  approvalStatus: 'pending' | 'approved';
+  competitionRevision: number;
   memberNames: string[];
   memberCount: number;
   checkedInCount: number;

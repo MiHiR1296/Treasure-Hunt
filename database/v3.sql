@@ -148,8 +148,15 @@ create table if not exists hunt_v3.teams (
   pin_hash text not null check (length(pin_hash) >= 32),
   registration_source text not null
     check (registration_source in ('self_serve', 'organizer_assigned', 'roster_import')),
+  -- Self-serve crews remain visible and may finish joining while awaiting an
+  -- explicit competition approval. Operational suspension/disqualification is
+  -- kept in status so restoring a team never silently changes its approval.
+  approval_status text not null default 'approved'
+    constraint teams_approval_status_valid check (approval_status in ('pending', 'approved')),
   status text not null default 'active'
     check (status in ('active', 'disabled', 'disqualified', 'archived')),
+  competition_revision integer not null default 1
+    constraint teams_competition_revision_positive check (competition_revision > 0),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (hunt_id, canonical_code),
@@ -159,6 +166,29 @@ create table if not exists hunt_v3.teams (
     or (display_name is not null and name_key is not null)
   )
 );
+
+-- Repeatable hardening for databases initialized before competition approval
+-- became explicit. Existing organizer-approved V3 teams remain approved.
+alter table hunt_v3.teams add column if not exists approval_status text not null default 'approved';
+alter table hunt_v3.teams add column if not exists competition_revision integer not null default 1;
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid='hunt_v3.teams'::regclass and conname='teams_approval_status_valid'
+  ) then
+    alter table hunt_v3.teams add constraint teams_approval_status_valid
+      check (approval_status in ('pending', 'approved'));
+  end if;
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid='hunt_v3.teams'::regclass and conname='teams_competition_revision_positive'
+  ) then
+    alter table hunt_v3.teams add constraint teams_competition_revision_positive
+      check (competition_revision > 0);
+  end if;
+end;
+$$;
 
 create unique index if not exists teams_hunt_name_key
   on hunt_v3.teams(hunt_id, name_key)
@@ -352,6 +382,11 @@ create table if not exists hunt_v3.runs (
   run_number integer not null check (run_number > 0),
   private_seed text not null check (length(private_seed) between 32 and 512),
   seed_commitment text not null check (seed_commitment ~ '^[0-9a-f]{64}$'),
+  -- Private structural-plan identity used by the balanced allocator. It is not
+  -- included in player/public projections.
+  plan_key text not null default (md5(gen_random_uuid()::text) || md5(gen_random_uuid()::text))
+    constraint runs_plan_key_digest check (plan_key ~ '^[0-9a-f]{64}$'),
+  allocation_cycle integer not null default 0 constraint runs_allocation_cycle_nonnegative check (allocation_cycle >= 0),
   route_plan jsonb not null check (jsonb_typeof(route_plan) = 'object'),
   resolved_variables jsonb not null default '{}'::jsonb
     check (jsonb_typeof(resolved_variables) = 'object'),
@@ -376,6 +411,11 @@ create table if not exists hunt_v3.runs (
   foreign key (hunt_id, hunt_version)
     references hunt_v3.hunt_versions(hunt_id, version),
   unique (team_id, run_number),
+  constraint runs_hunt_seed_commitment_unique unique (hunt_id, seed_commitment),
+  -- Historical official and practice allocations occupy separate namespaces
+  -- so migrated rows cannot collide. The service treats practice as a
+  -- one-way boundary and never creates a later official row for that team.
+  constraint runs_team_plan_cycle_unique unique (team_id, hunt_version, plan_key, allocation_cycle, practice),
   unique (team_id, id),
   unique (hunt_id, id),
   check (not (practice and eligible)),
@@ -385,6 +425,54 @@ create table if not exists hunt_v3.runs (
     check (status <> 'completed' or (completed_at is not null and elapsed_ms is not null))
 );
 
+-- V3 is not runtime-compatible with pre-cutover attempts, but keep migration
+-- repeatable for disposable databases created from an earlier V3 draft.
+alter table hunt_v3.runs add column if not exists plan_key text;
+alter table hunt_v3.runs add column if not exists allocation_cycle integer not null default 0;
+alter table hunt_v3.runs alter column plan_key set default (md5(gen_random_uuid()::text) || md5(gen_random_uuid()::text));
+update hunt_v3.runs
+set plan_key = md5(route_plan::text || id::text) || md5(id::text || route_plan::text)
+where plan_key is null;
+alter table hunt_v3.runs alter column plan_key set not null;
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid='hunt_v3.runs'::regclass and conname='runs_plan_key_digest'
+  ) then
+    alter table hunt_v3.runs add constraint runs_plan_key_digest check(plan_key ~ '^[0-9a-f]{64}$');
+  end if;
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid='hunt_v3.runs'::regclass and conname='runs_allocation_cycle_nonnegative'
+  ) then
+    alter table hunt_v3.runs add constraint runs_allocation_cycle_nonnegative check(allocation_cycle >= 0);
+  end if;
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid='hunt_v3.runs'::regclass and conname='runs_hunt_seed_commitment_unique'
+  ) then
+    alter table hunt_v3.runs add constraint runs_hunt_seed_commitment_unique
+      unique(hunt_id,seed_commitment);
+  end if;
+  if exists (
+    select 1 from pg_constraint
+    where conrelid='hunt_v3.runs'::regclass
+      and conname='runs_team_plan_cycle_unique'
+      and position('practice' in lower(pg_get_constraintdef(oid)))=0
+  ) then
+    alter table hunt_v3.runs drop constraint runs_team_plan_cycle_unique;
+  end if;
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid='hunt_v3.runs'::regclass and conname='runs_team_plan_cycle_unique'
+  ) then
+    alter table hunt_v3.runs add constraint runs_team_plan_cycle_unique
+      unique(team_id,hunt_version,plan_key,allocation_cycle,practice);
+  end if;
+end;
+$$;
+
 create unique index if not exists runs_one_open_per_team
   on hunt_v3.runs(team_id)
   where status in ('waiting', 'active');
@@ -392,6 +480,8 @@ create index if not exists runs_hunt_live
   on hunt_v3.runs(hunt_id, status, updated_at desc);
 create index if not exists runs_team_history
   on hunt_v3.runs(team_id, run_number desc);
+create index if not exists runs_plan_allocation
+  on hunt_v3.runs(hunt_id, hunt_version, plan_key, created_at);
 create index if not exists runs_official_leaderboard
   on hunt_v3.runs(hunt_id, score desc, elapsed_ms asc, completed_at asc)
   where status = 'completed' and eligible and not practice;
@@ -430,8 +520,8 @@ create table if not exists hunt_v3.help_requests (
 create index if not exists help_requests_live
   on hunt_v3.help_requests(hunt_id, status, created_at);
 
--- Snapshot membership for an attempt. Late joins can append another row; an
--- earlier participant is never silently removed from the run's history.
+-- Immutable starting-roster snapshot for an attempt. A member who checks in
+-- after the run starts participates from the next run instead.
 create table if not exists hunt_v3.run_members (
   run_id uuid not null,
   team_id uuid not null,
@@ -584,6 +674,10 @@ create table if not exists hunt_v3.media (
   submitted_at timestamptz,
   reviewed_at timestamptz,
   expires_at timestamptz,
+  -- Immutable epoch of the exact action instance that accepted this evidence.
+  -- Resetting the same authored node creates a new epoch, so bytes prepared
+  -- before the reset cannot be attached to the replacement task.
+  task_started_at timestamptz,
   foreign key (team_id, hunt_id)
     references hunt_v3.teams(id, hunt_id),
   foreign key (team_id, run_id)
@@ -593,8 +687,8 @@ create table if not exists hunt_v3.media (
   foreign key (run_id, member_id)
     references hunt_v3.run_members(run_id, member_id),
   check (
-    (kind = 'asset' and team_id is null and run_id is null and member_id is null)
-    or (kind = 'photo' and team_id is not null and run_id is not null and member_id is not null)
+    (kind = 'asset' and team_id is null and run_id is null and member_id is null and task_started_at is null)
+    or (kind = 'photo' and team_id is not null and run_id is not null and member_id is not null and task_started_at is not null)
   ),
   check (
     (parallel_mechanic_id is null and parallel_lane_id is null)
@@ -607,6 +701,7 @@ create table if not exists hunt_v3.media (
 );
 
 alter table hunt_v3.media add column if not exists submitted_at timestamptz;
+alter table hunt_v3.media add column if not exists task_started_at timestamptz;
 do $$
 begin
   if not exists (
@@ -629,6 +724,63 @@ create index if not exists media_submitted_review
 create index if not exists media_expiry
   on hunt_v3.media(expires_at)
   where expires_at is not null;
+
+-- Keep only the non-reversible digest and ownership coordinates after media
+-- retention deletes the underlying photo. This prevents the same exact file
+-- from being recycled by another team or run later in the event.
+create table if not exists hunt_v3.photo_evidence_hashes (
+  hunt_id text not null references hunt_v3.hunts(id),
+  content_hash text not null check (content_hash ~ '^[0-9a-f]{64}$'),
+  media_id uuid not null,
+  team_id uuid not null,
+  run_id uuid not null,
+  created_at timestamptz not null default now(),
+  constraint photo_evidence_hashes_hunt_content_key primary key (hunt_id, content_hash),
+  constraint photo_evidence_hashes_media_key unique (media_id)
+);
+
+-- Upgrade existing V3 databases before the insert trigger is installed. If an
+-- early database already contains duplicate evidence, the oldest row owns the
+-- durable digest and every future reuse is rejected.
+insert into hunt_v3.photo_evidence_hashes(hunt_id,content_hash,media_id,team_id,run_id,created_at)
+select distinct on (hunt_id,content_hash) hunt_id,content_hash,id,team_id,run_id,created_at
+from hunt_v3.media
+where kind='photo'
+order by hunt_id,content_hash,created_at,id
+on conflict do nothing;
+
+create or replace function hunt_v3.reserve_photo_evidence_hash() returns trigger
+language plpgsql
+set search_path = hunt_v3, pg_temp
+as $$
+declare
+  reserved_media_id uuid;
+  reserved_team_id uuid;
+  reserved_run_id uuid;
+begin
+  if new.kind <> 'photo' then
+    return new;
+  end if;
+  insert into hunt_v3.photo_evidence_hashes(hunt_id,content_hash,media_id,team_id,run_id,created_at)
+  values(new.hunt_id,new.content_hash,new.id,new.team_id,new.run_id,new.created_at)
+  on conflict do nothing;
+  select media_id,team_id,run_id into reserved_media_id,reserved_team_id,reserved_run_id
+  from hunt_v3.photo_evidence_hashes
+  where hunt_id=new.hunt_id and content_hash=new.content_hash;
+  if reserved_media_id is distinct from new.id
+    or reserved_team_id is distinct from new.team_id
+    or reserved_run_id is distinct from new.run_id then
+    raise exception 'This exact photo was already used in this hunt'
+      using errcode='23505', constraint='photo_evidence_hashes_hunt_content_key';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists media_reserve_photo_evidence_hash on hunt_v3.media;
+create trigger media_reserve_photo_evidence_hash
+after insert on hunt_v3.media
+for each row execute function hunt_v3.reserve_photo_evidence_hash();
 
 -- Deletion work survives removal of the metadata row and transient storage
 -- provider failures. Maintenance deletes queue rows only after object removal.
@@ -668,11 +820,45 @@ create table if not exists hunt_v3.media_uploads (
     references hunt_v3.run_members(run_id, member_id),
   check (cleanup_after >= expires_at),
   constraint media_uploads_media_identity check (media_id is null or media_id = id),
+  constraint media_uploads_completion_timestamp check (media_id is null or completed_at is not null),
   check (
     (kind = 'asset' and team_id is null and run_id is null and member_id is null)
     or (kind = 'photo' and team_id is not null and run_id is not null and member_id is not null)
   )
 );
+
+-- V3 is not a compatibility runtime, but keep the additive schema repeatable
+-- for development databases created before task epochs were persisted. Direct
+-- receipts retain the exact epoch; older multipart rows use their immutable
+-- upload time and remain subject to the normal active-task checks on submit.
+update hunt_v3.media media
+set task_started_at=coalesce(
+  (
+    select (upload.metadata->>'taskStartedAt')::timestamptz
+    from hunt_v3.media_uploads upload
+    where upload.id=media.id
+      and upload.metadata->>'taskStartedAt' is not null
+    limit 1
+  ),
+  media.created_at
+)
+where media.kind='photo' and media.task_started_at is null;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'media_task_started_at_required'
+      and conrelid = 'hunt_v3.media'::regclass
+  ) then
+    alter table hunt_v3.media add constraint media_task_started_at_required
+      check (
+        (kind='asset' and task_started_at is null)
+        or (kind='photo' and task_started_at is not null)
+      );
+  end if;
+end;
+$$;
 
 create index if not exists media_uploads_cleanup
   on hunt_v3.media_uploads(cleanup_after);
@@ -1013,6 +1199,53 @@ create table if not exists hunt_v3.rate_limits (
   window_start timestamptz not null default now()
 );
 
+-- Competitive answer budgets last for the whole run, unlike ordinary
+-- 15-minute abuse windows. A reservation is keyed by the idempotency request
+-- so simultaneous retries consume one slot while new guesses consume another.
+create table if not exists hunt_v3.run_attempt_reservations (
+  scope_key text not null check (scope_key ~ '^[0-9a-f]{64}$'),
+  request_id uuid not null,
+  payload_hash text not null check (payload_hash ~ '^[0-9a-f]{64}$'),
+  run_id uuid not null,
+  team_id uuid not null,
+  ordinal integer not null check (ordinal > 0),
+  created_at timestamptz not null default now(),
+  primary key (scope_key, request_id),
+  unique (scope_key, ordinal),
+  foreign key (team_id, run_id) references hunt_v3.runs(team_id, id)
+);
+
+create index if not exists run_attempt_reservations_run
+  on hunt_v3.run_attempt_reservations(run_id, scope_key);
+
+-- An organizer may recover a team that exhausted a legitimate task budget,
+-- but the original guesses remain immutable. Each row increases one exact
+-- run/task scope by a bounded amount and is tied to both the idempotent
+-- organizer request and its named audit event.
+create table if not exists hunt_v3.run_attempt_allowances (
+  id bigint generated always as identity primary key,
+  scope_key text not null check (scope_key ~ '^[0-9a-f]{64}$'),
+  request_id uuid not null,
+  hunt_id text not null,
+  team_id uuid not null,
+  run_id uuid not null,
+  checkpoint_id text not null check (length(checkpoint_id) between 1 and 160),
+  node_id text not null check (length(node_id) between 1 and 160),
+  additional_attempts integer not null check (additional_attempts between 1 and 1000),
+  reason text not null check (length(reason) between 1 and 500),
+  organizer_actor text not null check (length(organizer_actor) between 1 and 120),
+  admin_event_id bigint not null references hunt_v3.admin_events(id),
+  created_at timestamptz not null default now(),
+  unique (scope_key, request_id),
+  unique (admin_event_id, scope_key),
+  foreign key (team_id, hunt_id) references hunt_v3.teams(id, hunt_id),
+  foreign key (team_id, run_id) references hunt_v3.runs(team_id, id),
+  foreign key (hunt_id, run_id) references hunt_v3.runs(hunt_id, id)
+);
+
+create index if not exists run_attempt_allowances_run
+  on hunt_v3.run_attempt_allowances(run_id, scope_key, created_at);
+
 -- Repeatable hardening for databases that applied an earlier V3 draft. These
 -- ownership constraints prevent nullable or single-column foreign keys from
 -- binding an audit row to an object from another team, run, or hunt.
@@ -1032,6 +1265,9 @@ begin
   end if;
   if not exists (select 1 from pg_constraint where conname='media_uploads_media_identity' and conrelid='hunt_v3.media_uploads'::regclass) then
     alter table hunt_v3.media_uploads add constraint media_uploads_media_identity check(media_id is null or media_id=id);
+  end if;
+  if not exists (select 1 from pg_constraint where conname='media_uploads_completion_timestamp' and conrelid='hunt_v3.media_uploads'::regclass) then
+    alter table hunt_v3.media_uploads add constraint media_uploads_completion_timestamp check(media_id is null or completed_at is not null);
   end if;
   if not exists (select 1 from pg_constraint where conname='recognition_overrides_identity_unique' and conrelid='hunt_v3.recognition_overrides'::regclass) then
     alter table hunt_v3.recognition_overrides add constraint recognition_overrides_identity_unique unique(run_id,member_id,id);
@@ -1083,6 +1319,9 @@ begin
     new.run_number,
     new.private_seed,
     new.seed_commitment,
+    new.plan_key,
+    new.allocation_cycle,
+    new.practice,
     new.route_plan,
     new.resolved_variables,
     new.created_at
@@ -1094,6 +1333,9 @@ begin
     old.run_number,
     old.private_seed,
     old.seed_commitment,
+    old.plan_key,
+    old.allocation_cycle,
+    old.practice,
     old.route_plan,
     old.resolved_variables,
     old.created_at
@@ -1104,6 +1346,19 @@ begin
   if row(new.score,new.bonus_score) is distinct from row(old.score,old.bonus_score)
     and coalesce(current_setting('hunt_v3.allow_score_cache_update', true),'') <> '1' then
     raise exception 'Run score caches may change only through the append-only score ledger'
+      using errcode = '55000';
+  end if;
+  return new;
+end;
+$$;
+
+create or replace function hunt_v3.reject_late_run_member() returns trigger
+language plpgsql
+set search_path = hunt_v3, pg_temp
+as $$
+begin
+  if exists(select 1 from hunt_v3.run_events event where event.run_id = new.run_id) then
+    raise exception 'Run membership is frozen after the starting roster is recorded'
       using errcode = '55000';
   end if;
   return new;
@@ -1130,7 +1385,8 @@ begin
     new.bytes,
     new.content_hash,
     new.storage_key,
-    new.created_at
+    new.created_at,
+    new.task_started_at
   ) is distinct from row(
     old.id,
     old.hunt_id,
@@ -1146,11 +1402,182 @@ begin
     old.bytes,
     old.content_hash,
     old.storage_key,
-    old.created_at
+    old.created_at,
+    old.task_started_at
   ) then
     raise exception 'Media ownership, evidence identity, and stored object metadata are immutable'
       using errcode = '55000';
   end if;
+  return new;
+end;
+$$;
+
+-- Every player photo is tied to one immutable activation of one run action.
+-- The shared row lock is deliberate: it conflicts with the organizer reset's
+-- FOR UPDATE lock. Whichever statement commits second must observe the first,
+-- so there is no validation/insert gap for multipart filesystem uploads.
+create or replace function hunt_v3.validate_media_task_epoch() returns trigger
+language plpgsql
+set search_path = hunt_v3, pg_temp
+as $$
+begin
+  if new.kind <> 'photo' then
+    return new;
+  end if;
+  if new.task_started_at is null then
+    raise exception 'Photo evidence must identify its exact task activation'
+      using errcode='23514', constraint='media_task_epoch_binding';
+  end if;
+  -- Global competition lock order is hunt -> team -> run -> member.
+  -- Lifecycle operations begin at the hunt, while disqualification takes the
+  -- team before invalidating runs, so media materialization must explicitly do
+  -- both instead of row-marking all joins in planner order.
+  perform 1
+  from hunt_v3.hunts hunt
+  where hunt.id=new.hunt_id
+  for share of hunt;
+  if not found then
+    raise exception 'Photo evidence no longer belongs to an existing hunt'
+      using errcode='55000', constraint='media_task_epoch_binding';
+  end if;
+  perform 1
+  from hunt_v3.teams team
+  where team.id=new.team_id and team.hunt_id=new.hunt_id and team.status='active'
+  for share of team;
+  if not found then
+    raise exception 'Photo evidence no longer belongs to an active team'
+      using errcode='55000', constraint='media_task_epoch_binding';
+  end if;
+  perform 1
+  from hunt_v3.runs run
+  join hunt_v3.run_members participant
+    on participant.run_id=run.id and participant.team_id=run.team_id and participant.member_id=new.member_id
+  join hunt_v3.team_members member
+    on member.id=participant.member_id and member.team_id=participant.team_id and member.status='active'
+  where run.id=new.run_id and run.team_id=new.team_id and run.hunt_id=new.hunt_id
+    and run.status='active'
+    and run.engine_state->>'status'='active'
+    and run.engine_state->>'activeCheckpointId'=new.checkpoint_id
+    and run.engine_state #>> array['checkpoints',new.checkpoint_id,'activeNodeId']=new.node_id
+    and (run.engine_state #>> array['checkpoints',new.checkpoint_id,'nodes',new.node_id,'startedAt'])::timestamptz=new.task_started_at
+  for share of run,member;
+  if not found then
+    raise exception 'Photo evidence no longer matches the active task activation'
+      using errcode='55000', constraint='media_task_epoch_binding';
+  end if;
+  return new;
+end;
+$$;
+
+create or replace function hunt_v3.protect_media_upload_identity() returns trigger
+language plpgsql
+set search_path = hunt_v3, pg_temp
+as $$
+begin
+  if row(
+    new.id,
+    new.owner_key,
+    new.hunt_id,
+    new.team_id,
+    new.run_id,
+    new.member_id,
+    new.kind,
+    new.storage_key,
+    new.payload_hash,
+    new.metadata,
+    new.created_at,
+    new.expires_at
+  ) is distinct from row(
+    old.id,
+    old.owner_key,
+    old.hunt_id,
+    old.team_id,
+    old.run_id,
+    old.member_id,
+    old.kind,
+    old.storage_key,
+    old.payload_hash,
+    old.metadata,
+    old.created_at,
+    old.expires_at
+  ) then
+    raise exception 'Direct-upload ownership, task, file metadata, hash, and expiry are immutable'
+      using errcode='55000', constraint='media_upload_ticket_binding';
+  end if;
+  if old.completed_at is null then
+    if (new.completed_at is null) is distinct from (new.media_id is null) then
+      raise exception 'Direct-upload completion must record media and time together'
+        using errcode='55000', constraint='media_upload_ticket_binding';
+    end if;
+  elsif new.completed_at is distinct from old.completed_at
+    or (old.media_id is not null and new.media_id is distinct from old.media_id and new.media_id is not null) then
+    raise exception 'A completed direct-upload receipt cannot be rewritten'
+      using errcode='55000', constraint='media_upload_ticket_binding';
+  end if;
+  return new;
+end;
+$$;
+
+-- A direct upload uses the same UUID for its receipt and final media row. This
+-- trigger is the final fail-closed boundary: materialization and receipt
+-- completion happen in one statement, using the database clock and the exact
+-- active run/node snapshot recorded when the signed write was prepared.
+create or replace function hunt_v3.complete_direct_upload_ticket() returns trigger
+language plpgsql
+set search_path = hunt_v3, pg_temp
+as $$
+declare
+  upload hunt_v3.media_uploads%rowtype;
+begin
+  select * into upload from hunt_v3.media_uploads where id=new.id for update;
+  if not found then
+    return new;
+  end if;
+  if upload.completed_at is not null then
+    if upload.media_id is distinct from new.id then
+      raise exception 'Direct-upload receipt is already bound to different media'
+        using errcode='55000', constraint='media_upload_ticket_binding';
+    end if;
+    return new;
+  end if;
+  if upload.expires_at <= clock_timestamp() then
+    raise exception 'Direct-upload receipt expired before media materialization'
+      using errcode='23514', constraint='media_upload_ticket_expired';
+  end if;
+  if new.kind <> 'photo'
+    or upload.kind <> 'photo'
+    or upload.owner_key is distinct from format('team:%s:member:%s',new.team_id,new.member_id)
+    or upload.hunt_id is distinct from new.hunt_id
+    or upload.team_id is distinct from new.team_id
+    or upload.run_id is distinct from new.run_id
+    or upload.member_id is distinct from new.member_id
+    or upload.metadata->>'checkpointId' is distinct from new.checkpoint_id
+    or upload.metadata->>'nodeId' is distinct from new.node_id
+    or (upload.metadata->>'taskStartedAt')::timestamptz is distinct from new.task_started_at
+    or nullif(upload.metadata->>'mechanicId','') is distinct from new.parallel_mechanic_id
+    or nullif(upload.metadata->>'laneId','') is distinct from new.parallel_lane_id then
+    raise exception 'Direct-upload receipt no longer matches its active starting-roster task'
+      using errcode='55000', constraint='media_upload_ticket_binding';
+  end if;
+  perform 1
+  from hunt_v3.runs run
+  join hunt_v3.run_members participant
+    on participant.run_id=run.id and participant.team_id=run.team_id and participant.member_id=upload.member_id
+  join hunt_v3.team_members member
+    on member.id=participant.member_id and member.team_id=participant.team_id and member.status='active'
+  where run.id=upload.run_id and run.team_id=upload.team_id and run.hunt_id=upload.hunt_id
+    and run.status='active'
+    and run.engine_state->>'activeCheckpointId'=upload.metadata->>'checkpointId'
+    and run.engine_state #>> array['checkpoints',upload.metadata->>'checkpointId','activeNodeId']=upload.metadata->>'nodeId'
+    and run.engine_state #>> array['checkpoints',upload.metadata->>'checkpointId','nodes',upload.metadata->>'nodeId','startedAt']=upload.metadata->>'taskStartedAt'
+  for share of run,member;
+  if not found then
+    raise exception 'Direct-upload receipt no longer matches its active starting-roster task'
+      using errcode='55000', constraint='media_upload_ticket_binding';
+  end if;
+  update hunt_v3.media_uploads
+  set media_id=new.id,completed_at=clock_timestamp()
+  where id=upload.id;
   return new;
 end;
 $$;
@@ -1240,6 +1667,11 @@ create trigger runs_touch_updated_at
 before update on hunt_v3.runs
 for each row execute function hunt_v3.touch_updated_at();
 
+drop trigger if exists run_members_reject_late_insert on hunt_v3.run_members;
+create trigger run_members_reject_late_insert
+before insert on hunt_v3.run_members
+for each row execute function hunt_v3.reject_late_run_member();
+
 drop trigger if exists public_boards_touch_updated_at on hunt_v3.public_boards;
 create trigger public_boards_touch_updated_at
 before update on hunt_v3.public_boards
@@ -1249,6 +1681,21 @@ drop trigger if exists media_protect_identity on hunt_v3.media;
 create trigger media_protect_identity
 before update on hunt_v3.media
 for each row execute function hunt_v3.protect_media_identity();
+
+drop trigger if exists media_validate_task_epoch on hunt_v3.media;
+create trigger media_validate_task_epoch
+before insert on hunt_v3.media
+for each row execute function hunt_v3.validate_media_task_epoch();
+
+drop trigger if exists media_uploads_protect_identity on hunt_v3.media_uploads;
+create trigger media_uploads_protect_identity
+before update on hunt_v3.media_uploads
+for each row execute function hunt_v3.protect_media_upload_identity();
+
+drop trigger if exists media_complete_direct_upload_ticket on hunt_v3.media;
+create trigger media_complete_direct_upload_ticket
+after insert on hunt_v3.media
+for each row execute function hunt_v3.complete_direct_upload_ticket();
 
 drop trigger if exists score_ledger_apply on hunt_v3.score_ledger;
 create trigger score_ledger_apply
@@ -1280,6 +1727,9 @@ begin
     'run_events',
     'score_ledger',
     'run_contributions',
+    'photo_evidence_hashes',
+    'run_attempt_reservations',
+    'run_attempt_allowances',
     'recognition_votes',
     'recognition_results',
     'recognition_overrides',

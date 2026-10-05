@@ -129,6 +129,36 @@ export type V3PlayerView = PlayerView & {
   };
 };
 
+/**
+ * Authored checkpoint IDs can identify both a physical route and the selected
+ * challenge-pool variant. Keep those identifiers (and map coordinates) out of
+ * the player projection until the run has actually reached that stage. The
+ * colon cannot occur in an authored engine ID, so these ordinal placeholders
+ * also cannot collide with a current/reached checkpoint in React lists.
+ */
+function redactFutureCheckpoints(view: PlayerView, state: GameState) {
+  const publicId = (authoredId: string, index: number) =>
+    state.checkpoints[authoredId]?.startedAt ? authoredId : `stage:${index + 1}`;
+
+  view.checkpoints = view.checkpoints?.map((checkpoint, index) => {
+    if (state.checkpoints[checkpoint.id]?.startedAt) return checkpoint;
+    return {
+      id: publicId(checkpoint.id, index),
+      title: `Stage ${index + 1}`,
+      status: checkpoint.status,
+      required: checkpoint.required,
+    };
+  });
+  if (view.summary) view.summary.checkpoints = view.summary.checkpoints.map((checkpoint, index) => {
+    if (state.checkpoints[checkpoint.id]?.startedAt) return checkpoint;
+    return {
+      ...checkpoint,
+      id: publicId(checkpoint.id, index),
+      title: `Stage ${index + 1}`,
+    };
+  });
+}
+
 export function v3PlayerView(input: {
   definition: V3Definition;
   plan: ResolvedRunPlan;
@@ -151,11 +181,20 @@ export function v3PlayerView(input: {
       .filter(entry => entry.checkpointId === checkpoint.id && entry.countsForRanking !== false)
       .reduce((total, entry) => total + entry.amount, 0),
   }));
+  redactFutureCheckpoints(view, input.state);
   const clock = playability(engineDefinition, input.state, input.huntStatus, input.now);
   const gameplayHidden = input.state.status !== 'completed' && !clock.allowed;
   const selectedCheckpoints = new Set(input.plan.checkpointIds);
-  const parallelMechanics = publicParallelMechanics(input.definition, materializeRunParallelMechanics(input.definition, input.plan)).filter(mechanic =>
-    selectedCheckpoints.has(mechanic.checkpointId) && mechanic.checkpointId === input.state.activeCheckpointId);
+  const activeNodeId = input.state.activeCheckpointId
+    ? input.state.checkpoints[input.state.activeCheckpointId]?.activeNodeId
+    : undefined;
+  const parallelMechanics = gameplayHidden ? [] : publicParallelMechanics(
+    input.definition,
+    materializeRunParallelMechanics(input.definition, input.plan),
+  ).filter(mechanic =>
+    selectedCheckpoints.has(mechanic.checkpointId) &&
+    mechanic.checkpointId === input.state.activeCheckpointId &&
+    mechanic.nodeId === activeNodeId);
   return {
     ...view,
     playability: clock,

@@ -11,7 +11,8 @@ import {
 import { aggregateContributions, calculateRecognitionResults, isRecognitionWindowOpen, validateRecognitionVote } from '../../v3/recognition';
 import { getPool, transaction } from '../db';
 import { canonicalJson, digest, HttpError } from '../security';
-import { rateLimitV3 } from './security';
+import { lockV3Hunt, lockV3Team } from './locking';
+import { isV3Uuid, rateLimitV3 } from './security';
 
 type RecognitionContext = {
   run: {
@@ -166,9 +167,25 @@ async function visibleResults(client: PoolClient, runId: string) {
 }
 
 export async function privateRecognition(teamId: string, memberId: string, runId: string, scope: 'run' | 'all' = 'run') {
+  if (![teamId, memberId, runId].every(isV3Uuid)) throw new HttpError(400, 'Choose a valid completed run.');
   return transaction(async client => {
-    await client.query('set transaction isolation level repeatable read');
-    const ctx = await context(client, teamId, runId);
+    const identity = (await client.query(
+      'select hunt_id from hunt_v3.runs where id=$1 and team_id=$2',
+      [runId, teamId],
+    )).rows[0];
+    if (!identity || !await lockV3Hunt(client, identity.hunt_id) ||
+      !await lockV3Team(client, identity.hunt_id, teamId)) {
+      throw new HttpError(404, 'Run not found.');
+    }
+    // This read can lazily materialize the first recognition result. Take the
+    // same parent-first run lock as vote saves so two teammates opening the
+    // finish screen cannot both choose the same next result revision, and a
+    // disqualification cannot form a run -> team lock inversion through FKs.
+    const ctx = await context(client, teamId, runId, true);
+    const currentRunMembers = await runMembers(client, runId);
+    if (!currentRunMembers.some(member => member.teamMemberId === memberId)) {
+      throw new HttpError(409, 'This run is locked to its starting roster. You can take part in the team\'s next run.');
+    }
     if (ctx.run.status !== 'completed') throw new HttpError(409, 'Crew recognition opens when the run is complete.');
     const settings = ctx.definition.settings.recognition;
     if (!settings.enabled) return { enabled: false, standings: [], results: [] };
@@ -184,7 +201,6 @@ export async function privateRecognition(teamId: string, memberId: string, runId
         order by min(participant.joined_run_at),participant.member_id`,
       [runIds],
     )).rows as TeamMemberIdentity[];
-    const currentRunMembers = await runMembers(client, runId);
     const contributions = await contributionEvents(client, runIds);
     const standings = aggregateContributions(memberRows, contributions, new Set(runIds));
     let results = await visibleResults(client, runId);
@@ -223,7 +239,9 @@ export async function saveRecognitionVote(input: {
   subtype: PeerRecognitionSubtype;
   requestSource?: string;
 }) {
-  if (!/^[0-9a-f-]{36}$/i.test(input.requestId)) throw new HttpError(400, 'A valid request ID is required.');
+  if (![input.teamId, input.memberId, input.runId, input.requestId, input.recipientMemberId].every(isV3Uuid)) {
+    throw new HttpError(400, 'A valid recognition identity is required.');
+  }
   const payloadHash = digest(canonicalJson({ operation: 'recognition_vote', recipientMemberId: input.recipientMemberId, category: input.category, subtype: input.subtype }));
   const scopeKey = `member:${input.memberId}:recognition:${input.runId}`;
   const preflightReceipt = (await getPool().query(
@@ -249,6 +267,15 @@ export async function saveRecognitionVote(input: {
     const replay = await replayReceipt();
     if (replay) return replay;
 
+    const identity = (await client.query(
+      'select hunt_id from hunt_v3.runs where id=$1 and team_id=$2',
+      [input.runId, input.teamId],
+    )).rows[0];
+    if (!identity) throw new HttpError(404, 'Run not found.');
+    if (!await lockV3Hunt(client, identity.hunt_id) ||
+      !await lockV3Team(client, identity.hunt_id, input.teamId)) {
+      throw new HttpError(404, 'Run not found.');
+    }
     const ctx = await context(client, input.teamId, input.runId, true);
     const concurrentReplay = await replayReceipt();
     if (concurrentReplay) return concurrentReplay;

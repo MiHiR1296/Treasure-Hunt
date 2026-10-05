@@ -2,17 +2,23 @@ import '../isolated-database';
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { NextRequest } from 'next/server';
+import sharp from 'sharp';
 import { getPool } from '../../lib/server/db';
+import { elapsedMilliseconds } from '../../lib/engine/session';
 import { validateFairness } from '../../lib/v3/fairness';
 import type { V3Definition } from '../../lib/v3/types';
 import { publicLeaderboard, teamLeaderboards } from '../../lib/server/v3/leaderboards';
+import { authorizeV3Media, uploadV3Photo } from '../../lib/server/v3/media';
 import { createOrganizerTeam, liveOperations, pendingPhotoReviews, reviewPhoto } from '../../lib/server/v3/operations';
 import { parallelPhotoReviewStatus, submitParallelLane } from '../../lib/server/v3/parallel';
-import { saveRecognitionVote } from '../../lib/server/v3/recognition';
+import { privateRecognition, saveRecognitionVote } from '../../lib/server/v3/recognition';
 import { registerV3Team, teamSessionSummary } from '../../lib/server/v3/registration';
-import { applyRunCommand, createRun } from '../../lib/server/v3/runs';
-import { authenticateV3, createV3AdminSession, digest, v3RequestSource } from '../../lib/server/v3/security';
+import { applyRunCommand, createRun, currentRunView } from '../../lib/server/v3/runs';
+import { authenticateV3, createV3AdminSession, digest, V3_TEAM_COOKIE, v3RequestSource } from '../../lib/server/v3/security';
 
 const enabled = Boolean(process.env.DATABASE_URL);
 
@@ -60,16 +66,17 @@ function definition(id: string, registrationMode: V3Definition['settings']['regi
         shuffleSelectedCheckpoints: false,
         avoidTransitions: [],
         checkpointEstimates: { start: { durationMinutes: 1 }, finale: { durationMinutes: 1 } },
-        travelEstimates: [],
+        travelEstimates: [{ from: 'start', to: 'finale', durationMinutes: 0 }],
       },
       challengePools: {},
       variableGenerators: {
         northLaneCode: { type: 'literal', value: 'NORTH-7' },
       },
       fairnessPolicy: {
+        minimumDistinctPlans: 1,
         durationToleranceMinutes: 0,
         maxResolvedRoutes: 100,
-        requireTravelEstimates: false,
+        requireTravelEstimates: true,
         walkingSpeedMetersPerMinute: 72,
         minutesPerDifficultyPoint: 1.5,
       },
@@ -143,6 +150,20 @@ async function insertHunt(value: V3Definition, status = 'live') {
       values($1,$2,true,'Public V3 board','live',$3,true,true,'display_name')`,
     [value.id, `${value.id}-board`, value.settings.publicBoard.columns],
   );
+}
+
+async function approveTestTeam(teamId: string) {
+  await getPool().query("update hunt_v3.teams set approval_status='approved' where id=$1", [teamId]);
+}
+
+async function taskStartedAt(runId: string, checkpointId: string, nodeId: string) {
+  const value = (await getPool().query(
+    `select engine_state #>> array['checkpoints',$2,'nodes',$3,'startedAt'] as started_at
+      from hunt_v3.runs where id=$1`,
+    [runId, checkpointId, nodeId],
+  )).rows[0]?.started_at as string | undefined;
+  assert.ok(value, `expected active task epoch for ${checkpointId}/${nodeId}`);
+  return value;
 }
 
 async function finishRun(
@@ -260,6 +281,7 @@ test('PostgreSQL V3 runtime: self-serve registration, isolated replays, idempote
     requestSource: `runtime-bob-${huntId}`,
   });
   assert.equal(bob.summary.team.id, alice.summary.team.id);
+  await approveTestTeam(alice.summary.team.id);
   await assert.rejects(
     registerV3Team({
       requestId: randomUUID(), huntId, intent: 'join', playerName: 'Bob', teamCode: alice.summary.team.code,
@@ -291,6 +313,9 @@ test('PostgreSQL V3 runtime: self-serve registration, isolated replays, idempote
   assert.equal(initialized.engine_state.checkpoints.start.activeNodeId, 'parallel-gate');
   assert.equal(created.score, 0);
   assert.equal(created.bonusScore, 3);
+  assert.equal(created.checkpoints?.[1]?.id, 'stage:2', 'a future authored checkpoint ID is replaced by an ordinal');
+  assert.equal(created.summary?.checkpoints[1]?.id, 'stage:2', 'the summary uses the same redacted future ID');
+  assert.equal(JSON.stringify(created).includes('finale'), false, 'the future route is absent from the player response');
   assert.equal(JSON.stringify(created).includes('NORTH-7'), false, 'parallel secrets stay out of the player view');
   assert.equal(JSON.stringify(created).includes('privateSeed'), false);
   await finishRun(alice.summary.team.id, alice.summary.member.id, bob.summary.member.id, created.runId);
@@ -325,6 +350,11 @@ test('PostgreSQL V3 runtime: self-serve registration, isolated replays, idempote
   const voteReplay = await saveRecognitionVote(voteInput);
   assert.equal(voteReplay.replayed, true, 'a committed vote remains retryable after its window closes');
 
+  await assert.rejects(
+    createRun(alice.summary.team.id, alice.summary.member.id, randomUUID(), true),
+    /practice is unavailable.*unlimited official attempts/i,
+    'an unlimited competition cannot use practice mode to scout outside official allocator accounting',
+  );
   const replay = await createRun(alice.summary.team.id, alice.summary.member.id, randomUUID());
   assert.notEqual(replay.runId, created.runId);
   assert.equal(replay.runNumber, 2);
@@ -347,6 +377,123 @@ test('PostgreSQL V3 runtime: self-serve registration, isolated replays, idempote
   assert.equal(publicJson.includes('Bob'), false);
   assert.equal(publicJson.includes('helping_hand'), false);
   assert.equal(publicJson.includes('voterMemberId'), false);
+});
+
+test('PostgreSQL V3 runs freeze their starting roster and admit late check-ins only on the next run', { skip: !enabled }, async () => {
+  const huntId = `v3-run-roster-${randomUUID().slice(0, 8)}`;
+  await insertHunt(definition(huntId, 'rostered'));
+  const assigned = await createOrganizerTeam({
+    huntId,
+    requestId: randomUUID(),
+    displayName: 'Frozen Crew',
+    memberNames: ['Captain', 'Scout', 'Late Joiner'],
+    pin: '864201',
+    credentialSecret: 'integration-run-roster-secret',
+    actor: 'Test organizer',
+    sessionHash: 'a'.repeat(64),
+  });
+  const captainCredential = assigned.memberCredentials.find(member => member.name === 'Captain');
+  const scoutCredential = assigned.memberCredentials.find(member => member.name === 'Scout');
+  const lateCredential = assigned.memberCredentials.find(member => member.name === 'Late Joiner');
+  assert.ok(captainCredential && scoutCredential && lateCredential);
+  const captain = await registerV3Team({
+    requestId: randomUUID(),
+    huntId,
+    intent: 'claim',
+    playerName: 'Captain',
+    teamCode: assigned.code,
+    pin: '864201',
+    memberPin: captainCredential.claimPin,
+    requestSource: `run-roster-create-${huntId}`,
+  });
+  const scout = await registerV3Team({
+    requestId: randomUUID(),
+    huntId,
+    intent: 'claim',
+    playerName: 'Scout',
+    teamCode: captain.summary.team.code,
+    pin: '864201',
+    memberPin: scoutCredential.claimPin,
+    requestSource: `run-roster-scout-${huntId}`,
+  });
+  const firstRun = await createRun(captain.summary.team.id, captain.summary.member.id, randomUUID());
+
+  const late = await registerV3Team({
+    requestId: randomUUID(),
+    huntId,
+    intent: 'claim',
+    playerName: 'Late Joiner',
+    teamCode: captain.summary.team.code,
+    pin: '864201',
+    memberPin: lateCredential.claimPin,
+    requestSource: `run-roster-late-${huntId}`,
+  });
+  assert.equal(late.summary.activeRun, null, 'a late check-in does not receive the active run ID');
+  assert.equal(late.summary.latestRun, null, 'a late check-in does not receive a non-participating run summary');
+  assert.equal(Number((await getPool().query(
+    'select count(*)::int as count from hunt_v3.run_members where run_id=$1',
+    [firstRun.runId],
+  )).rows[0].count), 2);
+
+  await assert.rejects(
+    currentRunView(captain.summary.team.id, late.summary.member.id, firstRun.runId),
+    /locked to its starting roster/i,
+  );
+  await assert.rejects(
+    applyRunCommand(
+      captain.summary.team.id,
+      late.summary.member.id,
+      firstRun.runId,
+      randomUUID(),
+      { type: 'continue', checkpointId: 'start', nodeId: 'parallel-gate' },
+    ),
+    /locked to its starting roster/i,
+  );
+  await assert.rejects(
+    getPool().query(
+      `insert into hunt_v3.run_members(run_id,team_id,member_id,member_name_snapshot)
+        values($1,$2,$3,'Late Joiner')`,
+      [firstRun.runId, captain.summary.team.id, late.summary.member.id],
+    ),
+    /membership is frozen/i,
+    'the database rejects a service regression that tries to append a late member',
+  );
+  const photoId = randomUUID();
+  const photoTaskStartedAt = await taskStartedAt(firstRun.runId, 'start', 'parallel-gate');
+  await getPool().query(
+    `insert into hunt_v3.media(
+      id,hunt_id,team_id,run_id,member_id,checkpoint_id,node_id,kind,content_type,bytes,content_hash,storage_key,retention,
+      task_started_at)
+      values($1,$2,$3,$4,$5,'start','parallel-gate','photo','image/jpeg',1,$6,$7,'keep',$8::timestamptz)`,
+    [photoId, huntId, captain.summary.team.id, firstRun.runId, captain.summary.member.id,
+      digest(photoId), `${photoId}-${randomUUID()}`, photoTaskStartedAt],
+  );
+  const mediaRequest = (token: string) => new NextRequest(`http://localhost/api/v3/media/${photoId}`, {
+    headers: { cookie: `${V3_TEAM_COOKIE}=${token}` },
+  });
+  await assert.rejects(
+    authorizeV3Media(mediaRequest(late.token), photoId),
+    /not available for your current task/i,
+    'a late check-in cannot read media from the active run',
+  );
+  assert.equal((await authorizeV3Media(mediaRequest(captain.token), photoId)).id, photoId);
+
+  await finishRun(captain.summary.team.id, captain.summary.member.id, scout.summary.member.id, firstRun.runId);
+  await assert.rejects(
+    privateRecognition(captain.summary.team.id, late.summary.member.id, firstRun.runId),
+    /locked to its starting roster/i,
+    'a late check-in cannot read the completed run contribution board',
+  );
+  const replay = await createRun(captain.summary.team.id, captain.summary.member.id, randomUUID());
+  assert.equal(Number((await getPool().query(
+    'select count(*)::int as count from hunt_v3.run_members where run_id=$1',
+    [replay.runId],
+  )).rows[0].count), 3, 'the next run snapshots every checked-in member');
+  assert.equal(
+    (await currentRunView(captain.summary.team.id, late.summary.member.id, replay.runId)).runId,
+    replay.runId,
+    'the late check-in can participate once included in a new starting roster',
+  );
 });
 
 test('PostgreSQL V3 runtime: rostered identities require personal PINs and replace older sessions', { skip: !enabled }, async () => {
@@ -434,7 +581,7 @@ test('PostgreSQL V3 runtime: rostered identities require personal PINs and repla
   assert.equal(claim.claim_method, 'member_pin');
 });
 
-test('PostgreSQL V3 runs: practice cannot precede competition and an expired capped attempt stays terminal', { skip: !enabled }, async () => {
+test('PostgreSQL V3 runs: capped practice unlocks only after competition and reuses a seen structure', { skip: !enabled }, async () => {
   const huntId = `v3-run-policy-${randomUUID().slice(0, 8)}`;
   const hunt = definition(huntId);
   hunt.settings.runPolicy = { mode: 'capped', maxOfficialRuns: 1 };
@@ -448,6 +595,7 @@ test('PostgreSQL V3 runs: practice cannot precede competition and an expired cap
     requestId: randomUUID(), huntId, intent: 'join', playerName: 'Scout', teamCode: captain.summary.team.code,
     pin: '424242', memberPin: '222222', requestSource: `policy-join-${huntId}`,
   });
+  await approveTestTeam(captain.summary.team.id);
   await assert.rejects(
     createRun(captain.summary.team.id, captain.summary.member.id, randomUUID(), true),
     /official run before starting practice/i,
@@ -478,6 +626,57 @@ test('PostgreSQL V3 runs: practice cannot precede competition and an expired cap
   assert.equal(summary.completedOfficialRuns, 0);
   assert.equal(summary.officialAttemptCount, 1);
   assert.equal(summary.remainingOfficialRuns, 0);
+
+  const practice = await createRun(captain.summary.team.id, captain.summary.member.id, randomUUID(), true);
+  assert.equal(practice.practice, true);
+  assert.equal(practice.eligible, false);
+  const attempts = (await getPool().query(
+    `select private_seed,plan_key,allocation_cycle,practice,eligible,route_plan,engine_state
+      from hunt_v3.runs where team_id=$1 order by run_number`,
+    [captain.summary.team.id],
+  )).rows;
+  assert.equal(attempts.length, 2);
+  assert.notEqual(attempts[0].private_seed, attempts[1].private_seed, 'practice still receives fresh run-scoped values');
+  assert.equal(attempts[1].plan_key, attempts[0].plan_key, 'practice cannot reveal an unseen structural plan');
+  assert.deepEqual(attempts[1].route_plan.checkpointIds, attempts[0].route_plan.checkpointIds);
+  assert.deepEqual(attempts[1].route_plan.challenges, attempts[0].route_plan.challenges);
+  assert.deepEqual(
+    attempts[1].engine_state.routeAssignments.map((assignment: { checkpointId: string; nodeId: string; choiceIndex: number; nextNodeId: string }) => ({
+      checkpointId: assignment.checkpointId,
+      nodeId: assignment.nodeId,
+      choiceIndex: assignment.choiceIndex,
+      nextNodeId: assignment.nextNodeId,
+    })),
+    attempts[0].engine_state.routeAssignments.map((assignment: { checkpointId: string; nodeId: string; choiceIndex: number; nextNodeId: string }) => ({
+      checkpointId: assignment.checkpointId,
+      nodeId: assignment.nodeId,
+      choiceIndex: assignment.choiceIndex,
+      nextNodeId: assignment.nextNodeId,
+    })),
+    'practice also preserves the already-exposed internal seeded branches',
+  );
+  assert.equal(attempts[1].allocation_cycle, attempts[0].allocation_cycle + 1);
+  const startedEvent = (await getPool().query(
+    "select details from hunt_v3.run_events where run_id=$1 and event_type='run_started'",
+    [practice.runId],
+  )).rows[0].details;
+  assert.equal(startedEvent.practiceSourceRunId, started.runId, 'the reused official source is privately auditable');
+
+  const otherCaptain = await registerV3Team({
+    requestId: randomUUID(), huntId, intent: 'create', playerName: 'Other Captain', teamName: 'Other Clock Crew',
+    pin: '525252', memberPin: '333333', memberNames: ['Other Scout'], requestSource: `policy-other-create-${huntId}`,
+  });
+  await registerV3Team({
+    requestId: randomUUID(), huntId, intent: 'join', playerName: 'Other Scout', teamCode: otherCaptain.summary.team.code,
+    pin: '525252', memberPin: '444444', requestSource: `policy-other-join-${huntId}`,
+  });
+  await approveTestTeam(otherCaptain.summary.team.id);
+  const otherOfficial = await createRun(otherCaptain.summary.team.id, otherCaptain.summary.member.id, randomUUID());
+  const otherStarted = (await getPool().query(
+    "select details from hunt_v3.run_events where run_id=$1 and event_type='run_started'",
+    [otherOfficial.runId],
+  )).rows[0].details;
+  assert.equal(otherStarted.priorEventUses, 1, 'practice runs do not consume or distort the official allocation deck');
 });
 
 test('PostgreSQL V3 auth: limits, personal identity, lock scope, team size and revocation fail closed', { skip: !enabled }, async () => {
@@ -503,20 +702,26 @@ test('PostgreSQL V3 auth: limits, personal identity, lock scope, team size and r
   try {
     await blocker.query('begin');
     await blocker.query('select id from hunt_v3.hunts where id=$1 for update', [huntId]);
+    const blockerPid = Number((await blocker.query('select pg_backend_pid() as pid')).rows[0].pid);
     const join = registerV3Team({
       requestId: randomUUID(), huntId, intent: 'join', playerName: 'Bela', teamCode: asha.summary.team.code,
       pin: '123456', memberPin: '222222', requestSource: `join-${huntId}`,
     });
-    const raced = await Promise.race([
-      join.then(value => ({ value })),
-      new Promise<{ timedOut: true }>(resolve => setTimeout(() => resolve({ timedOut: true }), 1_500)),
-    ]);
-    await blocker.query('rollback');
-    if ('timedOut' in raced) {
-      await join;
-      assert.fail('joining an existing team waited on the hunt-wide allocation lock');
+    let observedParentWait = false;
+    const deadline = Date.now() + 2_000;
+    while (!observedParentWait && Date.now() < deadline) {
+      observedParentWait = Boolean((await getPool().query(
+        `select exists(
+          select 1 from pg_stat_activity activity
+          where activity.pid<>$1 and $1=any(pg_blocking_pids(activity.pid))
+        ) as blocked`,
+        [blockerPid],
+      )).rows[0].blocked);
+      if (!observedParentWait) await new Promise(resolve => setTimeout(resolve, 10));
     }
-    bela = raced.value;
+    await blocker.query('rollback');
+    bela = await join;
+    assert.equal(observedParentWait, true, 'joining locks the hunt parent before the team so concurrent lifecycle changes cannot invert lock order');
   } finally {
     await blocker.query('rollback').catch(() => undefined);
     blocker.release();
@@ -640,6 +845,7 @@ test('PostgreSQL V3 commands: novel state-neutral writes are bounded while exact
     requestId: randomUUID(), huntId, intent: 'create', playerName: 'Reader', teamName: 'Hint Crew',
     pin: '481516', memberPin: '234211', requestSource: `command-limit-${huntId}`,
   });
+  await approveTestTeam(player.summary.team.id);
   const run = await createRun(player.summary.team.id, player.summary.member.id, randomUUID());
   const command = { type: 'use_hint' as const, checkpointId: 'start', hintId: 'nudge' };
   const originalRequestId = randomUUID();
@@ -692,6 +898,7 @@ test('PostgreSQL V3 run creation bounds novel resumes while exact create receipt
     requestId: randomUUID(), huntId, intent: 'create', playerName: 'Resume Player', teamName: 'Resume Crew',
     pin: '246802', memberPin: '135792', requestSource: `create-limit-${huntId}`,
   });
+  await approveTestTeam(player.summary.team.id);
   const originalRequestId = randomUUID();
   const run = await createRun(player.summary.team.id, player.summary.member.id, originalRequestId);
   for (let index = 0; index < 29; index++) {
@@ -729,6 +936,7 @@ test('PostgreSQL V3 concurrent commands do not exhaust the pool through nested l
     requestId: randomUUID(), huntId, intent: 'create', playerName: 'Concurrent Player', teamName: 'Concurrent Crew',
     pin: '246803', memberPin: '135793', requestSource: `command-concurrency-${huntId}`,
   });
+  await approveTestTeam(player.summary.team.id);
   const run = await createRun(player.summary.team.id, player.summary.member.id, randomUUID());
   const requestIds = Array.from({ length: 20 }, () => randomUUID());
   const startedAt = Date.now();
@@ -762,6 +970,7 @@ test('PostgreSQL V3 parallel commands have a broad novel-write cap with exact re
     requestId: randomUUID(), huntId, intent: 'join', playerName: 'Limit Scout', teamCode: captain.summary.team.code,
     pin: '246804', memberPin: '975314', requestSource: `parallel-limit-join-${huntId}`,
   });
+  await approveTestTeam(captain.summary.team.id);
   const run = await createRun(captain.summary.team.id, captain.summary.member.id, randomUUID());
   const original = {
     teamId: captain.summary.team.id,
@@ -792,6 +1001,179 @@ test('PostgreSQL V3 parallel commands have a broad novel-write cap with exact re
   )).rows[0].count), before, 'a throttled parallel request creates no immutable receipt');
 });
 
+test('PostgreSQL V3 verifier attempts share one run/node budget across team members', { skip: !enabled }, async () => {
+  const huntId = `v3-verifier-aggregate-${randomUUID().slice(0, 8)}`;
+  const hunt = definition(huntId);
+  hunt.settings.parallelMechanics = [];
+  hunt.checkpoints[0].flow = {
+    startNodeId: 'answer',
+    nodes: [
+      { id: 'answer', type: 'verify_answer', prompt: 'Enter the answer.', answers: ['correct'], next: 'photo' },
+      { id: 'photo', type: 'verify_image', prompt: 'Take fresh proof.', referenceImages: [], next: 'done' },
+      { id: 'done', type: 'complete' },
+    ],
+  };
+  await insertHunt(hunt);
+  const captain = await registerV3Team({
+    requestId: randomUUID(), huntId, intent: 'create', playerName: 'Verifier Captain', teamName: 'Verifier Crew',
+    pin: '246805', memberPin: '135795', memberNames: ['Verifier Scout'], requestSource: `verifier-create-${huntId}`,
+  });
+  await approveTestTeam(captain.summary.team.id);
+  const scout = await registerV3Team({
+    requestId: randomUUID(), huntId, intent: 'join', playerName: 'Verifier Scout', teamCode: captain.summary.team.code,
+    pin: '246805', memberPin: '975315', requestSource: `verifier-join-${huntId}`,
+  });
+  const run = await createRun(captain.summary.team.id, captain.summary.member.id, randomUUID());
+  const lateMemberId = randomUUID();
+  await getPool().query(
+    `insert into hunt_v3.team_members(id,team_id,name,name_key,status,checked_in_at)
+      values($1,$2,'Verifier Late Joiner',$3,'active',clock_timestamp())`,
+    [lateMemberId, captain.summary.team.id, `verifier-late-${lateMemberId}`],
+  );
+  const aggregateKey = digest(`run-verifier:aggregate:${captain.summary.team.id}:${run.runId}:start:answer`);
+  await assert.rejects(
+    applyRunCommand(captain.summary.team.id, lateMemberId, run.runId, randomUUID(), {
+      type: 'verify', checkpointId: 'start', nodeId: 'answer', value: 'correct',
+    }),
+    /starting roster/i,
+    'a member who joined after the run began cannot spend the starting roster\'s answer budget',
+  );
+  assert.equal(
+    (await getPool().query('select 1 from hunt_v3.run_attempt_reservations where scope_key=$1', [aggregateKey])).rowCount,
+    0,
+    'an unauthorized late member creates no aggregate attempt reservation',
+  );
+  const firstRequest = randomUUID();
+  const firstCommand = { type: 'verify' as const, checkpointId: 'start', nodeId: 'answer', value: 'wrong-1' };
+  for (let index = 0; index < 6; index++) {
+    const result = await applyRunCommand(
+      captain.summary.team.id,
+      index % 2 ? scout.summary.member.id : captain.summary.member.id,
+      run.runId,
+      index === 0 ? firstRequest : randomUUID(),
+      index === 0 ? firstCommand : { ...firstCommand, value: `wrong-${index + 1}` },
+    );
+    assert.equal(result.feedback.status, 'rejected');
+  }
+  await assert.rejects(
+    applyRunCommand(captain.summary.team.id, scout.summary.member.id, run.runId, randomUUID(), {
+      ...firstCommand, value: 'correct',
+    }),
+    /too many attempts/i,
+    'a second identity cannot multiply the answer budget',
+  );
+  assert.equal(
+    (await applyRunCommand(captain.summary.team.id, captain.summary.member.id, run.runId, firstRequest, firstCommand)).feedback.status,
+    'rejected',
+    'an exact committed request remains replayable after the aggregate bucket is exhausted',
+  );
+  assert.equal(Number((await getPool().query(
+    'select count(*)::int as count from hunt_v3.run_attempt_reservations where scope_key=$1',
+    [aggregateKey],
+  )).rows[0].count), 6);
+});
+
+test('PostgreSQL V3 code and QR lanes share one aggregate budget across team members', { skip: !enabled }, async () => {
+  const huntId = `v3-parallel-aggregate-${randomUUID().slice(0, 8)}`;
+  await insertHunt(definition(huntId));
+  const captain = await registerV3Team({
+    requestId: randomUUID(), huntId, intent: 'create', playerName: 'Lane Captain', teamName: 'Lane Crew',
+    pin: '246806', memberPin: '135796', memberNames: ['Lane Scout'], requestSource: `lane-create-${huntId}`,
+  });
+  await approveTestTeam(captain.summary.team.id);
+  const scout = await registerV3Team({
+    requestId: randomUUID(), huntId, intent: 'join', playerName: 'Lane Scout', teamCode: captain.summary.team.code,
+    pin: '246806', memberPin: '975316', requestSource: `lane-join-${huntId}`,
+  });
+  const run = await createRun(captain.summary.team.id, captain.summary.member.id, randomUUID());
+  const first = {
+    teamId: captain.summary.team.id,
+    memberId: captain.summary.member.id,
+    runId: run.runId,
+    requestId: randomUUID(),
+    mechanicId: 'split-gate',
+    laneId: 'north',
+    evidence: { value: 'wrong-1' },
+  };
+  for (let index = 0; index < 6; index++) {
+    const result = await submitParallelLane(index === 0 ? first : {
+      ...first,
+      memberId: index % 2 ? scout.summary.member.id : captain.summary.member.id,
+      requestId: randomUUID(),
+      evidence: { value: `wrong-${index + 1}` },
+    });
+    assert.deepEqual({ accepted: result.accepted, status: result.status }, { accepted: false, status: 'rejected' });
+  }
+  await assert.rejects(
+    submitParallelLane({ ...first, memberId: scout.summary.member.id, requestId: randomUUID(), evidence: { value: 'NORTH-7' } }),
+    /too many attempts/i,
+    'a second identity cannot multiply a code/QR lane budget',
+  );
+  assert.deepEqual(
+    await submitParallelLane(first).then(result => ({ accepted: result.accepted, status: result.status })),
+    { accepted: false, status: 'rejected' },
+    'an exact failed lane request remains replayable after the aggregate bucket is exhausted',
+  );
+  const aggregateKey = digest(`parallel-lane:aggregate:${captain.summary.team.id}:${run.runId}:split-gate:north`);
+  assert.equal(Number((await getPool().query(
+    'select count(*)::int as count from hunt_v3.run_attempt_reservations where scope_key=$1',
+    [aggregateKey],
+  )).rows[0].count), 6);
+});
+
+test('PostgreSQL V3 reserves a transitioned parallel lane from the authoritative locked state', { skip: !enabled }, async t => {
+  const huntId = `v3-parallel-transition-${randomUUID().slice(0, 8)}`;
+  const hunt = definition(huntId);
+  hunt.checkpoints[0].flow = {
+    startNodeId: 'intro',
+    nodes: [
+      { id: 'intro', type: 'show_text', text: 'Ready?', next: 'parallel-gate' },
+      { id: 'parallel-gate', type: 'verify_organizer', prompt: 'Split up.', next: 'done' },
+      { id: 'done', type: 'complete' },
+    ],
+  };
+  await insertHunt(hunt);
+  const captain = await registerV3Team({
+    requestId: randomUUID(), huntId, intent: 'create', playerName: 'Transition Captain', teamName: 'Parallel Transition Crew',
+    pin: '246816', memberPin: '135716', memberNames: ['Transition Partner'], requestSource: `parallel-transition-create-${huntId}`,
+  });
+  await approveTestTeam(captain.summary.team.id);
+  const partner = await registerV3Team({
+    requestId: randomUUID(), huntId, intent: 'join', playerName: 'Transition Partner', teamCode: captain.summary.team.code,
+    pin: '246816', memberPin: '975316', requestSource: `parallel-transition-join-${huntId}`,
+  });
+  const run = await createRun(captain.summary.team.id, captain.summary.member.id, randomUUID());
+  assert.match(run.runId, /^[0-9a-f-]{36}$/i);
+  await getPool().query(`
+    create or replace function hunt_v3.test_delay_parallel_transition() returns trigger
+    language plpgsql as $$ begin perform pg_sleep(0.5); return new; end $$;
+    drop trigger if exists test_delay_parallel_transition on hunt_v3.runs;
+    create trigger test_delay_parallel_transition before update on hunt_v3.runs
+    for each row when (new.id='${run.runId}'::uuid)
+    execute function hunt_v3.test_delay_parallel_transition();
+  `);
+  t.after(async () => {
+    await getPool().query('drop trigger if exists test_delay_parallel_transition on hunt_v3.runs');
+    await getPool().query('drop function if exists hunt_v3.test_delay_parallel_transition()');
+  });
+  const advance = applyRunCommand(captain.summary.team.id, captain.summary.member.id, run.runId, randomUUID(), {
+    type: 'continue', checkpointId: 'start', nodeId: 'intro',
+  });
+  await new Promise(resolve => setTimeout(resolve, 100));
+  const laneRequestId = randomUUID();
+  const lane = submitParallelLane({
+    teamId: captain.summary.team.id, memberId: partner.summary.member.id, runId: run.runId,
+    requestId: laneRequestId, mechanicId: 'split-gate', laneId: 'north', evidence: { value: 'WRONG' },
+  });
+  const [, laneResult] = await Promise.all([advance, lane]);
+  assert.deepEqual({ accepted: laneResult.accepted, status: laneResult.status }, { accepted: false, status: 'rejected' });
+  const aggregateKey = digest(`parallel-lane:aggregate:${captain.summary.team.id}:${run.runId}:split-gate:north`);
+  assert.equal(Number((await getPool().query(
+    'select count(*)::int as count from hunt_v3.run_attempt_reservations where scope_key=$1 and request_id=$2',
+    [aggregateKey, laneRequestId],
+  )).rows[0].count), 1);
+});
+
 test('PostgreSQL V3 puzzle throttles allow stateful progress beyond 20 moves while capping text guesses', { skip: !enabled }, async () => {
   const quizHuntId = `v3-quiz-rate-${randomUUID().slice(0, 8)}`;
   const quizHunt = definition(quizHuntId);
@@ -818,8 +1200,9 @@ test('PostgreSQL V3 puzzle throttles allow stateful progress beyond 20 moves whi
             correctOptionId: `answer-${index + 1}`,
           })),
         },
-        next: 'done',
+        next: 'photo',
       },
+      { id: 'photo', type: 'verify_image', prompt: 'Take fresh quiz proof.', referenceImages: [], next: 'done' },
       { id: 'done', type: 'complete' },
     ],
   };
@@ -828,6 +1211,7 @@ test('PostgreSQL V3 puzzle throttles allow stateful progress beyond 20 moves whi
     requestId: randomUUID(), huntId: quizHuntId, intent: 'create', playerName: 'Quiz Player',
     teamName: 'Quiz Crew', pin: '246801', memberPin: '135790', requestSource: `quiz-rate-${quizHuntId}`,
   });
+  await approveTestTeam(quizPlayer.summary.team.id);
   const quizRun = await createRun(quizPlayer.summary.team.id, quizPlayer.summary.member.id, randomUUID());
   for (let index = 0; index < 21; index++) {
     const result = await applyRunCommand(
@@ -864,44 +1248,268 @@ test('PostgreSQL V3 puzzle throttles allow stateful progress beyond 20 moves whi
         type: 'puzzle',
         prompt: 'Enter the secret answer.',
         puzzle: { type: 'text', prompt: 'What is the secret?', answers: ['correct'] },
-        next: 'done',
+        next: 'photo',
       },
+      { id: 'photo', type: 'verify_image', prompt: 'Take fresh answer proof.', referenceImages: [], next: 'done' },
       { id: 'done', type: 'complete' },
     ],
   };
   await insertHunt(textHunt);
   const textPlayer = await registerV3Team({
     requestId: randomUUID(), huntId: textHuntId, intent: 'create', playerName: 'Text Player',
-    teamName: 'Text Crew', pin: '864209', memberPin: '975310', requestSource: `text-rate-${textHuntId}`,
+    teamName: 'Text Crew', pin: '864209', memberPin: '975310', memberNames: ['Text Partner'],
+    requestSource: `text-rate-${textHuntId}`,
+  });
+  await approveTestTeam(textPlayer.summary.team.id);
+  const textPartner = await registerV3Team({
+    requestId: randomUUID(), huntId: textHuntId, intent: 'join', playerName: 'Text Partner',
+    teamCode: textPlayer.summary.team.code, pin: '864209', memberPin: '975311', requestSource: `text-partner-${textHuntId}`,
   });
   const textRun = await createRun(textPlayer.summary.team.id, textPlayer.summary.member.id, randomUUID());
-  for (let index = 0; index < 20; index++) {
+  const firstTextRequest = randomUUID();
+  const firstTextCommand = {
+    type: 'submit_puzzle' as const,
+    checkpointId: 'start',
+    nodeId: 'answer',
+    expectedRevision: 0,
+    value: { value: 'wrong-1' },
+  };
+  for (let index = 0; index < 6; index++) {
     const result = await applyRunCommand(
       textPlayer.summary.team.id,
-      textPlayer.summary.member.id,
+      index % 2 ? textPartner.summary.member.id : textPlayer.summary.member.id,
       textRun.runId,
-      randomUUID(),
-      {
-        type: 'submit_puzzle',
-        checkpointId: 'start',
-        nodeId: 'answer',
-        expectedRevision: index,
-        value: { value: `wrong-${index + 1}` },
-      },
+      index === 0 ? firstTextRequest : randomUUID(),
+      index === 0 ? firstTextCommand : { ...firstTextCommand, expectedRevision: index, value: { value: `wrong-${index + 1}` } },
     );
     assert.equal(result.feedback.status, 'accepted');
   }
   await assert.rejects(
-    applyRunCommand(textPlayer.summary.team.id, textPlayer.summary.member.id, textRun.runId, randomUUID(), {
-      type: 'submit_puzzle', checkpointId: 'start', nodeId: 'answer', expectedRevision: 20, value: { value: 'wrong-21' },
+    applyRunCommand(textPlayer.summary.team.id, textPartner.summary.member.id, textRun.runId, randomUUID(), {
+      type: 'submit_puzzle', checkpointId: 'start', nodeId: 'answer', expectedRevision: 6, value: { value: 'wrong-7' },
     }),
     /too many attempts/i,
+    'a second identity cannot multiply the text-answer budget',
+  );
+  assert.equal(
+    (await applyRunCommand(
+      textPlayer.summary.team.id,
+      textPlayer.summary.member.id,
+      textRun.runId,
+      firstTextRequest,
+      firstTextCommand,
+    )).feedback.status,
+    'accepted',
+    'an exact puzzle receipt remains replayable after the aggregate bucket is exhausted',
   );
   const textProgress = (await getPool().query(
     "select engine_state->'checkpoints'->'start'->'nodes'->'answer'->'puzzle'->>'revision' as revision from hunt_v3.runs where id=$1",
     [textRun.runId],
   )).rows[0];
-  assert.equal(Number(textProgress.revision), 20, 'the throttled text guess does not mutate puzzle progress');
+  assert.equal(Number(textProgress.revision), 6, 'the throttled text guess does not mutate puzzle progress');
+  const textAggregateKey = digest(`run-puzzle-submit:aggregate:${textPlayer.summary.team.id}:${textRun.runId}:start:answer`);
+  assert.equal(Number((await getPool().query(
+    'select count(*)::int as count from hunt_v3.run_attempt_reservations where scope_key=$1',
+    [textAggregateKey],
+  )).rows[0].count), 6);
+});
+
+test('PostgreSQL V3 multiple choice permits one final team submission instead of sequential brute force', { skip: !enabled }, async () => {
+  const huntId = `v3-choice-final-${randomUUID().slice(0, 8)}`;
+  const hunt = definition(huntId);
+  hunt.settings.minTeamSize = 1;
+  hunt.settings.parallelMechanics = [];
+  hunt.checkpoints[0].flow = {
+    startNodeId: 'choice',
+    nodes: [
+      {
+        id: 'choice',
+        type: 'puzzle',
+        prompt: 'Choose once.',
+        puzzle: {
+          type: 'multiple_choice',
+          prompt: 'Which answer is correct?',
+          options: [{ id: 'first', label: 'First' }, { id: 'second', label: 'Second' }],
+          correctOptionId: 'second',
+        },
+        next: 'photo',
+      },
+      { id: 'photo', type: 'verify_image', prompt: 'Take fresh choice proof.', referenceImages: [], next: 'done' },
+      { id: 'done', type: 'complete' },
+    ],
+  };
+  await insertHunt(hunt);
+  const player = await registerV3Team({
+    requestId: randomUUID(), huntId, intent: 'create', playerName: 'Choice Player', teamName: 'Choice Crew',
+    pin: '246807', memberPin: '135797', requestSource: `choice-create-${huntId}`,
+  });
+  await approveTestTeam(player.summary.team.id);
+  const run = await createRun(player.summary.team.id, player.summary.member.id, randomUUID());
+  const firstRequest = randomUUID();
+  const wrong = {
+    type: 'submit_puzzle' as const,
+    checkpointId: 'start',
+    nodeId: 'choice',
+    expectedRevision: 0,
+    value: { optionId: 'first' },
+  };
+  const concurrentRetry = await Promise.all([
+    applyRunCommand(player.summary.team.id, player.summary.member.id, run.runId, firstRequest, wrong),
+    applyRunCommand(player.summary.team.id, player.summary.member.id, run.runId, firstRequest, wrong),
+  ]);
+  assert.deepEqual(concurrentRetry.map(result => result.view.status), ['active', 'active']);
+  const choiceScopeKey = digest(`run-puzzle-submit:aggregate:${player.summary.team.id}:${run.runId}:start:choice`);
+  assert.equal(Number((await getPool().query(
+    'select count(*)::int as count from hunt_v3.run_attempt_reservations where scope_key=$1',
+    [choiceScopeKey],
+  )).rows[0].count), 1, 'simultaneous retries reserve one permanent final submission');
+  await assert.rejects(
+    applyRunCommand(player.summary.team.id, player.summary.member.id, run.runId, randomUUID(), {
+      ...wrong, expectedRevision: 1, value: { optionId: 'second' },
+    }),
+    /too many attempts/i,
+    'trying every public option cannot guarantee an official solve',
+  );
+  assert.equal((await applyRunCommand(
+    player.summary.team.id, player.summary.member.id, run.runId, firstRequest, wrong,
+  )).view.status, 'active', 'the single final submission remains idempotently replayable');
+  const persisted = (await getPool().query('select status,score,engine_state from hunt_v3.runs where id=$1', [run.runId])).rows[0];
+  assert.equal(persisted.status, 'active');
+  assert.equal(persisted.score, 0);
+  assert.equal(persisted.engine_state.checkpoints.start.nodes.choice.puzzle.revision, 1);
+});
+
+test('PostgreSQL V3 reserves a transitioned puzzle budget from the authoritative locked state', { skip: !enabled }, async t => {
+  const huntId = `v3-transition-budget-${randomUUID().slice(0, 8)}`;
+  const hunt = definition(huntId);
+  hunt.settings.minTeamSize = 1;
+  hunt.settings.parallelMechanics = [];
+  hunt.checkpoints[0].flow = {
+    startNodeId: 'intro',
+    nodes: [
+      { id: 'intro', type: 'show_text', text: 'Ready?', next: 'choice' },
+      {
+        id: 'choice', type: 'puzzle', prompt: 'Choose once.',
+        puzzle: {
+          type: 'multiple_choice', prompt: 'Which is correct?',
+          options: [{ id: 'wrong', label: 'Wrong' }, { id: 'right', label: 'Right' }], correctOptionId: 'right',
+        },
+        next: 'photo',
+      },
+      { id: 'photo', type: 'verify_image', prompt: 'Take fresh transition proof.', referenceImages: [], next: 'done' },
+      { id: 'done', type: 'complete' },
+    ],
+  };
+  await insertHunt(hunt);
+  const player = await registerV3Team({
+    requestId: randomUUID(), huntId, intent: 'create', playerName: 'Transition Player', teamName: 'Transition Crew',
+    pin: '246815', memberPin: '135715', requestSource: `transition-create-${huntId}`,
+  });
+  await approveTestTeam(player.summary.team.id);
+  const run = await createRun(player.summary.team.id, player.summary.member.id, randomUUID());
+  assert.match(run.runId, /^[0-9a-f-]{36}$/i);
+  await getPool().query(`
+    create or replace function hunt_v3.test_delay_transition_update() returns trigger
+    language plpgsql as $$ begin perform pg_sleep(0.5); return new; end $$;
+    drop trigger if exists test_delay_transition_update on hunt_v3.runs;
+    create trigger test_delay_transition_update before update on hunt_v3.runs
+    for each row when (new.id='${run.runId}'::uuid)
+    execute function hunt_v3.test_delay_transition_update();
+  `);
+  t.after(async () => {
+    await getPool().query('drop trigger if exists test_delay_transition_update on hunt_v3.runs');
+    await getPool().query('drop function if exists hunt_v3.test_delay_transition_update()');
+  });
+  const advance = applyRunCommand(player.summary.team.id, player.summary.member.id, run.runId, randomUUID(), {
+    type: 'continue', checkpointId: 'start', nodeId: 'intro',
+  });
+  await new Promise(resolve => setTimeout(resolve, 100));
+  const racedRequestId = randomUUID();
+  const choose = applyRunCommand(player.summary.team.id, player.summary.member.id, run.runId, racedRequestId, {
+    type: 'submit_puzzle', checkpointId: 'start', nodeId: 'choice', expectedRevision: 0,
+    value: { optionId: 'right' },
+  });
+  const [, chosen] = await Promise.all([advance, choose]);
+  assert.equal(chosen.feedback.status, 'accepted');
+  const preflightMemberKey = digest(`run-puzzle-submit:${run.runId}:${player.summary.member.id}:start:choice`);
+  assert.equal(
+    (await getPool().query('select 1 from hunt_v3.rate_limits where key=$1', [preflightMemberKey])).rowCount,
+    0,
+    'the intentionally stale preflight did not see the newly active puzzle',
+  );
+  const aggregateKey = digest(`run-puzzle-submit:aggregate:${player.summary.team.id}:${run.runId}:start:choice`);
+  assert.equal(Number((await getPool().query(
+    'select count(*)::int as count from hunt_v3.run_attempt_reservations where scope_key=$1 and request_id=$2',
+    [aggregateKey, racedRequestId],
+  )).rows[0].count), 1, 'the locked state still reserves the transitioned node before accepting it');
+});
+
+test('PostgreSQL V3 stateful puzzle budgets cannot be multiplied by extra team identities', { skip: !enabled }, async () => {
+  const huntId = `v3-matching-budget-${randomUUID().slice(0, 8)}`;
+  const hunt = definition(huntId);
+  hunt.settings.parallelMechanics = [];
+  hunt.checkpoints[0].flow = {
+    startNodeId: 'matching',
+    nodes: [
+      {
+        id: 'matching', type: 'puzzle', prompt: 'Match all five.',
+        puzzle: {
+          type: 'matching',
+          left: ['a', 'b', 'c', 'd', 'e'].map(id => ({ id, label: id.toUpperCase() })),
+          right: ['1', '2', '3', '4', '5'].map(id => ({ id, label: id })),
+          solution: [
+            { leftId: 'a', rightId: '1' }, { leftId: 'b', rightId: '2' },
+            { leftId: 'c', rightId: '3' }, { leftId: 'd', rightId: '4' }, { leftId: 'e', rightId: '5' },
+          ],
+        },
+        next: 'photo',
+      },
+      { id: 'photo', type: 'verify_image', prompt: 'Take fresh matching proof.', referenceImages: [], next: 'done' },
+      { id: 'done', type: 'complete' },
+    ],
+  };
+  await insertHunt(hunt);
+  const captain = await registerV3Team({
+    requestId: randomUUID(), huntId, intent: 'create', playerName: 'Matching Captain', teamName: 'Matching Crew',
+    pin: '246814', memberPin: '135714', memberNames: ['Matching Partner'], requestSource: `matching-create-${huntId}`,
+  });
+  await approveTestTeam(captain.summary.team.id);
+  const partner = await registerV3Team({
+    requestId: randomUUID(), huntId, intent: 'join', playerName: 'Matching Partner', teamCode: captain.summary.team.code,
+    pin: '246814', memberPin: '975314', requestSource: `matching-join-${huntId}`,
+  });
+  const run = await createRun(captain.summary.team.id, captain.summary.member.id, randomUUID());
+  const candidates = [
+    ['2', '1', '3', '4', '5'], ['1', '2', '4', '3', '5'], ['2', '3', '4', '5', '1'],
+    ['3', '4', '5', '1', '2'], ['4', '5', '1', '2', '3'], ['5', '4', '3', '2', '1'],
+    ['2', '4', '1', '5', '3'], ['3', '1', '5', '2', '4'],
+  ];
+  for (const [index, rights] of candidates.entries()) {
+    const result = await applyRunCommand(
+      captain.summary.team.id,
+      index % 2 ? partner.summary.member.id : captain.summary.member.id,
+      run.runId,
+      randomUUID(),
+      {
+        type: 'submit_puzzle', checkpointId: 'start', nodeId: 'matching', expectedRevision: index,
+        value: { pairs: ['a', 'b', 'c', 'd', 'e'].map((leftId, pairIndex) => ({ leftId, rightId: rights[pairIndex] })) },
+      },
+    );
+    assert.equal(result.feedback.status, 'accepted');
+  }
+  await assert.rejects(
+    applyRunCommand(captain.summary.team.id, partner.summary.member.id, run.runId, randomUUID(), {
+      type: 'submit_puzzle', checkpointId: 'start', nodeId: 'matching', expectedRevision: 8,
+      value: { pairs: ['a', 'b', 'c', 'd', 'e'].map((leftId, index) => ({ leftId, rightId: String(index + 1) })) },
+    }),
+    /too many attempts/i,
+    'cycling identities cannot enumerate the remaining matching permutations',
+  );
+  const scopeKey = digest(`run-puzzle-submit:aggregate:${captain.summary.team.id}:${run.runId}:start:matching`);
+  assert.equal(Number((await getPool().query(
+    'select count(*)::int as count from hunt_v3.run_attempt_reservations where scope_key=$1',
+    [scopeKey],
+  )).rows[0].count), 8);
 });
 
 test('PostgreSQL V3 photo review starts at accepted submission and parallel uploads require a lane submission', { skip: !enabled }, async () => {
@@ -922,14 +1530,17 @@ test('PostgreSQL V3 photo review starts at accepted submission and parallel uplo
     requestId: randomUUID(), huntId: normalHuntId, intent: 'create', playerName: 'Photographer',
     teamName: 'Photo Crew', pin: '246810', memberPin: '135791', requestSource: `photo-create-${normalHuntId}`,
   });
+  await approveTestTeam(photographer.summary.team.id);
   const normalRun = await createRun(photographer.summary.team.id, photographer.summary.member.id, randomUUID());
   const normalMediaId = randomUUID();
+  const normalTaskStartedAt = await taskStartedAt(normalRun.runId, 'start', 'photo');
   await getPool().query(
     `insert into hunt_v3.media(
-      id,hunt_id,team_id,run_id,member_id,checkpoint_id,node_id,kind,content_type,bytes,content_hash,storage_key,retention,created_at)
-      values($1,$2,$3,$4,$5,'start','photo','photo','image/jpeg',1,$6,$7,'keep',clock_timestamp()-interval '10 minutes')`,
+      id,hunt_id,team_id,run_id,member_id,checkpoint_id,node_id,kind,content_type,bytes,content_hash,storage_key,retention,created_at,
+      task_started_at)
+      values($1,$2,$3,$4,$5,'start','photo','photo','image/jpeg',1,$6,$7,'keep',clock_timestamp()-interval '10 minutes',$8::timestamptz)`,
     [normalMediaId, normalHuntId, photographer.summary.team.id, normalRun.runId, photographer.summary.member.id,
-      'c'.repeat(64), `${normalMediaId}-${randomUUID()}`],
+      'c'.repeat(64), `${normalMediaId}-${randomUUID()}`, normalTaskStartedAt],
   );
   assert.equal((await pendingPhotoReviews(normalHuntId)).some(photo => photo.id === normalMediaId), false);
   assert.equal((await liveOperations(normalHuntId)).alerts.photos, 0);
@@ -999,15 +1610,18 @@ test('PostgreSQL V3 photo review starts at accepted submission and parallel uplo
     teamCode: captain.summary.team.code, pin: '864208', memberPin: '222222',
     requestSource: `parallel-photo-join-${parallelHuntId}`,
   });
+  await approveTestTeam(captain.summary.team.id);
   const parallelRun = await createRun(captain.summary.team.id, captain.summary.member.id, randomUUID());
   const parallelMediaId = randomUUID();
+  const parallelTaskStartedAt = await taskStartedAt(parallelRun.runId, 'start', 'parallel-gate');
   await getPool().query(
     `insert into hunt_v3.media(
       id,hunt_id,team_id,run_id,member_id,checkpoint_id,node_id,parallel_mechanic_id,parallel_lane_id,
-      kind,content_type,bytes,content_hash,storage_key,retention,created_at)
-      values($1,$2,$3,$4,$5,'start','parallel-gate','split-gate','north','photo','image/jpeg',1,$6,$7,'keep',clock_timestamp()-interval '10 minutes')`,
+      kind,content_type,bytes,content_hash,storage_key,retention,created_at,task_started_at)
+      values($1,$2,$3,$4,$5,'start','parallel-gate','split-gate','north','photo','image/jpeg',1,$6,$7,'keep',
+        clock_timestamp()-interval '10 minutes',$8::timestamptz)`,
     [parallelMediaId, parallelHuntId, captain.summary.team.id, parallelRun.runId, captain.summary.member.id,
-      'd'.repeat(64), `${parallelMediaId}-${randomUUID()}`],
+      'd'.repeat(64), `${parallelMediaId}-${randomUUID()}`, parallelTaskStartedAt],
   );
   assert.equal((await pendingPhotoReviews(parallelHuntId)).some(photo => photo.id === parallelMediaId), false);
   assert.equal((await liveOperations(parallelHuntId)).alerts.photos, 0);
@@ -1113,6 +1727,219 @@ test('PostgreSQL V3 photo review starts at accepted submission and parallel uplo
   assert.equal(accepted.mechanicCompleted, true);
 });
 
+test('PostgreSQL V3 rejected normal and parallel photos receive no leaderboard-time credit', { skip: !enabled }, async () => {
+  const normalHuntId = `v3-photo-reject-${randomUUID().slice(0, 8)}`;
+  const normalHunt = definition(normalHuntId);
+  normalHunt.settings.minTeamSize = 1;
+  normalHunt.settings.parallelMechanics = [];
+  normalHunt.checkpoints[0].flow = {
+    startNodeId: 'photo',
+    nodes: [
+      { id: 'photo', type: 'verify_image', prompt: 'Send current evidence.', referenceImages: [], next: 'done' },
+      { id: 'done', type: 'complete' },
+    ],
+  };
+  await insertHunt(normalHunt);
+  const photographer = await registerV3Team({
+    requestId: randomUUID(), huntId: normalHuntId, intent: 'create', playerName: 'Reject Photographer',
+    teamName: 'Reject Photo Crew', pin: '246811', memberPin: '135711', requestSource: `photo-reject-${normalHuntId}`,
+  });
+  await approveTestTeam(photographer.summary.team.id);
+  const normalRun = await createRun(photographer.summary.team.id, photographer.summary.member.id, randomUUID());
+  const normalMediaId = randomUUID();
+  const normalTaskStartedAt = await taskStartedAt(normalRun.runId, 'start', 'photo');
+  await getPool().query(
+    `insert into hunt_v3.media(
+      id,hunt_id,team_id,run_id,member_id,checkpoint_id,node_id,kind,content_type,bytes,content_hash,storage_key,retention,created_at,
+      task_started_at)
+      values($1,$2,$3,$4,$5,'start','photo','photo','image/jpeg',1,$6,$7,'keep',clock_timestamp()-interval '10 minutes',$8::timestamptz)`,
+    [normalMediaId, normalHuntId, photographer.summary.team.id, normalRun.runId, photographer.summary.member.id,
+      digest(`normal-reject-${normalMediaId}`), `${normalMediaId}-${randomUUID()}`, normalTaskStartedAt],
+  );
+  await applyRunCommand(photographer.summary.team.id, photographer.summary.member.id, normalRun.runId, randomUUID(), {
+    type: 'submit_photo', checkpointId: 'start', nodeId: 'photo', mediaId: normalMediaId,
+  });
+  const normalScenarioNow = Date.now();
+  const normalStartedAt = new Date(normalScenarioNow - 180_000).toISOString();
+  const normalReviewStartedAt = new Date(normalScenarioNow - 120_000).toISOString();
+  const normalBeforeReject = (await getPool().query('select engine_state from hunt_v3.runs where id=$1', [normalRun.runId])).rows[0].engine_state;
+  normalBeforeReject.startedAt = normalStartedAt;
+  normalBeforeReject.clockPauses.find((pause: { sourceId?: string }) => pause.sourceId === normalMediaId).startedAt = normalReviewStartedAt;
+  const normalDeadline = normalBeforeReject.timer.deadlineAt;
+  await getPool().query('update hunt_v3.runs set engine_state=$1,started_at=$2 where id=$3', [normalBeforeReject, normalStartedAt, normalRun.runId]);
+  await getPool().query('update hunt_v3.media set submitted_at=$1 where id=$2', [normalReviewStartedAt, normalMediaId]);
+  await reviewPhoto({ mediaId: normalMediaId, approved: false, reason: 'Landmark not visible', requestId: randomUUID(), actor: 'Test organizer' });
+  const normalAfterReject = (await getPool().query(
+    `select run.engine_state,media.reviewed_at from hunt_v3.runs run join hunt_v3.media media on media.run_id=run.id
+      where run.id=$1 and media.id=$2`,
+    [normalRun.runId, normalMediaId],
+  )).rows[0];
+  assert.equal(normalAfterReject.engine_state.timer.deadlineAt, normalDeadline, 'normal rejection does not extend the countdown');
+  assert.equal(normalAfterReject.engine_state.clockPauses.some(
+    (pause: { sourceId?: string }) => pause.sourceId === normalMediaId,
+  ), false, 'normal rejected evidence leaves no credited review interval');
+  assert.ok(
+    elapsedMilliseconds(normalAfterReject.engine_state, normalStartedAt, new Date(normalAfterReject.reviewed_at).toISOString()) >= 179_000,
+    'normal review wait remains in competitive elapsed time',
+  );
+
+  const parallelHuntId = `v3-parallel-photo-reject-${randomUUID().slice(0, 8)}`;
+  const parallelHunt = definition(parallelHuntId);
+  parallelHunt.settings.parallelMechanics = [{
+    id: 'split-gate', checkpointId: 'start', nodeId: 'parallel-gate', timeWindowSeconds: 120,
+    lanes: [
+      { id: 'north', label: 'North photo', type: 'photo' },
+      { id: 'south', label: 'South code', type: 'code', code: 'SOUTH-9' },
+    ],
+  }];
+  await insertHunt(parallelHunt);
+  const captain = await registerV3Team({
+    requestId: randomUUID(), huntId: parallelHuntId, intent: 'create', playerName: 'Reject Captain',
+    teamName: 'Reject Parallel Crew', pin: '864211', memberPin: '111119', memberNames: ['Reject Scout'],
+    requestSource: `parallel-reject-create-${parallelHuntId}`,
+  });
+  await approveTestTeam(captain.summary.team.id);
+  const scout = await registerV3Team({
+    requestId: randomUUID(), huntId: parallelHuntId, intent: 'join', playerName: 'Reject Scout',
+    teamCode: captain.summary.team.code, pin: '864211', memberPin: '222229', requestSource: `parallel-reject-join-${parallelHuntId}`,
+  });
+  const parallelRun = await createRun(captain.summary.team.id, captain.summary.member.id, randomUUID());
+  const parallelMediaId = randomUUID();
+  const parallelTaskStartedAt = await taskStartedAt(parallelRun.runId, 'start', 'parallel-gate');
+  await getPool().query(
+    `insert into hunt_v3.media(
+      id,hunt_id,team_id,run_id,member_id,checkpoint_id,node_id,parallel_mechanic_id,parallel_lane_id,
+      kind,content_type,bytes,content_hash,storage_key,retention,created_at,task_started_at)
+      values($1,$2,$3,$4,$5,'start','parallel-gate','split-gate','north','photo','image/jpeg',1,$6,$7,'keep',
+        clock_timestamp()-interval '10 minutes',$8::timestamptz)`,
+    [parallelMediaId, parallelHuntId, captain.summary.team.id, parallelRun.runId, captain.summary.member.id,
+      digest(`parallel-reject-${parallelMediaId}`), `${parallelMediaId}-${randomUUID()}`, parallelTaskStartedAt],
+  );
+  await submitParallelLane({
+    teamId: captain.summary.team.id, memberId: captain.summary.member.id, runId: parallelRun.runId,
+    requestId: randomUUID(), mechanicId: 'split-gate', laneId: 'north', evidence: { mediaId: parallelMediaId },
+  });
+  await submitParallelLane({
+    teamId: captain.summary.team.id, memberId: scout.summary.member.id, runId: parallelRun.runId,
+    requestId: randomUUID(), mechanicId: 'split-gate', laneId: 'south', evidence: { value: 'SOUTH-9' },
+  });
+  const parallelScenarioNow = Date.now();
+  const parallelStartedAt = new Date(parallelScenarioNow - 180_000).toISOString();
+  const parallelReviewStartedAt = new Date(parallelScenarioNow - 120_000).toISOString();
+  const parallelBeforeReject = (await getPool().query('select engine_state from hunt_v3.runs where id=$1', [parallelRun.runId])).rows[0].engine_state;
+  parallelBeforeReject.startedAt = parallelStartedAt;
+  parallelBeforeReject.clockPauses.find((pause: { sourceId?: string }) => pause.sourceId === parallelMediaId).startedAt = parallelReviewStartedAt;
+  const parallelDeadline = parallelBeforeReject.timer.deadlineAt;
+  await getPool().query('update hunt_v3.runs set engine_state=$1,started_at=$2 where id=$3', [parallelBeforeReject, parallelStartedAt, parallelRun.runId]);
+  await getPool().query('update hunt_v3.media set submitted_at=$1 where id=$2', [parallelReviewStartedAt, parallelMediaId]);
+  await reviewPhoto({ mediaId: parallelMediaId, approved: false, reason: 'Wrong landmark', requestId: randomUUID(), actor: 'Test organizer' });
+  const parallelAfterReject = (await getPool().query(
+    `select run.engine_state,media.reviewed_at from hunt_v3.runs run join hunt_v3.media media on media.run_id=run.id
+      where run.id=$1 and media.id=$2`,
+    [parallelRun.runId, parallelMediaId],
+  )).rows[0];
+  assert.equal(parallelAfterReject.engine_state.timer.deadlineAt, parallelDeadline, 'parallel rejection does not extend the countdown');
+  assert.equal(parallelAfterReject.engine_state.clockPauses.some(
+    (pause: { reason?: string; endedAt?: string }) => pause.reason === 'review' && !pause.endedAt,
+  ), false, 'parallel rejection removes every provisional review blocker');
+  assert.ok(
+    elapsedMilliseconds(parallelAfterReject.engine_state, parallelStartedAt, new Date(parallelAfterReject.reviewed_at).toISOString()) >= 179_000,
+    'parallel review wait remains in competitive elapsed time',
+  );
+});
+
+test('PostgreSQL V3 rejects exact photo reuse across teams and retains the digest after media deletion', { skip: !enabled }, async t => {
+  const previousDirectory = process.env.MEDIA_DIRECTORY;
+  const previousStorage = process.env.MEDIA_STORAGE;
+  const directory = await mkdtemp(path.join(tmpdir(), 'hunt-v3-photo-reuse-'));
+  process.env.MEDIA_DIRECTORY = directory;
+  process.env.MEDIA_STORAGE = 'filesystem';
+  t.after(async () => {
+    if (previousDirectory === undefined) delete process.env.MEDIA_DIRECTORY;
+    else process.env.MEDIA_DIRECTORY = previousDirectory;
+    if (previousStorage === undefined) delete process.env.MEDIA_STORAGE;
+    else process.env.MEDIA_STORAGE = previousStorage;
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  const huntId = `v3-photo-reuse-${randomUUID().slice(0, 8)}`;
+  const hunt = definition(huntId);
+  hunt.settings.minTeamSize = 1;
+  hunt.settings.parallelMechanics = [];
+  hunt.checkpoints[0].flow = {
+    startNodeId: 'photo',
+    nodes: [
+      { id: 'photo', type: 'verify_image', prompt: 'Take a fresh photo.', referenceImages: [], next: 'done' },
+      { id: 'done', type: 'complete' },
+    ],
+  };
+  await insertHunt(hunt);
+  const firstTeam = await registerV3Team({
+    requestId: randomUUID(), huntId, intent: 'create', playerName: 'First Photographer', teamName: 'First Photo Team',
+    pin: '246812', memberPin: '135712', requestSource: `photo-reuse-first-${huntId}`,
+  });
+  const secondTeam = await registerV3Team({
+    requestId: randomUUID(), huntId, intent: 'create', playerName: 'Second Photographer', teamName: 'Second Photo Team',
+    pin: '246813', memberPin: '135713', requestSource: `photo-reuse-second-${huntId}`,
+  });
+  await Promise.all([approveTestTeam(firstTeam.summary.team.id), approveTestTeam(secondTeam.summary.team.id)]);
+  await Promise.all([
+    createRun(firstTeam.summary.team.id, firstTeam.summary.member.id, randomUUID()),
+    createRun(secondTeam.summary.team.id, secondTeam.summary.member.id, randomUUID()),
+  ]);
+  const image = await sharp({
+    create: { width: 40, height: 40, channels: 3, background: '#126c53' },
+  }).png().toBuffer();
+  const file = () => new File([new Uint8Array(image)], 'fresh-proof.png', { type: 'image/png' });
+  const firstMediaId = randomUUID();
+  const firstUpload = await uploadV3Photo(firstTeam.summary.team.id, firstTeam.summary.member.id, {
+    id: firstMediaId, file: file(), checkpointId: 'start', nodeId: 'photo',
+  });
+  assert.deepEqual(
+    await uploadV3Photo(firstTeam.summary.team.id, firstTeam.summary.member.id, {
+      id: firstMediaId, file: file(), checkpointId: 'start', nodeId: 'photo',
+    }),
+    firstUpload,
+    'retrying the same upload ID and owner remains idempotent',
+  );
+  await assert.rejects(
+    uploadV3Photo(secondTeam.summary.team.id, secondTeam.summary.member.id, {
+      id: randomUUID(), file: file(), checkpointId: 'start', nodeId: 'photo',
+    }),
+    /exact photo was already used/i,
+    'another team cannot recycle the same normalized image bytes',
+  );
+  const registeredHash = (await getPool().query(
+    'select content_hash from hunt_v3.photo_evidence_hashes where hunt_id=$1',
+    [huntId],
+  )).rows[0].content_hash;
+  const firstStorageKey = (await getPool().query(
+    'select storage_key from hunt_v3.media where id=$1',
+    [firstMediaId],
+  )).rows[0].storage_key;
+  await getPool().query('delete from hunt_v3.media where id=$1', [firstMediaId]);
+  await assert.rejects(
+    uploadV3Photo(secondTeam.summary.team.id, secondTeam.summary.member.id, {
+      id: firstMediaId, file: file(), checkpointId: 'start', nodeId: 'photo',
+    }),
+    /exact photo was already used/i,
+    'reusing the original upload ID cannot bypass cross-team ownership after media retention',
+  );
+  await assert.rejects(
+    uploadV3Photo(secondTeam.summary.team.id, secondTeam.summary.member.id, {
+      id: randomUUID(), file: file(), checkpointId: 'start', nodeId: 'photo',
+    }),
+    /exact photo was already used/i,
+    'media retention cannot erase the event-wide anti-reuse digest',
+  );
+  assert.equal((await getPool().query(
+    'select count(*)::int as count from hunt_v3.photo_evidence_hashes where hunt_id=$1 and content_hash=$2',
+    [huntId, registeredHash],
+  )).rows[0].count, 1);
+  assert.equal((await readdir(directory)).length, 1, 'rejected reuse does not create an orphan media object');
+  await getPool().query('delete from hunt_v3.media_deletions where storage_key=$1', [firstStorageKey]);
+});
+
 test('PostgreSQL V3 terminal photo reviews finalize evidence without resurrecting gameplay', { skip: !enabled }, async () => {
   const huntId = `v3-terminal-photo-${randomUUID().slice(0, 8)}`;
   const hunt = definition(huntId);
@@ -1130,13 +1957,17 @@ test('PostgreSQL V3 terminal photo reviews finalize evidence without resurrectin
     requestId: randomUUID(), huntId, intent: 'create', playerName: 'Terminal Player', teamName: 'Terminal Crew',
     pin: '640286', memberPin: '357913', requestSource: `terminal-photo-${huntId}`,
   });
+  await approveTestTeam(player.summary.team.id);
   const run = await createRun(player.summary.team.id, player.summary.member.id, randomUUID());
   const mediaId = randomUUID();
+  const mediaTaskStartedAt = await taskStartedAt(run.runId, 'start', 'photo');
   await getPool().query(
     `insert into hunt_v3.media(
-      id,hunt_id,team_id,run_id,member_id,checkpoint_id,node_id,kind,content_type,bytes,content_hash,storage_key,retention)
-      values($1,$2,$3,$4,$5,'start','photo','photo','image/jpeg',1,$6,$7,'after_review')`,
-    [mediaId, huntId, player.summary.team.id, run.runId, player.summary.member.id, 'e'.repeat(64), `${mediaId}-${randomUUID()}`],
+      id,hunt_id,team_id,run_id,member_id,checkpoint_id,node_id,kind,content_type,bytes,content_hash,storage_key,retention,
+      task_started_at)
+      values($1,$2,$3,$4,$5,'start','photo','photo','image/jpeg',1,$6,$7,'after_review',$8::timestamptz)`,
+    [mediaId, huntId, player.summary.team.id, run.runId, player.summary.member.id, 'e'.repeat(64),
+      `${mediaId}-${randomUUID()}`, mediaTaskStartedAt],
   );
   await applyRunCommand(player.summary.team.id, player.summary.member.id, run.runId, randomUUID(), {
     type: 'submit_photo', checkpointId: 'start', nodeId: 'photo', mediaId,

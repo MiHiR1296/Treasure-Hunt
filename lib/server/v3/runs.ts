@@ -1,15 +1,17 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { createInitialState, executeCommand, parseCommand } from '../../engine';
-import type { GameCommand, GameEvent, GameState, ScoreEntry } from '../../engine/types';
+import type { PuzzleDefinition } from '../../engine/puzzles';
+import { EngineError, type GameCommand, type GameEvent, type GameState, type HuntDefinition, type ScoreEntry } from '../../engine/types';
 import { assertSessionPlayable, assertStartWindow, beginReviewClockPause, elapsedMilliseconds, timerRemaining } from '../../engine/session';
-import { planRun } from '../../v3/planning';
-import type { ContributionCategory, ResolvedRunPlan, V3Definition } from '../../v3/types';
+import { planRunForFairnessRoute, selectBalancedPlan } from '../../v3/planning';
+import type { ContributionCategory, FairnessReport, ResolvedRunPlan, V3Definition } from '../../v3/types';
 import { getPool, transaction } from '../db';
 import { canonicalJson, digest, HttpError } from '../security';
+import { lockV3Hunt } from './locking';
 import { recalculateRecognition } from './recognition';
 import { materializeRunDefinition, materializeRunParallelMechanics, seededEngineRoutes, v3PlayerView } from './runtime';
-import { rateLimitV3 } from './security';
+import { isV3Uuid, rateLimitV3, reserveV3RunAttempt } from './security';
 
 type RunRow = {
   id: string;
@@ -34,7 +36,7 @@ type RunRow = {
 };
 
 function validRequestId(requestId: string) {
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestId)) {
+  if (!isV3Uuid(requestId)) {
     throw new HttpError(400, 'A valid request ID is required.');
   }
 }
@@ -50,12 +52,29 @@ async function loadRun(client: PoolClient, teamId: string, memberId: string, run
     join hunt_v3.teams t on t.id=r.team_id and t.status='active'
     join hunt_v3.hunts h on h.id=r.hunt_id
     join hunt_v3.team_members m on m.id=$2 and m.team_id=t.id and m.status='active'
+    join hunt_v3.run_members rm on rm.run_id=r.id and rm.team_id=t.id and rm.member_id=m.id
     join hunt_v3.hunt_versions v on v.hunt_id=r.hunt_id and v.version=r.hunt_version
     where r.team_id=$1 and ${selector}
     order by r.run_number desc limit 1${lock ? ' for update of r' : ''}`;
   const values = runId ? [teamId, memberId, runId] : [teamId, memberId];
   const run = (await client.query(query, values)).rows[0] as RunRow | undefined;
-  if (!run) throw new HttpError(404, runId ? 'Run not found.' : 'This team has no active run.');
+  if (!run) {
+    const excludedStartingRoster = await client.query(
+      `select 1 from hunt_v3.runs r
+        join hunt_v3.teams t on t.id=r.team_id and t.status='active'
+        join hunt_v3.team_members m on m.id=$2 and m.team_id=t.id and m.status='active'
+        where r.team_id=$1 and ${selector}
+          and not exists(
+            select 1 from hunt_v3.run_members rm where rm.run_id=r.id and rm.member_id=m.id
+          )
+        limit 1`,
+      values,
+    );
+    if (excludedStartingRoster.rowCount) {
+      throw new HttpError(409, 'This run is locked to its starting roster. You can take part in the team\'s next run.');
+    }
+    throw new HttpError(404, runId ? 'Run not found.' : 'This team has no active run.');
+  }
   return run;
 }
 
@@ -63,7 +82,8 @@ async function renderRun(client: PoolClient, run: RunRow, memberId: string) {
   const now = await databaseNow(client);
   const parallelProgress: Record<string, Array<{ laneId: string; memberId: string; memberName: string; occurredAt: string }>> = {};
   for (const mechanic of materializeRunParallelMechanics(run.definition, run.route_plan)) {
-    const mechanicStartedAt = run.engine_state.checkpoints[mechanic.checkpointId]?.startedAt ?? run.started_at;
+    const mechanicProgress = run.engine_state.checkpoints[mechanic.checkpointId];
+    const mechanicStartedAt = mechanicProgress?.nodes[mechanic.nodeId]?.startedAt ?? mechanicProgress?.startedAt ?? run.started_at;
     const rows = (await client.query(
       `select event.details->>'laneId' as lane_id,
         event.actor_member_id,member.name as member_name,event.occurred_at
@@ -71,8 +91,13 @@ async function renderRun(client: PoolClient, run: RunRow, memberId: string) {
         where event.run_id=$1 and event.event_type='parallel_lane_completed'
           and event.details->>'mechanicId'=$2
           and event.occurred_at>=$3::timestamptz
+          and event.revision>=coalesce((
+            select max(reset.revision) from hunt_v3.run_events reset
+            where reset.run_id=event.run_id and reset.event_type='attempt_budget_reset'
+              and reset.checkpoint_id=$4 and reset.node_id=$5
+          ),0)
         order by event.occurred_at desc,event.id desc`,
-      [run.id, mechanic.id, mechanicStartedAt],
+      [run.id, mechanic.id, mechanicStartedAt, mechanic.checkpointId, mechanic.nodeId],
     )).rows;
     const byLane = new Map<string, { laneId: string; memberId: string; memberName: string; occurredAt: string }>();
     for (const row of rows) {
@@ -99,6 +124,7 @@ async function renderRun(client: PoolClient, run: RunRow, memberId: string) {
 }
 
 export async function currentRunView(teamId: string, memberId: string, runId?: string) {
+  if (runId && !isV3Uuid(runId)) throw new HttpError(400, 'Invalid run.');
   return transaction(async client => {
     await client.query('set transaction isolation level repeatable read read only');
     return renderRun(client, await loadRun(client, teamId, memberId, runId), memberId);
@@ -112,25 +138,43 @@ function runPolicy(settings: V3Definition['settings'], previousOfficialAttempts:
   }
   const policy = settings.runPolicy;
   if (policy.mode === 'disabled') throw new HttpError(409, 'This hunt allows one official run per team.');
-  if (policy.mode === 'capped' && previousOfficialAttempts >= (policy.maxOfficialRuns ?? 1)) {
-    throw new HttpError(409, `This team has used all ${policy.maxOfficialRuns ?? 1} official runs.`);
+  if (policy.mode === 'practice-only') return { practice: true, eligible: false };
+  if (policy.mode === 'capped') {
+    const maximum = policy.maxOfficialRuns ?? 1;
+    if (previousOfficialAttempts >= maximum) {
+      if (requestedPractice) return { practice: true, eligible: false };
+      throw new HttpError(409, `This team has used all ${maximum} official runs. Start a practice run to keep playing.`);
+    }
+    if (requestedPractice) {
+      throw new HttpError(409, `Practice unlocks after this team uses all ${maximum} official runs. Start the next official run instead.`);
+    }
+    return { practice: false, eligible: true };
   }
-  const practice = requestedPractice || policy.mode === 'practice-only';
-  return { practice, eligible: !practice };
+  if (requestedPractice) {
+    throw new HttpError(409, 'Practice is unavailable while this team still has unlimited official attempts.');
+  }
+  return { practice: false, eligible: true };
 }
 
 async function terminalizeExpiredRun(
   client: PoolClient,
-  run: { id: string; team_id: string; hunt_id: string; engine_state: GameState },
+  run: { id: string; team_id: string; hunt_id: string; engine_state: GameState; definition: V3Definition },
   now: string,
 ) {
-  if (!run.engine_state.timer || (timerRemaining(run.engine_state, now) ?? 1) > 0) return false;
+  const timerExpired = Boolean(run.engine_state.timer) && (timerRemaining(run.engine_state, now) ?? 1) <= 0;
+  const scheduledEnd = !run.engine_state.timer ? run.definition.settings.endsAt : undefined;
+  const scheduleExpired = Boolean(scheduledEnd) && Number.isFinite(Date.parse(scheduledEnd!)) && Date.parse(now) >= Date.parse(scheduledEnd!);
+  if (!timerExpired && !scheduleExpired) return false;
+  const action = timerExpired ? 'run_timed_out' : 'run_schedule_ended';
+  const reason = timerExpired ? 'Session duration expired' : 'Published hunt end time passed';
   const elapsedMs = run.engine_state.startedAt ? elapsedMilliseconds(run.engine_state, run.engine_state.startedAt, now) : 0;
-  await client.query(
-    `update hunt_v3.runs set status='abandoned',eligible=false,elapsed_ms=$1,updated_at=$2
-      where id=$3 and status='active'`,
-    [elapsedMs, now, run.id],
+  const updated = await client.query(
+    `update hunt_v3.runs set status='abandoned',eligible=false,elapsed_ms=$1,
+      ineligibility_reason=coalesce(ineligibility_reason,$2),updated_at=$3
+      where id=$4 and status='active' returning id`,
+    [elapsedMs, reason, now, run.id],
   );
+  if (!updated.rowCount) return false;
   const ordinal = Number((await client.query(
     'select coalesce(max(ordinal),0)+1 as ordinal from hunt_v3.run_events where run_id=$1 and revision=$2',
     [run.id, run.engine_state.revision],
@@ -138,16 +182,75 @@ async function terminalizeExpiredRun(
   await client.query(
     `insert into hunt_v3.run_events(
       run_id,team_id,revision,ordinal,actor_kind,event_type,details,occurred_at)
-      values($1,$2,$3,$4,'system','run_timed_out',$5,$6)`,
-    [run.id, run.team_id, run.engine_state.revision, ordinal, { reason: 'session_duration_expired', elapsedMs }, now],
+      values($1,$2,$3,$4,'system',$5,$6,$7)`,
+    [run.id, run.team_id, run.engine_state.revision, ordinal, action, {
+      reason: timerExpired ? 'session_duration_expired' : 'hunt_schedule_ended',
+      elapsedMs,
+      ...(scheduledEnd ? { scheduledEnd } : {}),
+    }, now],
   );
   await client.query(
     `insert into hunt_v3.admin_events(action,hunt_id,team_id,run_id,reason,details)
-      values('run_timed_out',$1,$2,$3,'Session duration expired',$4)`,
-    [run.hunt_id, run.team_id, run.id, { elapsedMs }],
+      values($1,$2,$3,$4,$5,$6)`,
+    [action, run.hunt_id, run.team_id, run.id, reason, { elapsedMs, ...(scheduledEnd ? { scheduledEnd } : {}) }],
   );
   await updateLiveRollup(client, run.id);
   return true;
+}
+
+/**
+ * Persist timer or immutable schedule expiry even when a team closes the
+ * browser and never sends a follow-up command. Live/final organizer reads
+ * invoke this bounded sweep so a stale run cannot remain provisional forever.
+ */
+export async function terminalizeExpiredV3Runs(huntId: string, suppliedClient?: PoolClient) {
+  const sweep = async (client: PoolClient) => {
+    // Always acquire the parent before any run row. Besides keeping the
+    // explicit lock graph acyclic, this covers the hunt FK acquired by the
+    // timeout audit insert in terminalizeExpiredRun.
+    const hunt = await lockV3Hunt(client, huntId);
+    if (!hunt) return { examined: 0, expired: 0 };
+    const now = await databaseNow(client);
+    const observed = (await client.query(
+      `select run.id,run.team_id,run.hunt_id,run.engine_state,version.definition
+        from hunt_v3.runs run join hunt_v3.hunt_versions version
+          on version.hunt_id=run.hunt_id and version.version=run.hunt_version
+        where run.hunt_id=$1 and run.status='active'
+        order by run.team_id,run.run_number,run.id`,
+      [huntId],
+    )).rows as Array<{ id: string; team_id: string; hunt_id: string; engine_state: GameState; definition: V3Definition }>;
+    // Do not lock every healthy run on each five-second operations poll.
+    // Select only rows that appeared expired at one database timestamp, then
+    // re-read them under lock and re-check the authoritative pinned version.
+    const candidateIds = observed
+      .filter(run => {
+        if (run.engine_state.timer) return (timerRemaining(run.engine_state, now) ?? 1) <= 0;
+        const endsAt = run.definition.settings.endsAt;
+        return Boolean(endsAt) && Number.isFinite(Date.parse(endsAt!)) && Date.parse(now) >= Date.parse(endsAt!);
+      })
+      .map(run => run.id);
+    const candidateTeamIds = [...new Set(observed
+      .filter(run => candidateIds.includes(run.id))
+      .map(run => run.team_id))].sort();
+    if (candidateTeamIds.length) await client.query(
+      `select id from hunt_v3.teams
+        where hunt_id=$1 and id=any($2::uuid[]) order by id for share`,
+      [huntId, candidateTeamIds],
+    );
+    const rows = candidateIds.length ? (await client.query(
+      `select run.id,run.team_id,run.hunt_id,run.engine_state,version.definition
+        from hunt_v3.runs run join hunt_v3.hunt_versions version
+          on version.hunt_id=run.hunt_id and version.version=run.hunt_version
+        where run.hunt_id=$1 and run.id=any($2::uuid[]) and run.status='active'
+        order by run.team_id,run.run_number,run.id
+        for update of run`,
+      [huntId, candidateIds],
+    )).rows as Array<{ id: string; team_id: string; hunt_id: string; engine_state: GameState; definition: V3Definition }> : [];
+    let expired = 0;
+    for (const run of rows) if (await terminalizeExpiredRun(client, run, now)) expired += 1;
+    return { examined: observed.length, expired };
+  };
+  return suppliedClient ? sweep(suppliedClient) : transaction(sweep);
 }
 
 export async function createRun(teamId: string, memberId: string, requestId: string, requestedPractice = false) {
@@ -165,18 +268,37 @@ export async function createRun(teamId: string, memberId: string, requestId: str
     await rateLimitV3(`run-create:novel:${teamId}:${memberId}`, 30);
   }
   const outcome = await transaction(async client => {
-    const identity = (await client.query("select hunt_id from hunt_v3.teams where id=$1 and status='active'", [teamId])).rows[0];
+    const identity = (await client.query(
+      'select hunt_id,status,approval_status from hunt_v3.teams where id=$1',
+      [teamId],
+    )).rows[0];
     if (!identity) throw new HttpError(404, 'Team not found.');
+    if (identity.status !== 'active') throw new HttpError(409, 'This team is not allowed to start runs. Ask the organizer for help.');
+    if (identity.approval_status !== 'approved') {
+      throw new HttpError(409, 'Your team is awaiting organizer approval before it can start an official run.');
+    }
     const hunt = (await client.query(
       `select h.*,v.definition,v.fairness_report
         from hunt_v3.hunts h join hunt_v3.hunt_versions v on v.hunt_id=h.id and v.version=h.latest_version
-        where h.id=$1 for share of h`,
+        where h.id=$1 for update of h`,
       [identity.hunt_id],
-    )).rows[0] as ({ definition: V3Definition; fairness_report: { valid?: boolean } } & Record<string, unknown>) | undefined;
+    )).rows[0] as ({ definition: V3Definition; fairness_report: FairnessReport } & Record<string, unknown>) | undefined;
     if (!hunt) throw new HttpError(404, 'Hunt not found.');
-    await client.query('select id from hunt_v3.teams where id=$1 for update', [teamId]);
-    const member = (await client.query("select id from hunt_v3.team_members where id=$1 and team_id=$2 and status='active'", [memberId, teamId])).rows[0];
-    if (!member) throw new HttpError(401, 'Your team membership changed. Sign in again.');
+    const lockedIdentity = (await client.query(
+      'select status,approval_status from hunt_v3.teams where id=$1 for update',
+      [teamId],
+    )).rows[0];
+    if (!lockedIdentity || lockedIdentity.status !== 'active') {
+      throw new HttpError(409, 'This team is not allowed to start runs. Ask the organizer for help.');
+    }
+    if (lockedIdentity.approval_status !== 'approved') {
+      throw new HttpError(409, 'Your team is awaiting organizer approval before it can start an official run.');
+    }
+    const member = (await client.query(
+      "select id from hunt_v3.team_members where id=$1 and team_id=$2 and status='active' and checked_in_at is not null",
+      [memberId, teamId],
+    )).rows[0];
+    if (!member) throw new HttpError(401, 'Check in with an active team membership before starting a run.');
 
     const receipt = (await client.query(
       'select payload_hash,response from hunt_v3.command_receipts where scope_key=$1 and request_id=$2',
@@ -187,6 +309,16 @@ export async function createRun(teamId: string, memberId: string, requestId: str
       return renderRun(client, await loadRun(client, teamId, memberId, receipt.response.runId), memberId);
     }
     if (!hunt.fairness_report?.valid) throw new HttpError(409, 'This hunt version has not passed V3 fairness validation.');
+    const planCapacity = hunt.fairness_report.routes?.length ?? 0;
+    // Publication rejects an oversized capped policy. Clamp defensively at
+    // runtime as well so an old/manual database row cannot allocate more
+    // capped official attempts than the validated deck contains. Unlimited
+    // official replay remains an explicit organizer option.
+    const configuredRunPolicy = hunt.definition.settings.runPolicy;
+    const effectiveRunSettings: V3Definition['settings'] = configuredRunPolicy.mode === 'capped' &&
+      (configuredRunPolicy.maxOfficialRuns ?? 1) > planCapacity
+      ? { ...hunt.definition.settings, runPolicy: { mode: 'capped', maxOfficialRuns: planCapacity } }
+      : hunt.definition.settings;
     const activeMembers = Number((await client.query(
       "select count(*)::int as count from hunt_v3.team_members where team_id=$1 and status='active' and checked_in_at is not null",
       [teamId],
@@ -197,9 +329,13 @@ export async function createRun(teamId: string, memberId: string, requestId: str
     }
 
     let active = (await client.query(
-      "select id,team_id,hunt_id,engine_state from hunt_v3.runs where team_id=$1 and status='active' order by run_number desc limit 1 for update",
+      `select run.id,run.team_id,run.hunt_id,run.engine_state,version.definition
+        from hunt_v3.runs run join hunt_v3.hunt_versions version
+          on version.hunt_id=run.hunt_id and version.version=run.hunt_version
+        where run.team_id=$1 and run.status='active'
+        order by run.run_number desc limit 1 for update of run`,
       [teamId],
-    )).rows[0] as ({ id: string; team_id: string; hunt_id: string; engine_state: GameState } | undefined);
+    )).rows[0] as ({ id: string; team_id: string; hunt_id: string; engine_state: GameState; definition: V3Definition } | undefined);
     let terminalizedExpiredRun = false;
     if (active) {
       const now = await databaseNow(client);
@@ -217,15 +353,43 @@ export async function createRun(teamId: string, memberId: string, requestId: str
       return renderRun(client, await loadRun(client, teamId, memberId, active.id), memberId);
     }
 
+    // Check the immutable publication window before run policy/allocation. If
+    // this request just terminalized a ghost-active attempt, defer the error
+    // until after COMMIT so the terminal transition is not rolled back.
+    const startWindowNow = await databaseNow(client);
+    try {
+      assertStartWindow({ ...hunt.definition, schemaVersion: 1 }, String(hunt.status), startWindowNow);
+    } catch (error) {
+      if (terminalizedExpiredRun && error instanceof EngineError) {
+        return { deferredEngineError: { code: error.code, message: error.message } } as const;
+      }
+      throw error;
+    }
+
     const counts = (await client.query(
       `select count(*)::int as total,
-        count(*) filter(where not practice)::int as official
+        count(*) filter(
+          where not practice
+            and ineligibility_reason is distinct from 'Team disqualified by organizer'
+        )::int as official,
+        count(*) filter(where practice)::int as practice
         from hunt_v3.runs where team_id=$1`,
       [teamId],
     )).rows[0];
     let policy: ReturnType<typeof runPolicy>;
     try {
-      policy = runPolicy(hunt.definition.settings, Number(counts.official), requestedPractice);
+      // Practice is a one-way competition boundary. Once a team has rehearsed
+      // any already-exposed route, a later disqualification restore or policy
+      // change must not turn that identity back into an official competitor.
+      // It may keep replaying, but every subsequent run stays practice-only.
+      if (Number(counts.practice) > 0) {
+        if (!requestedPractice) {
+          throw new HttpError(409, 'This team has already entered practice and cannot return to official competition. Ask the organizer for help; this identity can start practice runs only.');
+        }
+        policy = { practice: true, eligible: false };
+      } else {
+        policy = runPolicy(effectiveRunSettings, Number(counts.official), requestedPractice);
+      }
     } catch (error) {
       // The expired attempt is durable even when the organizer's run policy
       // prevents a replacement. Throwing inside this transaction would roll
@@ -242,13 +406,61 @@ export async function createRun(teamId: string, memberId: string, requestId: str
       throw error;
     }
     const privateSeed = randomBytes(32).toString('base64url');
-    const plan = planRun(hunt.definition, privateSeed);
-    const now = await databaseNow(client);
+    const routeKeyByDigest = new Map((hunt.fairness_report.routes ?? []).map(route => [digest(route.routeKey), route.routeKey]));
+    const allocationRows = (await client.query(
+      `select id,team_id,plan_key,allocation_cycle,practice,engine_state from hunt_v3.runs
+        where hunt_id=$1 and hunt_version=$2
+        order by created_at,id`,
+      [identity.hunt_id, hunt.definition.version],
+    )).rows as Array<{
+      id: string;
+      team_id: string;
+      plan_key: string;
+      allocation_cycle: number;
+      practice: boolean;
+      engine_state: GameState;
+    }>;
+    const resolvedUsage = allocationRows.flatMap(row => {
+      const routeKey = routeKeyByDigest.get(String(row.plan_key));
+      return routeKey ? [{ row, teamId: String(row.team_id), routeKey }] : [];
+    });
+    const officialUsage = resolvedUsage.filter(item => !item.row.practice);
+    const practiceRoutes = policy.practice
+      ? (hunt.fairness_report.routes ?? []).filter(route => officialUsage.some(item => item.teamId === teamId && item.routeKey === route.routeKey))
+      : [];
+    if (policy.practice && !practiceRoutes.length) {
+      throw new HttpError(409, 'Practice could not recover one of this team\'s official routes. Ask the organizer for help.');
+    }
+    const allocation = policy.practice
+      ? selectBalancedPlan(
+        practiceRoutes,
+        resolvedUsage.filter(item => item.row.practice && item.teamId === teamId),
+        teamId,
+        privateSeed,
+      )
+      : selectBalancedPlan(hunt.fairness_report.routes ?? [], officialUsage, teamId, privateSeed);
+    const planDigest = digest(allocation.route.routeKey);
+    const practiceSource = policy.practice
+      ? [...resolvedUsage].reverse().find(item => !item.row.practice && item.teamId === teamId && item.routeKey === allocation.route.routeKey)?.row
+      : undefined;
+    if (policy.practice && !practiceSource) {
+      throw new HttpError(409, 'Practice could not recover its official source run. Ask the organizer for help.');
+    }
+    const allocationCycle = policy.practice
+      ? Math.max(-1, ...allocationRows
+        .filter(row => row.team_id === teamId && row.plan_key === planDigest)
+        .map(row => Number(row.allocation_cycle))) + 1
+      : allocation.cycle;
+    const plan = planRunForFairnessRoute(hunt.definition, privateSeed, allocation.route);
+    const now = startWindowNow;
     const runId = randomUUID();
     const engineDefinition = materializeRunDefinition(hunt.definition, plan);
     assertStartWindow(engineDefinition, String(hunt.status), now);
+    const routeAssignments = practiceSource
+      ? (practiceSource.engine_state.routeAssignments ?? []).map(assignment => ({ ...assignment, assignedAt: now }))
+      : seededEngineRoutes(engineDefinition, privateSeed, now);
     const state = createInitialState(engineDefinition, runId, now, {
-      routeAssignments: seededEngineRoutes(engineDefinition, privateSeed, now),
+      routeAssignments,
       initialVariables: plan.variables,
     });
     state.startingRoster = (await client.query(
@@ -263,11 +475,12 @@ export async function createRun(teamId: string, memberId: string, requestId: str
       : null;
     await client.query(
       `insert into hunt_v3.runs(
-        id,team_id,hunt_id,hunt_version,run_number,private_seed,seed_commitment,route_plan,resolved_variables,
+        id,team_id,hunt_id,hunt_version,run_number,private_seed,seed_commitment,plan_key,allocation_cycle,route_plan,resolved_variables,
         engine_state,status,practice,eligible,score,progress,current_checkpoint_id,started_at,completed_at,elapsed_ms,recognition_closes_at)
-        values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,0,$14,$15,$16,$17,$18,$19)`,
-      [runId, teamId, identity.hunt_id, hunt.definition.version, runNumber, privateSeed, digest(privateSeed), plan, plan.variables,
-        state, state.status === 'completed' ? 'completed' : 'active', policy.practice, policy.eligible, stateProgress(state),
+        values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,0,$16,$17,$18,$19,$20,$21)`,
+      [runId, teamId, identity.hunt_id, hunt.definition.version, runNumber, privateSeed, digest(privateSeed),
+        planDigest, allocationCycle, plan, plan.variables, state,
+        state.status === 'completed' ? 'completed' : 'active', policy.practice, policy.eligible, stateProgress(state),
         state.activeCheckpointId, state.startedAt ?? now, completedAt, elapsedMs, recognitionClosesAt],
     );
     await client.query(
@@ -279,7 +492,14 @@ export async function createRun(teamId: string, memberId: string, requestId: str
     const started = (await client.query(
       `insert into hunt_v3.run_events(run_id,team_id,revision,ordinal,event_type,actor_kind,actor_member_id,occurred_at,details,request_id)
         values($1,$2,0,1,'run_started','member',$3,$4,$5,$6) returning id`,
-      [runId, teamId, memberId, now, { runNumber, practice: policy.practice }, requestId],
+      [runId, teamId, memberId, now, {
+        runNumber,
+        practice: policy.practice,
+        allocationCycle,
+        priorEventUses: allocation.eventUseCount,
+        priorTeamUses: allocation.teamUseCount,
+        ...(practiceSource ? { practiceSourceRunId: practiceSource.id } : {}),
+      }, requestId],
     )).rows[0];
     for (const [index, event] of state.events.entries()) {
       await client.query(
@@ -301,9 +521,13 @@ export async function createRun(teamId: string, memberId: string, requestId: str
     );
     return renderRun(client, await loadRun(client, teamId, memberId, runId), memberId);
   });
-  if ('deferredRunPolicyError' in outcome) {
+  if ('deferredRunPolicyError' in outcome && outcome.deferredRunPolicyError) {
     const error = outcome.deferredRunPolicyError;
     throw new HttpError(error.status, error.message, error.details);
+  }
+  if ('deferredEngineError' in outcome && outcome.deferredEngineError) {
+    const error = outcome.deferredEngineError;
+    throw new EngineError(error.code, error.message);
   }
   return outcome;
 }
@@ -311,6 +535,73 @@ export async function createRun(teamId: string, memberId: string, requestId: str
 export function stateProgress(state: GameState) {
   const values = Object.values(state.checkpoints);
   return values.length ? values.filter(checkpoint => ['completed', 'skipped'].includes(checkpoint.status)).length / values.length : 0;
+}
+
+function puzzleInteractionLimit(puzzle: PuzzleDefinition) {
+  switch (puzzle.type) {
+    case 'multiple_choice': return 1;
+    // A quiz answer is immutable once recorded. Its allowance is exactly one
+    // final choice per question plus the explicit finish action.
+    case 'quiz': return puzzle.questions.length + 1;
+    case 'text': return 6;
+    // Stateful UI controls submit after each player move. These allowances
+    // cover a plausible solve/correction path but stay well below permutation
+    // enumeration for publishable puzzle sizes.
+    case 'jigsaw': return puzzle.pieces.length * 3;
+    case 'matching': return puzzle.left.length + Math.ceil(puzzle.left.length / 2);
+    case 'sequence': return (puzzle.items.length * (puzzle.items.length - 1)) / 2 + Math.ceil(puzzle.items.length / 2);
+    case 'rotation': return puzzle.tiles.length * 3;
+    case 'sudoku': {
+      const blanks = puzzle.givens.flat().filter(value => value === 0).length;
+      return Math.max(3, blanks * 3);
+    }
+    case 'word_search': return puzzle.words.length * 4 + 2;
+    case 'crossword': return Math.min(1_000, puzzle.entries.reduce((total, entry) => total + entry.answer.length, 0) * 2 + 4);
+  }
+}
+
+function runAttemptBudget(
+  definition: HuntDefinition,
+  state: GameState,
+  command: GameCommand,
+  teamId: string,
+  runId: string,
+) {
+  if (command.type === 'verify') {
+    const node = definition.checkpoints.find(checkpoint => checkpoint.id === command.checkpointId)
+      ?.flow.nodes.find(candidate => candidate.id === command.nodeId);
+    const isCurrentNode = state.activeCheckpointId === command.checkpointId &&
+      state.checkpoints[command.checkpointId]?.activeNodeId === command.nodeId;
+    if (isCurrentNode && node && ['verify_qr', 'verify_code', 'verify_answer'].includes(node.type)) {
+      return {
+        scope: `run-verifier:aggregate:${teamId}:${runId}:${command.checkpointId}:${command.nodeId}`,
+        maximum: 6,
+      };
+    }
+  }
+  if (command.type === 'submit_puzzle') {
+    const node = definition.checkpoints.find(checkpoint => checkpoint.id === command.checkpointId)
+      ?.flow.nodes.find(candidate => candidate.id === command.nodeId);
+    const isCurrentNode = state.activeCheckpointId === command.checkpointId &&
+      state.checkpoints[command.checkpointId]?.activeNodeId === command.nodeId;
+    if (isCurrentNode && node?.type === 'puzzle') {
+      return {
+        scope: `run-puzzle-submit:aggregate:${teamId}:${runId}:${command.checkpointId}:${command.nodeId}`,
+        maximum: puzzleInteractionLimit(node.puzzle),
+      };
+    }
+  }
+  if (command.type === 'submit_hint_puzzle') {
+    const hint = definition.checkpoints.find(checkpoint => checkpoint.id === command.checkpointId)
+      ?.hints.find(candidate => candidate.id === command.hintId);
+    if (state.activeCheckpointId === command.checkpointId && hint?.content.type === 'puzzle') {
+      return {
+        scope: `run-hint-puzzle-submit:aggregate:${teamId}:${runId}:${command.checkpointId}:${command.hintId}`,
+        maximum: puzzleInteractionLimit(hint.content.puzzle),
+      };
+    }
+  }
+  return undefined;
 }
 
 function contributionFor(command: GameCommand, event: GameEvent): { category: ContributionCategory; credit: number; evidence: string } | null {
@@ -413,6 +704,7 @@ export async function updateLiveRollup(client: PoolClient, runId: string) {
 }
 
 export async function applyRunCommand(teamId: string, memberId: string, runId: string, requestId: string, input: unknown) {
+  if (!isV3Uuid(runId)) throw new HttpError(400, 'Invalid run.');
   validRequestId(requestId);
   const command = parseCommand(input);
   if (command.type === 'start_session' || command.type === 'update_roster') throw new HttpError(400, 'Run and roster controls use their dedicated V3 actions.');
@@ -430,36 +722,39 @@ export async function applyRunCommand(teamId: string, memberId: string, runId: s
     // bucket (and growing arbitrary limiter keys) by inventing run UUIDs.
     await rateLimitV3(`run-command:member:${teamId}:${memberId}`, 800);
     await rateLimitV3(`run-command:novel:${runId}:${memberId}`, 400);
-    const interactionLimit = (type: string | undefined) =>
-      type && ['jigsaw', 'sudoku', 'word_search', 'crossword', 'rotation', 'quiz', 'matching', 'sequence'].includes(type)
-        ? 240
-        : 20;
+    const needsAggregateAttemptBudget = command.type === 'verify' || command.type === 'submit_puzzle' || command.type === 'submit_hint_puzzle';
+    const preflightRun = needsAggregateAttemptBudget ? (await getPool().query(
+      `select v.definition,r.route_plan,r.engine_state from hunt_v3.runs r
+        join hunt_v3.teams t on t.id=r.team_id and t.status='active'
+        join hunt_v3.run_members rm on rm.run_id=r.id and rm.team_id=t.id and rm.member_id=$3
+        join hunt_v3.team_members m on m.id=rm.member_id and m.team_id=t.id and m.status='active'
+        join hunt_v3.hunt_versions v on v.hunt_id=r.hunt_id and v.version=r.hunt_version
+        where r.id=$1 and r.team_id=$2`,
+      [runId, teamId, memberId],
+    )).rows[0] as { definition: V3Definition; route_plan: ResolvedRunPlan; engine_state: GameState } | undefined : undefined;
+    const definition = preflightRun ? materializeRunDefinition(preflightRun.definition, preflightRun.route_plan) : undefined;
+    const preflightBudget = definition && preflightRun
+      ? runAttemptBudget(definition, preflightRun.engine_state, command, teamId, runId)
+      : undefined;
     if (command.type === 'verify') {
-      await rateLimitV3(`run-verifier:${runId}:${memberId}:${command.checkpointId}:${command.nodeId}`, 12);
+      if (preflightBudget) {
+        await rateLimitV3(`run-verifier:${runId}:${memberId}:${command.checkpointId}:${command.nodeId}`, 12);
+      }
     } else if (command.type === 'submit_puzzle' || command.type === 'submit_hint_puzzle') {
-      const preflightRun = (await getPool().query(
-        `select v.definition,r.route_plan from hunt_v3.runs r
-          join hunt_v3.teams t on t.id=r.team_id and t.status='active'
-          join hunt_v3.team_members m on m.id=$3 and m.team_id=t.id and m.status='active'
-          join hunt_v3.hunt_versions v on v.hunt_id=r.hunt_id and v.version=r.hunt_version
-          where r.id=$1 and r.team_id=$2`,
-        [runId, teamId, memberId],
-      )).rows[0] as { definition: V3Definition; route_plan: ResolvedRunPlan } | undefined;
-      const definition = preflightRun ? materializeRunDefinition(preflightRun.definition, preflightRun.route_plan) : undefined;
       if (command.type === 'submit_puzzle') {
-        const node = definition?.checkpoints.find(checkpoint => checkpoint.id === command.checkpointId)
-          ?.flow.nodes.find(candidate => candidate.id === command.nodeId);
-        await rateLimitV3(
-          `run-puzzle-submit:${runId}:${memberId}:${command.checkpointId}:${command.nodeId}`,
-          interactionLimit(node?.type === 'puzzle' ? node.puzzle.type : undefined),
-        );
+        if (preflightBudget) {
+          await rateLimitV3(
+            `run-puzzle-submit:${runId}:${memberId}:${command.checkpointId}:${command.nodeId}`,
+            Math.max(12, preflightBudget.maximum),
+          );
+        }
       } else if (command.type === 'submit_hint_puzzle') {
-        const hint = definition?.checkpoints.find(checkpoint => checkpoint.id === command.checkpointId)
-          ?.hints.find(candidate => candidate.id === command.hintId);
-        await rateLimitV3(
-          `run-hint-puzzle-submit:${runId}:${memberId}:${command.checkpointId}:${command.hintId}`,
-          interactionLimit(hint?.content.type === 'puzzle' ? hint.content.puzzle.type : undefined),
-        );
+        if (preflightBudget) {
+          await rateLimitV3(
+            `run-hint-puzzle-submit:${runId}:${memberId}:${command.checkpointId}:${command.hintId}`,
+            Math.max(12, preflightBudget.maximum),
+          );
+        }
       }
     } else if (command.type === 'verify_gps') {
       await rateLimitV3(`run-gps:${runId}:${memberId}:${command.checkpointId}:${command.nodeId}`, 60);
@@ -485,13 +780,30 @@ export async function applyRunCommand(teamId: string, memberId: string, runId: s
     }
     const definition = materializeRunDefinition(run.definition, run.route_plan);
     if (run.status !== 'active') throw new HttpError(409, 'This run is already complete. Start a replay to continue.');
+    const attemptBudget = runAttemptBudget(definition, run.engine_state, command, teamId, run.id);
+    if (attemptBudget) {
+      await reserveV3RunAttempt(client, {
+        ...attemptBudget,
+        runId: run.id,
+        teamId,
+        requestId,
+        payloadHash,
+      });
+    }
+    const photoTaskStartedAt = command.type === 'submit_photo'
+      ? run.engine_state.checkpoints[command.checkpointId]?.nodes[command.nodeId]?.startedAt
+      : undefined;
+    if (command.type === 'submit_photo' && !photoTaskStartedAt) {
+      throw new HttpError(409, 'This photo belongs to an earlier task. Refresh and upload a new photo.');
+    }
     if (command.type === 'submit_photo') {
       const media = await client.query(
         `select id from hunt_v3.media where id=$1 and team_id=$2 and run_id=$3 and member_id=$4
           and checkpoint_id=$5 and node_id=$6 and kind='photo' and review_status='pending'
           and parallel_mechanic_id is null and parallel_lane_id is null
+          and task_started_at=$7::timestamptz
           and (expires_at is null or expires_at>now()) for update`,
-        [command.mediaId, teamId, run.id, memberId, command.checkpointId, command.nodeId],
+        [command.mediaId, teamId, run.id, memberId, command.checkpointId, command.nodeId, photoTaskStartedAt],
       );
       if (!media.rowCount) throw new HttpError(400, 'Take or upload a photo for this task before submitting it.');
     }
@@ -505,8 +817,9 @@ export async function applyRunCommand(teamId: string, memberId: string, runId: s
           where id=$2 and team_id=$3 and run_id=$4 and member_id=$5
             and checkpoint_id=$6 and node_id=$7 and kind='photo' and review_status='pending'
             and parallel_mechanic_id is null and parallel_lane_id is null
+            and task_started_at=$8::timestamptz
           returning submitted_at`,
-        [now, command.mediaId, teamId, run.id, memberId, command.checkpointId, command.nodeId],
+        [now, command.mediaId, teamId, run.id, memberId, command.checkpointId, command.nodeId, photoTaskStartedAt],
       );
       if (!submitted.rowCount) throw new HttpError(409, 'This photo is no longer available for review. Upload it again.');
       reviewStartedAt = new Date(submitted.rows[0].submitted_at).toISOString();

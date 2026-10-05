@@ -58,7 +58,13 @@ test('V3 maintenance preserves submitted review evidence and terminal reviews re
     [huntId, definition, 'e'.repeat(64), { valid: true, issues: [], routes: [] }],
   );
 
-  const identities = new Map<string, { teamId: string; memberId: string; runId: string }>();
+  const identities = new Map<string, {
+    teamId: string;
+    memberId: string;
+    runId: string;
+    targetStatus: 'waiting' | 'active' | 'completed';
+    taskStartedAt: string;
+  }>();
   const addRun = async (key: string, code: string, status: 'waiting' | 'active' | 'completed') => {
     const teamId = randomUUID(), memberId = randomUUID(), runId = randomUUID();
     await getPool().query(
@@ -71,24 +77,38 @@ test('V3 maintenance preserves submitted review evidence and terminal reviews re
         values($1,$2,$3,$4,'active')`,
       [memberId, teamId, `Member ${key}`, `member-${key.toLowerCase()}`],
     );
-    const startedAt = status === 'waiting' ? null : '2026-10-01T09:00:00.000Z';
-    const completedAt = status === 'completed' ? '2026-10-01T10:00:00.000Z' : null;
+    const startedAt = '2026-10-01T09:00:00.000Z';
     await getPool().query(
       `insert into hunt_v3.runs(
         id,team_id,hunt_id,hunt_version,run_number,private_seed,seed_commitment,route_plan,resolved_variables,
         engine_state,status,score,progress,started_at,completed_at,elapsed_ms)
         values($1,$2,$3,1,1,$4,$5,$6,'{}',$7,$8,17,0,$9,$10,$11)`,
-      [runId, teamId, huntId, randomUUID().replaceAll('-', ''), 'f'.repeat(64),
+      [runId, teamId, huntId, randomUUID().replaceAll('-', ''), randomUUID().replaceAll('-', '').repeat(2),
         { checkpointIds: [], routeCheckpointIds: [], variables: {}, challenges: [] },
-        { revision: 0, status, startedAt, completedAt, clockPauses: [], checkpoints: {}, events: [], ledger: [] },
-        status, startedAt, completedAt, status === 'completed' ? 3_600_000 : null],
+        {
+          revision: 0,
+          status: 'active',
+          startedAt,
+          activeCheckpointId: 'checkpoint',
+          clockPauses: [],
+          checkpoints: {
+            checkpoint: {
+              status: 'active',
+              activeNodeId: 'photo-node',
+              nodes: { 'photo-node': { status: 'active', startedAt } },
+            },
+          },
+          events: [],
+          ledger: [],
+        },
+        'active', startedAt, null, null],
     );
     await getPool().query(
       `insert into hunt_v3.run_members(run_id,team_id,member_id,member_name_snapshot)
         values($1,$2,$3,$4)`,
       [runId, teamId, memberId, `Member ${key}`],
     );
-    identities.set(key, { teamId, memberId, runId });
+    identities.set(key, { teamId, memberId, runId, targetStatus: status, taskStartedAt: startedAt });
   };
   await addRun('Active', 'T-701', 'active');
   await addRun('Waiting', 'T-702', 'waiting');
@@ -107,14 +127,15 @@ test('V3 maintenance preserves submitted review evidence and terminal reviews re
     await getPool().query(
       `insert into hunt_v3.media(
         id,hunt_id,team_id,run_id,member_id,checkpoint_id,node_id,kind,content_type,bytes,content_hash,
-        storage_key,review_status,review_reason,retention,created_at,submitted_at,reviewed_at,expires_at)
+        storage_key,review_status,review_reason,retention,created_at,submitted_at,reviewed_at,expires_at,task_started_at)
         values($1,$2,$3,$4,$5,'checkpoint','photo-node','photo','image/jpeg',10,$6,$7,$8,$9,'after_review',
-          now()-interval '10 days',$10,$11,$12)`,
-      [id, huntId, identity.teamId, identity.runId, identity.memberId, 'a'.repeat(64), storageKey,
+          now()-interval '10 days',$10,$11,$12,$13::timestamptz)`,
+      [id, huntId, identity.teamId, identity.runId, identity.memberId, id.replaceAll('-', '').repeat(2), storageKey,
         reviewStatus, reviewStatus === 'approved' ? 'Previously reviewed' : null,
         input.submitted ? new Date(Date.now() - 9 * 86_400_000).toISOString() : null,
         reviewStatus === 'approved' ? new Date(Date.now() - 8 * 86_400_000).toISOString() : null,
-        input.expired ? new Date(Date.now() - 86_400_000).toISOString() : new Date(Date.now() + 6 * 86_400_000).toISOString()],
+        input.expired ? new Date(Date.now() - 86_400_000).toISOString() : new Date(Date.now() + 6 * 86_400_000).toISOString(),
+        identity.taskStartedAt],
     );
     media.set(key, id);
   };
@@ -123,6 +144,24 @@ test('V3 maintenance preserves submitted review evidence and terminal reviews re
   await addMedia('unsubmitted', 'Active', { submitted: false, expired: true });
   await addMedia('approved', 'Active', { submitted: true, reviewStatus: 'approved', expired: true });
   await addMedia('terminalPending', 'Terminal', { submitted: true, expired: false });
+
+  const waiting = identities.get('Waiting')!;
+  await getPool().query(
+    `update hunt_v3.runs set status='waiting',engine_state=jsonb_set(engine_state,'{status}','"waiting"')
+      where id=$1`,
+    [waiting.runId],
+  );
+  const terminal = identities.get('Terminal')!;
+  const terminalCompletedAt = '2026-10-01T10:00:00.000Z';
+  await getPool().query(
+    `update hunt_v3.runs set status='completed',completed_at=$1::timestamptz,elapsed_ms=3600000,
+      engine_state=jsonb_set(
+        jsonb_set(engine_state,'{status}','"completed"'),
+        '{completedAt}',to_jsonb(($1::timestamptz)::text)
+      )
+      where id=$2`,
+    [terminalCompletedAt, terminal.runId],
+  );
 
   const removed = await cleanupV3ExpiredMedia(getPool());
   assert.ok(removed >= 2, 'ordinary expired uploads are removed');
@@ -142,7 +181,6 @@ test('V3 maintenance preserves submitted review evidence and terminal reviews re
   assert.equal(queue.find(item => item.id === media.get('waitingPending'))?.runStatus, 'waiting');
   assert.equal(queue.find(item => item.id === media.get('terminalPending'))?.runStatus, 'completed', 'terminal evidence remains visible for audit');
 
-  const terminal = identities.get('Terminal')!;
   const before = (await getPool().query(
     'select status,score,progress,completed_at,engine_state from hunt_v3.runs where id=$1',
     [terminal.runId],

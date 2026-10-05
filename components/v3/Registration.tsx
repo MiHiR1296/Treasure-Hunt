@@ -106,8 +106,8 @@ export default function Registration({ onRegistered }: { onRegistered: (summary:
       </label>
 
       {selected && <div className="rounded-2xl bg-emerald-50 p-4 text-sm leading-relaxed text-emerald-950">
-        {registrationMode === 'self-serve' && (selected.registrationOpen ? <><strong>Open team registration.</strong> Create a new crew or join one with its official team code.</> : <><strong>New team registration is closed.</strong> Existing crews can still join with their official team code.</>)}
-        {registrationMode === 'organizer-assigned' && <><strong>Organizer-assigned teams.</strong> Use the team code and team PIN from your organizer, then choose your own private member PIN.</>}
+        {registrationMode === 'self-serve' && (selected.registrationOpen ? <><strong>Open team registration.</strong> Create a new crew or join one with its official team code. Once the organizer approves a crew, only its already-declared names may join.</> : <><strong>New team registration is closed.</strong> Existing declared crew members can still join with their official team code.</>)}
+        {registrationMode === 'organizer-assigned' && <><strong>Organizer-assigned teams.</strong> Use the team code and team PIN from your organizer, then choose your own private member PIN. Every teammate must join before the team starts its first run.</>}
         {registrationMode === 'rostered' && <><strong>Rostered event.</strong> Claim your listed identity using the team code, team PIN, your personal claim PIN, and the same name the organizer entered.</>}
       </div>}
 
@@ -131,7 +131,7 @@ export default function Registration({ onRegistered }: { onRegistered: (summary:
 
       {intent === 'create' && <label htmlFor="v3-other-members" className="block text-sm font-bold text-stone-800">Other crew members <span className="font-normal text-stone-500">(optional)</span>
         <textarea id="v3-other-members" name="otherMembers" rows={3} disabled={busy} className={inputStyle} placeholder="One name per line" />
-        <span className="mt-2 block text-xs font-normal text-stone-500">Add known teammates now. Each person should later join on their own device so their contributions are authenticated.</span>
+        <span className="mt-2 block text-xs font-normal text-stone-500">Declare every teammate now. Organizer approval locks this list; each person should later join on their own device so contributions are authenticated.</span>
       </label>}
 
       <label htmlFor="v3-pin" className="block text-sm font-bold text-stone-800">Team PIN

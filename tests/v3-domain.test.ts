@@ -11,9 +11,11 @@ import {
   enumerateEligibleRoutes,
   isRecognitionWindowOpen,
   planRun,
+  planRunForFairnessRoute,
   publicParallelMechanics,
   renderVariableTemplate,
   resolveVariables,
+  selectBalancedPlan,
   validateFairness,
   validateParallelMechanics,
   validateRecognitionVote,
@@ -57,6 +59,8 @@ function definition(): V3Definition {
       },
     ],
     settings: {
+      minTeamSize: 3,
+      maxTeamSize: 4,
       registrationMode: 'rostered',
       runPolicy: { mode: 'unlimited' },
       leaderboardPolicy: {
@@ -91,10 +95,11 @@ function definition(): V3Definition {
       },
       variableGenerators: {
         colour: { type: 'choice', values: ['BLUE', 'GREEN', 'RED'] },
-        code: { type: 'code', alphabet: 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789', length: 6 },
+        code: { type: 'code', alphabet: 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789', length: 7 },
         number: { type: 'integer', minimum: 2, maximum: 10, step: 2 },
       },
       fairnessPolicy: {
+        minimumDistinctPlans: 3,
         durationToleranceMinutes: 0,
         maxResolvedRoutes: 100,
         requireTravelEstimates: true,
@@ -106,6 +111,7 @@ function definition(): V3Definition {
         lanes: [
           { id: 'north', label: 'North QR', type: 'qr', token: 'PRIVATE-QR' },
           { id: 'south', label: 'South code', type: 'code', code: 'PRIVATE-CODE' },
+          { id: 'proof', label: 'Fresh photo', type: 'photo' },
         ],
       }],
     },
@@ -173,6 +179,30 @@ test('private-seed resolution is deterministic, domain-separated, and seed-free'
   assert.equal(deterministicIndex('seed', 'one-domain', 10, 'x'), deterministicIndex('seed', 'one-domain', 10, 'x'))
 })
 
+test('balanced plan allocation prevents per-team repeats until the deck is exhausted and balances teams', () => {
+  const hunt = definition()
+  const routes = validateFairness(hunt).routes
+  assert.equal(routes.length, 3)
+  const usage: Array<{ routeKey: string; teamId: string }> = []
+  const teamOne = Array.from({ length: routes.length }, (_, index) => {
+    const selection = selectBalancedPlan(routes, usage, 'team-one', `seed-one-${index}`)
+    usage.push({ routeKey: selection.route.routeKey, teamId: 'team-one' })
+    return selection
+  })
+  assert.equal(new Set(teamOne.map(selection => selection.route.routeKey)).size, routes.length)
+  assert.deepEqual(teamOne.map(selection => selection.cycle), [0, 0, 0])
+
+  const repeat = selectBalancedPlan(routes, usage, 'team-one', 'seed-one-repeat')
+  assert.equal(repeat.cycle, 1)
+  const otherTeam = selectBalancedPlan(routes, usage, 'team-two', 'seed-two')
+  assert.equal(otherTeam.eventUseCount, 1, 'new teams receive one of the event-wide least-used plans')
+
+  const materialized = planRunForFairnessRoute(hunt, 'fresh-private-seed', routes[0])
+  assert.deepEqual(materialized.routeCheckpointIds, routes[0].routeCheckpointIds)
+  assert.deepEqual(materialized.checkpointIds, routes[0].checkpointIds)
+  assert.ok(!JSON.stringify(materialized).includes('fresh-private-seed'))
+})
+
 test('route planning enumerates choices and permutations while enforcing avoided transitions', () => {
   const enumeration = enumerateEligibleRoutes({
     startCheckpointId: 'start', finaleCheckpointId: 'finale', requiredCheckpointIds: ['required'],
@@ -238,6 +268,21 @@ test('fairness validation fails closed for score, duration, and proof-limit adva
   assert.ok(validateFairness(limited).issues.some(issue => issue.code === 'route_limit_exceeded'))
 })
 
+test('competitive time tie-breaks require zero tolerance, complete travel estimates, and the configured plan capacity', () => {
+  const unsafeClock = definition()
+  unsafeClock.settings.fairnessPolicy.durationToleranceMinutes = 1
+  unsafeClock.settings.fairnessPolicy.requireTravelEstimates = false
+  const clockIssues = validateFairness(unsafeClock).issues
+  assert.ok(clockIssues.some(issue => issue.code === 'unsafe_duration_tiebreak' && issue.path.endsWith('durationToleranceMinutes')))
+  assert.ok(clockIssues.some(issue => issue.code === 'unsafe_duration_tiebreak' && issue.path.endsWith('requireTravelEstimates')))
+
+  const insufficient = definition()
+  insufficient.settings.fairnessPolicy.minimumDistinctPlans = 4
+  const variation = validateFairness(insufficient).issues.find(issue => issue.code === 'insufficient_route_variation')
+  assert.ok(variation)
+  assert.match(variation.message, /produces 3 distinct structural plans/i)
+})
+
 test('source-bound bonuses are excluded from or included in the competitive fairness proof', () => {
   const excluded = definition()
   excluded.checkpoints.find(item => item.id === 'park')!.flow = {
@@ -263,7 +308,8 @@ test('fairness fails closed for scored dud QRs whose opportunity is not route-bo
   competitive.checkpoints.find(item => item.id === 'library-qr')!.flow = {
     startNodeId: 'scan',
     nodes: [
-      { id: 'scan', type: 'verify_qr', prompt: 'Scan the marker.', token: 'RIGHT-MARKER', next: 'done' },
+      { id: 'scan', type: 'verify_qr', prompt: 'Scan the marker.', token: 'RIGHT-MARKER', next: 'photo' },
+      { id: 'photo', type: 'verify_image', prompt: 'Take a fresh marker photo.', referenceImages: [], next: 'done' },
       { id: 'done', type: 'complete' },
     ],
   }
@@ -317,6 +363,24 @@ test('fairness excludes disabled hint rewards from ceilings and rejects every co
   assert.deepEqual(new Set(excludedReport.routes.map(route => route.maximumScore)), new Set([40]))
 })
 
+test('competitive time bonuses fail closed even when route score ceilings match', () => {
+  const hunt = definition()
+  for (const checkpoint of hunt.checkpoints) {
+    checkpoint.timeBonus = {
+      withinSeconds: checkpoint.id === 'library-riddle' ? 1 : 3600,
+      points: 10,
+    }
+  }
+  const report = validateFairness(hunt)
+  assert.ok(report.issues.some(issue =>
+    issue.code === 'non_neutral_competitive_bonus' && issue.path.endsWith('.timeBonus.rankingImpact')),
+  'equal maximum points do not prove that route-specific time thresholds are equally attainable')
+
+  for (const checkpoint of hunt.checkpoints) checkpoint.timeBonus!.rankingImpact = 'excluded'
+  assert.equal(validateFairness(hunt).issues.some(issue =>
+    issue.path.endsWith('.timeBonus.rankingImpact')), false)
+})
+
 test('checkpoint ceilings include puzzle rewards earned before taking a fallback', () => {
   const checkpointWithFallback = checkpoint('puzzle-fallback', 10)
   checkpointWithFallback.flow = {
@@ -341,6 +405,31 @@ test('checkpoint ceilings include puzzle rewards earned before taking a fallback
   if (puzzleNode.type !== 'puzzle' || puzzleNode.puzzle.type !== 'word_search') throw new Error('Expected word-search fixture.')
   puzzleNode.puzzle.bonusRankingImpact = 'excluded'
   assert.equal(checkpointMaximumScore(excluded), 110)
+})
+
+test('disabled recovery fallbacks cannot inflate an executable route ceiling', () => {
+  const disabledFallback: CheckpointDefinition = {
+    id: 'disabled-fallback', title: 'Disabled fallback', basePoints: 10, hints: [],
+    flow: {
+      startNodeId: 'message',
+      nodes: [
+        {
+          id: 'message', type: 'show_text', text: 'Continue.', next: 'done',
+          fallback: { nodeId: 'bonus', label: 'Organizer recovery only', enabled: false },
+        },
+        { id: 'bonus', type: 'add_points', amount: 10, label: 'Unreachable bonus', next: 'done' },
+        { id: 'done', type: 'complete' },
+      ],
+    },
+  }
+  assert.equal(checkpointMaximumScore(disabledFallback), 10)
+
+  const hunt = definition()
+  hunt.checkpoints = hunt.checkpoints.map(item => item.id === 'park'
+    ? { ...disabledFallback, id: 'park', title: 'Park' }
+    : item)
+  assert.ok(validateFairness(hunt).issues.some(issue => issue.code === 'unequal_route_scores'),
+    'an unreachable disabled fallback cannot make a lower-scoring route appear equal')
 })
 
 test('fairness keeps every official and excluded score cache inside PostgreSQL integer bounds', () => {
@@ -406,6 +495,325 @@ test('fairness rejects seeded internal branches with different score ceilings', 
     ],
   }
   assert.ok(validateFairness(variableHunt).issues.some(issue => issue.message.includes('Generated-variable branch')))
+})
+
+test('publication rejects hidden-duration branches, immediate fallbacks, and skewed variant weights', () => {
+  const hiddenDuration = definition()
+  const park = hiddenDuration.checkpoints.find(item => item.id === 'park')!
+  park.flow = {
+    startNodeId: 'route',
+    nodes: [
+      { id: 'route', type: 'random_branch', choices: [{ next: 'instant', weight: 1 }, { next: 'long-task', weight: 1 }] },
+      { id: 'instant', type: 'show_text', text: 'Done.', next: 'done' },
+      { id: 'long-task', type: 'verify_answer', prompt: 'Solve the long task.', answers: ['answer'], next: 'done' },
+      { id: 'done', type: 'complete' },
+    ],
+  }
+  assert.ok(validateFairness(hiddenDuration).issues.some(issue => issue.code === 'unmodeled_internal_variation'))
+
+  const timeBranch = definition()
+  timeBranch.checkpoints.find(item => item.id === 'park')!.flow = {
+    startNodeId: 'route',
+    nodes: [
+      {
+        id: 'route', type: 'branch', condition: { type: 'time', after: '08:00', before: '17:00' },
+        ifTrue: 'short', ifFalse: 'long',
+      },
+      { id: 'short', type: 'show_text', text: 'Short task.', next: 'done' },
+      { id: 'long', type: 'show_text', text: 'Potentially much longer task.', next: 'done' },
+      { id: 'done', type: 'complete' },
+    ],
+  }
+  assert.ok(validateFairness(timeBranch).issues.some(issue =>
+    issue.code === 'unmodeled_internal_variation' && issue.message.includes('time branches')))
+
+  const playerChoice = definition()
+  playerChoice.checkpoints.find(item => item.id === 'park')!.flow = {
+    startNodeId: 'route',
+    nodes: [
+      {
+        id: 'route', type: 'choose_path', prompt: 'Choose.',
+        choices: [{ id: 'short', label: 'Short', next: 'short' }, { id: 'long', label: 'Long', next: 'long' }],
+      },
+      { id: 'short', type: 'show_text', text: 'Short task.', next: 'done' },
+      { id: 'long', type: 'show_text', text: 'Potentially much longer task.', next: 'done' },
+      { id: 'done', type: 'complete' },
+    ],
+  }
+  assert.ok(validateFairness(playerChoice).issues.some(issue =>
+    issue.code === 'unmodeled_internal_variation' && issue.message.includes('Player-selected paths')))
+
+  const fallback = definition()
+  fallback.checkpoints.find(item => item.id === 'park')!.flow = {
+    startNodeId: 'code',
+    nodes: [
+      { id: 'code', type: 'verify_code', prompt: 'Find the code.', code: 'STRONG-CODE', next: 'done', fallback: { nodeId: 'done', label: 'Skip', enabled: true } },
+      { id: 'done', type: 'complete' },
+    ],
+  }
+  assert.ok(validateFairness(fallback).issues.some(issue => issue.code === 'competitive_fallback_not_allowed'))
+
+  const weighted = definition()
+  weighted.settings.challengePools.library.variants[1].weight = 9
+  assert.ok(validateFairness(weighted).issues.some(issue => issue.code === 'unequal_variant_weights'))
+})
+
+test('shareable GPS and QR proofs require independent photo or organizer evidence', () => {
+  const gpsOnly = definition()
+  gpsOnly.checkpoints.find(item => item.id === 'park')!.flow = {
+    startNodeId: 'gps',
+    nodes: [
+      { id: 'gps', type: 'verify_gps', prompt: 'Arrive.', latitude: 19, longitude: 73, radiusMeters: 50, maxAccuracyMeters: 30, next: 'done' },
+      { id: 'done', type: 'complete' },
+    ],
+  }
+  assert.ok(validateFairness(gpsOnly).issues.some(issue => issue.code === 'gps_requires_companion_evidence'))
+
+  const compound = clone(gpsOnly)
+  const compoundPark = compound.checkpoints.find(item => item.id === 'park')!
+  compoundPark.flow = {
+    startNodeId: 'gps',
+    nodes: [
+      { id: 'gps', type: 'verify_gps', prompt: 'Arrive.', latitude: 19, longitude: 73, radiusMeters: 50, maxAccuracyMeters: 30, next: 'photo' },
+      { id: 'photo', type: 'verify_image', prompt: 'Show the current landmark.', referenceImages: [], next: 'done' },
+      { id: 'done', type: 'complete' },
+    ],
+  }
+  assert.equal(validateFairness(compound).issues.some(issue => issue.code === 'gps_requires_companion_evidence'), false)
+
+  const qrOnly = definition()
+  qrOnly.checkpoints.find(item => item.id === 'park')!.flow = {
+    startNodeId: 'qr',
+    nodes: [
+      { id: 'qr', type: 'verify_qr', prompt: 'Scan the marker.', token: 'private-token', next: 'done' },
+      { id: 'done', type: 'complete' },
+    ],
+  }
+  assert.ok(validateFairness(qrOnly).issues.some(issue => issue.code === 'qr_requires_companion_evidence'))
+
+  const qrWithOrganizer = clone(qrOnly)
+  qrWithOrganizer.checkpoints.find(item => item.id === 'park')!.flow = {
+    startNodeId: 'qr',
+    nodes: [
+      { id: 'qr', type: 'verify_qr', prompt: 'Scan the marker.', token: 'private-token', next: 'marshal' },
+      { id: 'marshal', type: 'verify_organizer', prompt: 'Show the live location to the marshal.', next: 'done' },
+      { id: 'done', type: 'complete' },
+    ],
+  }
+  assert.equal(validateFairness(qrWithOrganizer).issues.some(issue => issue.code === 'qr_requires_companion_evidence'), false)
+
+  const organizerBeforeQr = clone(qrWithOrganizer)
+  organizerBeforeQr.checkpoints.find(item => item.id === 'park')!.flow = {
+    startNodeId: 'marshal',
+    nodes: [
+      { id: 'marshal', type: 'verify_organizer', prompt: 'Meet the marshal.', next: 'qr' },
+      { id: 'qr', type: 'verify_qr', prompt: 'Scan later.', token: 'private-token', next: 'done' },
+      { id: 'done', type: 'complete' },
+    ],
+  }
+  assert.ok(validateFairness(organizerBeforeQr).issues.some(issue => issue.code === 'qr_requires_companion_evidence'),
+    'evidence before the shareable verifier cannot corroborate the later action')
+
+  qrWithOrganizer.settings.parallelMechanics = [{
+    id: 'automatic-gate', checkpointId: 'park', nodeId: 'marshal', timeWindowSeconds: 60,
+    lanes: [
+      { id: 'one', label: 'First code', type: 'code', code: 'PRIVATE-CODE-ONE' },
+      { id: 'two', label: 'Second code', type: 'code', code: 'PRIVATE-CODE-TWO' },
+    ],
+  }]
+  assert.ok(validateFairness(qrWithOrganizer).issues.some(issue => issue.code === 'qr_requires_companion_evidence'),
+    'a gate completed automatically by parallel lanes is not independent organizer proof')
+
+  qrWithOrganizer.settings.parallelMechanics[0].lanes.push({ id: 'proof', label: 'Fresh proof', type: 'photo' })
+  assert.equal(validateFairness(qrWithOrganizer).issues.some(issue => issue.code === 'qr_requires_companion_evidence'), false,
+    'a parallel gate backed by a required reviewed-photo lane is independent companion evidence')
+})
+
+test('static answers and codes require companion evidence while run-scoped codes do not', () => {
+  const staticCode = definition()
+  staticCode.checkpoints.find(item => item.id === 'park')!.flow = {
+    startNodeId: 'code',
+    nodes: [
+      { id: 'code', type: 'verify_code', prompt: 'Enter the code.', code: 'LONG-STATIC-CODE', next: 'done' },
+      { id: 'done', type: 'complete' },
+    ],
+  }
+  assert.ok(validateFairness(staticCode).issues.some(issue =>
+    issue.code === 'shareable_verifier_requires_companion_evidence'))
+
+  const disabledFallback = clone(staticCode)
+  const disabledFallbackPark = disabledFallback.checkpoints.find(item => item.id === 'park')!
+  disabledFallbackPark.flow = {
+    startNodeId: 'code',
+    nodes: [
+      {
+        id: 'code', type: 'verify_code', prompt: 'Enter the code.', code: 'LONG-STATIC-CODE',
+        next: 'photo', fallback: { nodeId: 'done', label: 'Organizer recovery only', enabled: false },
+      },
+      { id: 'photo', type: 'verify_image', prompt: 'Take fresh proof.', referenceImages: [], next: 'done' },
+      { id: 'done', type: 'complete' },
+    ],
+  }
+  assert.equal(validateFairness(disabledFallback).issues.some(issue =>
+    issue.code === 'shareable_verifier_requires_companion_evidence'), false,
+  'a disabled player fallback is not an executable evidence bypass')
+
+  const staticAnswer = clone(staticCode)
+  staticAnswer.checkpoints.find(item => item.id === 'park')!.flow = {
+    startNodeId: 'answer',
+    nodes: [
+      { id: 'answer', type: 'verify_answer', prompt: 'Solve it.', answers: ['LONG STATIC ANSWER'], next: 'photo' },
+      { id: 'photo', type: 'verify_image', prompt: 'Photograph today\'s marked object.', referenceImages: [], next: 'done' },
+      { id: 'done', type: 'complete' },
+    ],
+  }
+  assert.equal(validateFairness(staticAnswer).issues.some(issue =>
+    issue.code === 'shareable_verifier_requires_companion_evidence'), false)
+
+  const generated = clone(staticCode)
+  generated.checkpoints.find(item => item.id === 'park')!.flow = {
+    startNodeId: 'answer',
+    nodes: [
+      { id: 'answer', type: 'verify_answer', prompt: 'Enter the run code.', answers: ['{{code}}', 'ALT-{{code}}'], next: 'done' },
+      { id: 'done', type: 'complete' },
+    ],
+  }
+  assert.equal(validateFairness(generated).issues.some(issue =>
+    issue.code === 'shareable_verifier_requires_companion_evidence'), false)
+
+  const independentAlternatives = clone(generated)
+  independentAlternatives.settings.variableGenerators.alternateCode = {
+    type: 'code', alphabet: 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789', length: 7,
+  }
+  const independentAnswer = independentAlternatives.checkpoints.find(item => item.id === 'park')!.flow.nodes[0]
+  if (independentAnswer.type !== 'verify_answer') throw new Error('Expected answer verifier.')
+  independentAnswer.answers.push('{{alternateCode}}')
+  assert.ok(validateFairness(independentAlternatives).issues.some(issue =>
+    issue.code === 'shareable_verifier_requires_companion_evidence'),
+  'independent accepted run codes multiply valid guesses and reduce aggregate verifier entropy')
+
+  const oneStaticAlternative = clone(generated)
+  const answerNode = oneStaticAlternative.checkpoints.find(item => item.id === 'park')!.flow.nodes[0]
+  if (answerNode.type !== 'verify_answer') throw new Error('Expected answer verifier.')
+  answerNode.answers.push('SHARED-BACKDOOR')
+  assert.ok(validateFairness(oneStaticAlternative).issues.some(issue =>
+    issue.code === 'shareable_verifier_requires_companion_evidence'))
+
+  const staticPuzzle = definition()
+  staticPuzzle.checkpoints.find(item => item.id === 'park')!.flow = {
+    startNodeId: 'puzzle',
+    nodes: [
+      {
+        id: 'puzzle', type: 'puzzle', prompt: 'Choose the answer.',
+        puzzle: {
+          type: 'multiple_choice', prompt: 'Which marker?',
+          options: [{ id: 'blue', label: 'Blue' }, { id: 'green', label: 'Green' }],
+          correctOptionId: 'blue',
+        },
+        next: 'done',
+      },
+      { id: 'done', type: 'complete' },
+    ],
+  }
+  assert.ok(validateFairness(staticPuzzle).issues.some(issue =>
+    issue.code === 'shareable_verifier_requires_companion_evidence'),
+  'a reusable puzzle solution can be forwarded just like a static answer')
+
+  const generatedTextPuzzle = clone(staticPuzzle)
+  generatedTextPuzzle.checkpoints.find(item => item.id === 'park')!.flow = {
+    startNodeId: 'puzzle',
+    nodes: [
+      {
+        id: 'puzzle', type: 'puzzle', prompt: 'Enter this run code.',
+        puzzle: { type: 'text', prompt: 'Run code', answers: ['{{code}}'] }, next: 'done',
+      },
+      { id: 'done', type: 'complete' },
+    ],
+  }
+  assert.equal(validateFairness(generatedTextPuzzle).issues.some(issue =>
+    issue.code === 'shareable_verifier_requires_companion_evidence'), false)
+
+  const independentTextAnswers = clone(generatedTextPuzzle)
+  independentTextAnswers.settings.variableGenerators.alternateCode = {
+    type: 'code', alphabet: 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789', length: 7,
+  }
+  const textPuzzleNode = independentTextAnswers.checkpoints.find(item => item.id === 'park')!.flow.nodes[0]
+  if (textPuzzleNode.type !== 'puzzle' || textPuzzleNode.puzzle.type !== 'text') throw new Error('Expected text puzzle.')
+  textPuzzleNode.puzzle.answers.push('{{alternateCode}}')
+  assert.ok(validateFairness(independentTextAnswers).issues.some(issue =>
+    issue.code === 'shareable_verifier_requires_companion_evidence'))
+})
+
+test('shareable hint puzzles require companion evidence on every checkpoint path', () => {
+  const staticHint = definition()
+  const finale = staticHint.checkpoints.find(item => item.id === 'finale')!
+  finale.hints = [{
+    id: 'shortcut', title: 'Unlock the clue', cost: 0,
+    content: {
+      type: 'puzzle',
+      puzzle: {
+        type: 'multiple_choice', prompt: 'Which one?',
+        options: [{ id: 'one', label: 'One' }, { id: 'two', label: 'Two' }],
+        correctOptionId: 'one',
+      },
+      reveal: { type: 'text', text: 'Use your run-specific clue.' },
+    },
+  }]
+  assert.ok(validateFairness(staticHint).issues.some(issue =>
+    issue.path.endsWith('.hints[0].content.puzzle') &&
+    issue.code === 'shareable_verifier_requires_companion_evidence'))
+
+  const withPhoto = clone(staticHint)
+  withPhoto.checkpoints.find(item => item.id === 'finale')!.flow = {
+    startNodeId: 'photo',
+    nodes: [
+      { id: 'photo', type: 'verify_image', prompt: 'Take fresh proof.', referenceImages: [], next: 'done' },
+      { id: 'done', type: 'complete' },
+    ],
+  }
+  assert.equal(validateFairness(withPhoto).issues.some(issue =>
+    issue.path.endsWith('.hints[0].content.puzzle') &&
+    issue.code === 'shareable_verifier_requires_companion_evidence'), false)
+
+  const generatedTextHint = clone(staticHint)
+  const hint = generatedTextHint.checkpoints.find(item => item.id === 'finale')!.hints[0]
+  if (hint.content.type !== 'puzzle') throw new Error('Expected puzzle hint.')
+  hint.content.puzzle = { type: 'text', prompt: 'Enter the private run code.', answers: ['{{code}}'] }
+  assert.equal(validateFairness(generatedTextHint).issues.some(issue =>
+    issue.path.endsWith('.hints[0].content.puzzle') &&
+    issue.code === 'shareable_verifier_requires_companion_evidence'), false)
+})
+
+test('parallel static codes require a photo lane but run-scoped generated codes do not', () => {
+  const staticCodes = definition()
+  staticCodes.settings.parallelMechanics![0].lanes = [
+    { id: 'one', label: 'First static code', type: 'code', code: 'STATIC-CODE-ONE' },
+    { id: 'two', label: 'Second static code', type: 'code', code: 'STATIC-CODE-TWO' },
+  ]
+  assert.ok(validateParallelMechanics(staticCodes).some(issue => issue.path.endsWith('.lanes')))
+
+  const generatedCodes = clone(staticCodes)
+  generatedCodes.settings.parallelMechanics![0].lanes = [
+    { id: 'one', label: 'First run code', type: 'code', code: '{{code}}' },
+    { id: 'two', label: 'Second run code', type: 'code', code: 'SOUTH-{{code}}' },
+  ]
+  assert.deepEqual(validateParallelMechanics(generatedCodes), [])
+
+  const impossibleRoster = clone(staticCodes)
+  impossibleRoster.settings.minTeamSize = 2
+  impossibleRoster.settings.maxTeamSize = 2
+  impossibleRoster.settings.parallelMechanics![0].lanes.push({ id: 'proof', label: 'Fresh proof', type: 'photo' })
+  const rosterIssues = validateParallelMechanics(impossibleRoster)
+  assert.ok(rosterIssues.some(issue => issue.message.includes('maximum team size')))
+  assert.ok(rosterIssues.some(issue => issue.message.includes('Minimum team size')))
+
+  const duplicateGate = clone(generatedCodes)
+  duplicateGate.settings.parallelMechanics!.push({
+    ...clone(duplicateGate.settings.parallelMechanics![0]),
+    id: 'same-gate-second-mechanic',
+  })
+  assert.ok(validateParallelMechanics(duplicateGate).some(issue =>
+    issue.message.includes('Only one parallel mechanic')))
 })
 
 test('fairness rejects every automatic runtime branch with unequal score ceilings', () => {
@@ -490,7 +898,7 @@ test('leaderboard completion ordering preserves PostgreSQL microseconds inside o
   ]
   const main = buildMainLeaderboard(runs, definition().settings.leaderboardPolicy)
   assert.deepEqual(main.map(entry => [entry.teamCode, entry.rank]), [
-    ['T-001', 1], ['T-002', 2], ['T-003', 2],
+    ['T-001', 1], ['T-002', 2], ['T-003', 3],
   ])
 })
 
@@ -555,7 +963,7 @@ test('parallel mechanic validation requires distinct lanes and public projection
   const hunt = definition()
   assert.deepEqual(validateParallelMechanics(hunt), [])
   const projection = publicParallelMechanics(hunt)
-  assert.equal(projection[0].lanes.length, 2)
+  assert.equal(projection[0].lanes.length, 3)
   assert.ok(!JSON.stringify(projection).includes('PRIVATE'))
 
   const invalid = clone(hunt)

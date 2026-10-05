@@ -1,4 +1,5 @@
 import type {
+  FairnessRouteResult,
   ParallelMechanic,
   PublicParallelMechanic,
   ResolvedChallenge,
@@ -7,7 +8,7 @@ import type {
   V3Definition,
 } from './types'
 import { deterministicIndex, deterministicWeightedIndex } from './seed'
-import { resolveVariables } from './variables'
+import { resolveVariables, usesStrongRunCodeTemplate } from './variables'
 
 const DEFAULT_ENUMERATION_LIMIT = 10_000
 const HARD_ENUMERATION_LIMIT = 100_000
@@ -129,6 +130,9 @@ function validatePool(definition: V3Definition, routeCheckpointId: string) {
   if (new Set(pool.variants.map(variant => variant.id)).size !== pool.variants.length) {
     throw new RunPlanningError('invalid_challenge_pool', `Challenge pool "${pool.id}" has duplicate variant IDs.`)
   }
+  if (new Set(pool.variants.map(variant => variant.checkpointId)).size !== pool.variants.length) {
+    throw new RunPlanningError('invalid_challenge_pool', `Challenge pool "${pool.id}" must use a different checkpoint for every meaningful variant.`)
+  }
   for (const variant of pool.variants) {
     if (!definition.checkpoints.some(checkpoint => checkpoint.id === variant.checkpointId)) {
       throw new RunPlanningError('invalid_challenge_pool', `Challenge variant "${variant.id}" references an unknown checkpoint.`)
@@ -179,14 +183,121 @@ export function planRun(definition: V3Definition, privateSeed: string): Resolved
   }
 }
 
+/**
+ * Rebuilds an exhaustively validated structural plan while resolving fresh,
+ * run-scoped variables from the private seed. The route result is private
+ * publication data and is never accepted from a player request.
+ */
+export function planRunForFairnessRoute(
+  definition: V3Definition,
+  privateSeed: string,
+  route: FairnessRouteResult,
+): ResolvedRunPlan {
+  if (route.routeCheckpointIds.length !== route.checkpointIds.length) {
+    throw new RunPlanningError('invalid_route_plan', 'The validated route has mismatched physical and engine checkpoint counts.')
+  }
+  let pooledIndex = 0
+  const challenges: ResolvedChallenge[] = route.routeCheckpointIds.map((routeCheckpointId, index) => {
+    const checkpointId = route.checkpointIds[index]
+    const pool = definition.settings.challengePools[routeCheckpointId]
+    if (!pool) {
+      if (checkpointId !== routeCheckpointId || !definition.checkpoints.some(checkpoint => checkpoint.id === checkpointId)) {
+        throw new RunPlanningError('invalid_route_plan', `Validated route checkpoint "${routeCheckpointId}" no longer matches the published definition.`)
+      }
+      return { routeCheckpointId, checkpointId }
+    }
+    validatePool(definition, routeCheckpointId)
+    const variantId = route.challengeVariantIds[pooledIndex++]
+    const variant = pool.variants.find(candidate => candidate.id === variantId && candidate.checkpointId === checkpointId)
+    if (!variant) {
+      throw new RunPlanningError('invalid_challenge_pool', `Validated challenge variant "${variantId ?? ''}" no longer matches pool "${pool.id}".`)
+    }
+    return { routeCheckpointId, poolId: pool.id, variantId: variant.id, checkpointId }
+  })
+  if (pooledIndex !== route.challengeVariantIds.length) {
+    throw new RunPlanningError('invalid_challenge_pool', 'The validated route contains unused challenge variants.')
+  }
+  return {
+    routeCheckpointIds: [...route.routeCheckpointIds],
+    checkpointIds: [...route.checkpointIds],
+    challenges,
+    variables: resolveVariables(privateSeed, definition.settings.variableGenerators),
+  }
+}
+
+export interface PlanAllocationUsage {
+  routeKey: string
+  teamId: string
+}
+
+export interface BalancedPlanSelection {
+  route: FairnessRouteResult
+  /** Zero-based pass through the plan deck for this team. */
+  cycle: number
+  /** Number of prior event assignments of this exact structural plan. */
+  eventUseCount: number
+  /** Number of prior assignments of this plan to the requesting team. */
+  teamUseCount: number
+}
+
+/**
+ * Chooses from the least-used plans for the team first, then the least-used
+ * plans event-wide. A private seed breaks only true ties, so the persistence
+ * layer can serialize starts without making allocation predictable.
+ */
+export function selectBalancedPlan(
+  routes: readonly FairnessRouteResult[],
+  usage: readonly PlanAllocationUsage[],
+  teamId: string,
+  privateSeed: string,
+): BalancedPlanSelection {
+  if (!routes.length) throw new RunPlanningError('no_eligible_routes', 'The published plan deck is empty.')
+  const known = new Set(routes.map(route => route.routeKey))
+  if (known.size !== routes.length) throw new RunPlanningError('invalid_route_plan', 'The published plan deck contains duplicate keys.')
+  const eventCounts = new Map(routes.map(route => [route.routeKey, 0]))
+  const teamCounts = new Map(routes.map(route => [route.routeKey, 0]))
+  for (const item of usage) {
+    if (!known.has(item.routeKey)) continue
+    eventCounts.set(item.routeKey, (eventCounts.get(item.routeKey) ?? 0) + 1)
+    if (item.teamId === teamId) teamCounts.set(item.routeKey, (teamCounts.get(item.routeKey) ?? 0) + 1)
+  }
+  const minimumTeamUse = Math.min(...teamCounts.values())
+  const leastUsedByTeam = routes.filter(route => teamCounts.get(route.routeKey) === minimumTeamUse)
+  const minimumEventUse = Math.min(...leastUsedByTeam.map(route => eventCounts.get(route.routeKey) ?? 0))
+  const candidates = leastUsedByTeam
+    .filter(route => eventCounts.get(route.routeKey) === minimumEventUse)
+    .sort((left, right) => left.routeKey.localeCompare(right.routeKey))
+  const route = candidates[deterministicIndex(
+    privateSeed,
+    'balanced-plan-allocation',
+    candidates.length,
+    routes.map(candidate => candidate.routeKey).sort().join('\u001f'),
+    teamId,
+    minimumTeamUse,
+    minimumEventUse,
+  )]
+  return {
+    route,
+    cycle: minimumTeamUse,
+    eventUseCount: eventCounts.get(route.routeKey) ?? 0,
+    teamUseCount: teamCounts.get(route.routeKey) ?? 0,
+  }
+}
+
 export interface ParallelMechanicIssue { path: string; message: string }
 
 /** Validates private lane configuration; the command layer still enforces one distinct actor per lane. */
-export function validateParallelMechanics(definition: V3Definition): ParallelMechanicIssue[] {
+export function validateParallelMechanics(
+  definition: V3Definition,
+  authoredSecurityDefinition: V3Definition = definition,
+): ParallelMechanicIssue[] {
   const issues: ParallelMechanicIssue[] = []
   const mechanics = definition.settings.parallelMechanics ?? []
   if (new Set(mechanics.map(mechanic => mechanic.id)).size !== mechanics.length) {
     issues.push({ path: 'settings.parallelMechanics', message: 'Parallel mechanic IDs must be unique.' })
+  }
+  if (new Set(mechanics.map(mechanic => `${mechanic.checkpointId}\u0000${mechanic.nodeId}`)).size !== mechanics.length) {
+    issues.push({ path: 'settings.parallelMechanics', message: 'Only one parallel mechanic may complete a checkpoint organizer gate.' })
   }
   for (const [mechanicIndex, mechanic] of mechanics.entries()) {
     const path = `settings.parallelMechanics[${mechanicIndex}]`
@@ -198,6 +309,12 @@ export function validateParallelMechanics(definition: V3Definition): ParallelMec
       issues.push({ path: `${path}.timeWindowSeconds`, message: 'Time window must be between 5 seconds and 24 hours.' })
     }
     if (mechanic.lanes.length < 2 || mechanic.lanes.length > 20) issues.push({ path: `${path}.lanes`, message: 'Parallel mechanics need 2 to 20 distinct-member lanes.' })
+    if (mechanic.lanes.length > (definition.settings.maxTeamSize ?? 50)) {
+      issues.push({ path: `${path}.lanes`, message: 'Parallel lane count cannot exceed the maximum team size because every lane needs a distinct starting-roster member.' })
+    }
+    if (mechanic.lanes.length > (definition.settings.minTeamSize ?? 1)) {
+      issues.push({ path: `${path}.lanes`, message: 'Minimum team size must be at least the parallel lane count so a legitimately started team cannot be trapped at this gate.' })
+    }
     if (new Set(mechanic.lanes.map(lane => lane.id)).size !== mechanic.lanes.length) issues.push({ path: `${path}.lanes`, message: 'Parallel lane IDs must be unique.' })
     mechanic.lanes.forEach((lane, laneIndex) => {
       const lanePath = `${path}.lanes[${laneIndex}]`
@@ -208,6 +325,17 @@ export function validateParallelMechanics(definition: V3Definition): ParallelMec
         issues.push({ path: `${lanePath}.location`, message: 'Lane location is invalid.' })
       }
     })
+    const authoredMechanic = authoredSecurityDefinition.settings.parallelMechanics?.find(source => source.id === mechanic.id)
+    const hasShareableLane = mechanic.lanes.some(lane => {
+      if (lane.type === 'gps' || lane.type === 'qr') return true
+      if (lane.type !== 'code') return false
+      const authoredLane = authoredMechanic?.lanes.find(source => source.id === lane.id)
+      const authoredCode = authoredLane?.type === 'code' ? authoredLane.code : lane.code
+      return !usesStrongRunCodeTemplate(authoredCode, authoredSecurityDefinition.settings.variableGenerators)
+    })
+    if (hasShareableLane && !mechanic.lanes.some(lane => lane.type === 'photo')) {
+      issues.push({ path: `${path}.lanes`, message: 'Browser GPS can be spoofed, and QR or static code values can be shared. A parallel mechanic containing one must also require a photo-evidence lane; a high-entropy run-scoped generated code is the only code-lane exception.' })
+    }
   }
   return issues
 }

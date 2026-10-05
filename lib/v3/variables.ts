@@ -4,6 +4,64 @@ import { deterministicIndex, deterministicPick } from './seed'
 
 const VARIABLE_KEY = /^[A-Za-z][A-Za-z0-9_]{0,63}$/
 const PLACEHOLDER = /{{\s*([A-Za-z][A-Za-z0-9_]*)\s*}}/g
+export const MINIMUM_GENERATED_CODE_ENTROPY_BITS = 32
+
+export function generatedCodeEntropyBits(generator: VariableGenerator): number {
+  if (generator.type !== 'code') return 0
+  const symbols = Array.from(generator.alphabet)
+  // Verifiers always apply NFKC and are case-insensitive by default. Treat a
+  // generator as security-bearing only when its alphabet is stable under that
+  // comparison. This deliberately excludes Unicode lookalikes, whitespace,
+  // punctuation and upper/lowercase duplicates from the entropy claim.
+  if (symbols.some(symbol => !/^[A-Za-z0-9]$/.test(symbol))) return 0
+  const foldedSymbols = symbols.map(symbol => symbol.toLowerCase())
+  const effectiveAlphabetSize = new Set(foldedSymbols).size
+  // A/a-style collisions make outputs non-uniform after the verifier folds
+  // case. Counting only distinct results would overstate min-entropy whenever
+  // one folded character has more source representations than another.
+  if (effectiveAlphabetSize !== symbols.length) return 0
+  return generator.length * Math.log2(effectiveAlphabetSize)
+}
+
+/** True only when every run placeholder is backed by a high-entropy code generator. */
+export function usesStrongRunCodeTemplate(
+  template: string,
+  generators: Readonly<Record<string, VariableGenerator>>,
+): boolean {
+  return strongRunCodeTemplateKeys(template, generators) !== undefined
+}
+
+function strongRunCodeTemplateKeys(
+  template: string,
+  generators: Readonly<Record<string, VariableGenerator>>,
+): ReadonlySet<string> | undefined {
+  const references = [...template.matchAll(PLACEHOLDER)].map(match => match[1])
+  if (!references.length) return undefined
+  if (!references.every(key => {
+    const generator = generators[key]
+    return Boolean(generator && generator.type === 'code' &&
+      generatedCodeEntropyBits(generator) >= MINIMUM_GENERATED_CODE_ENTROPY_BITS)
+  })) return undefined
+  return new Set(references)
+}
+
+/**
+ * True when accepted aliases all depend on one shared strong run code. Allowing
+ * independently generated accepted values would multiply the number of valid
+ * guesses and silently reduce the verifier's effective search space.
+ */
+export function acceptedTemplatesUseSingleStrongRunCode(
+  templates: readonly string[],
+  generators: Readonly<Record<string, VariableGenerator>>,
+): boolean {
+  const distinctKeys = new Set<string>()
+  for (const template of templates) {
+    const keys = strongRunCodeTemplateKeys(template, generators)
+    if (!keys) return false
+    for (const key of keys) distinctKeys.add(key)
+  }
+  return distinctKeys.size === 1
+}
 
 export class VariableResolutionError extends Error {
   constructor(public readonly code: 'invalid_generator' | 'unknown_variable' | 'invalid_template', message: string) {

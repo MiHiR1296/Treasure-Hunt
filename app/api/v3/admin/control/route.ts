@@ -3,13 +3,15 @@ import { handle, jsonBody, textField } from '@/lib/server/http';
 import { transaction } from '@/lib/server/db';
 import { HttpError } from '@/lib/server/security';
 import {
+  changeTeamCompetitionStatus,
+  controlRunGameplay,
   createOrganizerTeam,
   freezePublicBoard,
   renameTeam,
   setHuntLifecycle,
   updatePublicBoard,
 } from '@/lib/server/v3/operations';
-import { requireV3Session } from '@/lib/server/v3/security';
+import { requireV3Session, requireV3Uuid } from '@/lib/server/v3/security';
 
 export const runtime = 'nodejs';
 
@@ -20,7 +22,7 @@ export async function POST(request: NextRequest) {
     const action = textField(body, 'action');
     if (action === 'rename_team') {
       const name = body.displayName === null || body.displayName === '' ? null : textField(body, 'displayName', 80);
-      return renameTeam(textField(body, 'teamId'), name, textField(body, 'reason', 500), session.organizerName);
+      return renameTeam(requireV3Uuid(body.teamId, 'Choose a valid team.'), name, textField(body, 'reason', 500), session.organizerName);
     }
     if (action === 'create_team') {
       return createOrganizerTeam({
@@ -30,6 +32,38 @@ export async function POST(request: NextRequest) {
         memberNames: body.memberNames,
         pin: typeof body.pin === 'string' ? body.pin : undefined,
         credentialSecret: process.env.ORGANIZER_PASSWORD || '',
+        actor: session.organizerName,
+        sessionHash: session.sessionHash,
+      });
+    }
+    if (action === 'approve_team' || action === 'disqualify_team' || action === 'restore_team') {
+      if (!Number.isSafeInteger(body.expectedRevision)) throw new HttpError(400, 'A current team revision is required.');
+      return changeTeamCompetitionStatus({
+        huntId: textField(body, 'huntId'),
+        teamId: textField(body, 'teamId'),
+        action: action === 'approve_team' ? 'approve' : action === 'disqualify_team' ? 'disqualify' : 'restore',
+        reason: textField(body, 'reason', 500),
+        expectedRevision: Number(body.expectedRevision),
+        requestId: textField(body, 'requestId'),
+        actor: session.organizerName,
+        sessionHash: session.sessionHash,
+      });
+    }
+    if (action === 'recover_run') {
+      if (!Number.isSafeInteger(body.expectedRevision)) throw new HttpError(400, 'A current run revision is required.');
+      const control = textField(body, 'control');
+      if (!['approve_current', 'reset_current', 'extend_session'].includes(control)) {
+        throw new HttpError(400, 'Choose a supported run recovery action.');
+      }
+      return controlRunGameplay({
+        huntId: textField(body, 'huntId'),
+        teamId: textField(body, 'teamId'),
+        runId: textField(body, 'runId'),
+        requestId: textField(body, 'requestId'),
+        expectedRevision: Number(body.expectedRevision),
+        control: control as 'approve_current' | 'reset_current' | 'extend_session',
+        reason: textField(body, 'reason', 500),
+        ...(control === 'extend_session' ? { seconds: Number(body.seconds) } : {}),
         actor: session.organizerName,
         sessionHash: session.sessionHash,
       });

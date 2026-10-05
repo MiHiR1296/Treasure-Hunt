@@ -104,6 +104,8 @@ export interface ChallengePool {
 }
 
 export interface FairnessPolicy {
+  /** Minimum number of meaningfully distinct route/challenge plans required before publication. */
+  minimumDistinctPlans: number
   durationToleranceMinutes: number
   maxResolvedRoutes: number
   requireTravelEstimates: boolean
@@ -136,10 +138,13 @@ export interface PublicParallelMechanic {
 
 /** Existing runtime settings retained so a V3 run can reuse the V2 engine. */
 export type RuntimeCompatibleSettings = Pick<HuntSettings,
-  'mode' | 'map' | 'rules' | 'maxTeamSize' | 'minTeamSize' |
+  'map' | 'rules' | 'maxTeamSize' | 'minTeamSize' |
   'sessionDurationSeconds' | 'registrationOpen' | 'startsAt' | 'endsAt' |
   'completionMessage' | 'photoRetention'
->
+> & {
+  /** V3 routePlan owns progression order; open/dependency modes are not supported. */
+  mode?: 'sequential'
+}
 
 export interface V3Settings extends RuntimeCompatibleSettings {
   registrationMode: RegistrationMode
@@ -209,6 +214,14 @@ export type FairnessIssueCode =
   | 'unequal_variant_scores'
   | 'duplicate_resolved_checkpoint'
   | 'unequal_random_branch_scores'
+  | 'unmodeled_internal_variation'
+  | 'competitive_fallback_not_allowed'
+  | 'unequal_variant_weights'
+  | 'insufficient_route_variation'
+  | 'unsafe_duration_tiebreak'
+  | 'gps_requires_companion_evidence'
+  | 'qr_requires_companion_evidence'
+  | 'shareable_verifier_requires_companion_evidence'
   | 'non_neutral_competitive_bonus'
   | 'score_cache_limit_exceeded'
   | 'unbounded_score_cache'

@@ -10,11 +10,33 @@ import { cardStyle, primaryButton } from './ui';
 
 function replayAvailability(summary: TeamSessionSummary) {
   const policy = summary.settings.runPolicy;
-  if (policy.mode === 'disabled') return { allowed: false, reason: 'This event is set to one official attempt per team.' };
+  if (summary.hasPracticeRun) return {
+    allowed: true,
+    practice: true,
+    reason: 'This crew has entered practice, so every later run under this team identity remains practice-only. Ask the organizer if the registration needs correction; players cannot create an official restart.',
+  };
+  const replacementOfficialRun = summary.officialAttemptCount > 0 && summary.officialAttemptSlotsUsed === 0;
+  if (policy.mode === 'disabled') return summary.remainingOfficialRuns === 0
+    ? { allowed: false, reason: 'This event is set to one official attempt per team.' }
+    : { allowed: true, practice: false, reason: 'The organizer restored your crew. Your disqualified result stays ineligible, and this replacement run is your official attempt.' };
   if (policy.mode === 'capped' && summary.remainingOfficialRuns === 0) {
-    return { allowed: false, reason: `Your crew has used all ${policy.maxOfficialRuns ?? 1} official attempts.` };
+    return {
+      allowed: true,
+      practice: true,
+      reason: `Your crew has used all ${policy.maxOfficialRuns ?? 1} official attempts. Practice now reuses one of your already-seen structural routes, with fresh generated values, and cannot reveal another competition route.`,
+    };
   }
-  if (policy.mode === 'practice-only') return { allowed: true, practice: true, reason: 'Your next run is practice-only and will not change the official leaderboard.' };
+  if (policy.mode === 'practice-only') return replacementOfficialRun
+    ? {
+      allowed: true,
+      practice: false,
+      reason: 'The organizer restored your crew. Your disqualified result stays ineligible, and this replacement run is official before practice resumes.',
+    }
+    : {
+      allowed: true,
+      practice: true,
+      reason: 'Your next run is practice-only. It reuses your official structural route with fresh generated values and will not change the leaderboard.',
+    };
   return { allowed: true, practice: false, reason: 'A replay creates a new seeded route and keeps this result intact.' };
 }
 

@@ -3,12 +3,12 @@
   "id": "parallel-crew-demo",
   "version": 1,
   "title": "Parallel Crew Demo",
-  "description": "Annotated example: organizer-assigned registration keeps team creation controlled; the route has one fixed scored checkpoint; unlimited replays use a fresh private seed; time is revealed only after a second eligible finish; the public board exposes team-level data only; recognition blends 70% verified actions with 30% private peer support; and the parallel gate requires two distinct authenticated members inside 90 seconds. The QR value below is an import directive, not a live secret.",
+  "description": "Annotated example: organizer-assigned registration keeps team creation controlled; a balanced two-variant plan deck avoids a repeat before both Crew Gate variants are used; official runs are capped at two; time is revealed only after a second eligible finish; the public board exposes team-level data only; recognition blends 70% verified actions with 30% private peer support; and each parallel gate requires three distinct authenticated starting-roster members inside 90 seconds, including fresh photo evidence. QR values below are import directives, not live secrets.",
   "settings": {
     "mode": "sequential",
     "map": "none",
-    "rules": "Two different signed-in teammates must complete the two Crew Gate lanes within the same 90-second window.",
-    "minTeamSize": 2,
+    "rules": "Three different signed-in teammates must complete the three Crew Gate lanes within the same 90-second window.",
+    "minTeamSize": 3,
     "maxTeamSize": 5,
     "sessionDurationSeconds": 1800,
     "registrationOpen": true,
@@ -16,7 +16,8 @@
     "photoRetention": "after_verification",
     "registrationMode": "organizer-assigned",
     "runPolicy": {
-      "mode": "unlimited"
+      "mode": "capped",
+      "maxOfficialRuns": 2
     },
     "leaderboardPolicy": {
       "bestRunRule": "score_then_time_then_completion",
@@ -58,7 +59,7 @@
     "routePlan": {
       "startCheckpointId": "start",
       "finaleCheckpointId": "finale",
-      "requiredCheckpointIds": ["crew-gate-checkpoint"],
+      "requiredCheckpointIds": ["crew-gate-location"],
       "choose": {
         "count": 0,
         "fromCheckpointIds": []
@@ -67,12 +68,37 @@
       "avoidTransitions": [],
       "checkpointEstimates": {
         "start": { "durationMinutes": 1 },
-        "crew-gate-checkpoint": { "durationMinutes": 4, "difficulty": 3 },
+        "crew-gate-location": { "durationMinutes": 4, "difficulty": 3 },
         "finale": { "durationMinutes": 1 }
       },
-      "travelEstimates": []
+      "travelEstimates": [
+        { "from": "start", "to": "crew-gate-location", "durationMinutes": 1 },
+        { "from": "crew-gate-location", "to": "finale", "durationMinutes": 1 }
+      ]
     },
-    "challengePools": {},
+    "challengePools": {
+      "crew-gate-location": {
+        "id": "crew-gate-variants",
+        "variants": [
+          {
+            "id": "crew-gate-east-west",
+            "checkpointId": "crew-gate-checkpoint",
+            "estimatedDurationMinutes": 4,
+            "difficulty": 3,
+            "scoreCeiling": 30,
+            "weight": 1
+          },
+          {
+            "id": "crew-gate-north-south",
+            "checkpointId": "crew-gate-checkpoint-b",
+            "estimatedDurationMinutes": 4,
+            "difficulty": 3,
+            "scoreCeiling": 30,
+            "weight": 1
+          }
+        ]
+      }
+    },
     "parallelMechanics": [
       {
         "id": "crew-gate-sync",
@@ -92,6 +118,37 @@
             "type": "code",
             "code": "{{laneCode}}",
             "caseSensitive": false
+          },
+          {
+            "id": "fresh-proof",
+            "label": "Take a fresh Crew Gate photo",
+            "type": "photo"
+          }
+        ]
+      },
+      {
+        "id": "crew-gate-sync-b",
+        "checkpointId": "crew-gate-checkpoint-b",
+        "nodeId": "crew-gate-b",
+        "timeWindowSeconds": 90,
+        "lanes": [
+          {
+            "id": "north-marker",
+            "label": "Scan the north marker",
+            "type": "qr",
+            "token": "@server:generate:crew-gate-north"
+          },
+          {
+            "id": "south-code",
+            "label": "Enter the south code",
+            "type": "code",
+            "code": "{{laneCode}}",
+            "caseSensitive": false
+          },
+          {
+            "id": "fresh-proof-b",
+            "label": "Take a fresh Crew Gate photo",
+            "type": "photo"
           }
         ]
       }
@@ -100,13 +157,14 @@
       "laneCode": {
         "type": "code",
         "alphabet": "ABCDEFGHJKLMNPQRSTUVWXYZ23456789",
-        "length": 4
+        "length": 7
       }
     },
     "fairnessPolicy": {
+      "minimumDistinctPlans": 2,
       "durationToleranceMinutes": 0,
       "maxResolvedRoutes": 1000,
-      "requireTravelEstimates": false,
+      "requireTravelEstimates": true,
       "walkingSpeedMetersPerMinute": 72,
       "minutesPerDifficultyPoint": 1.5
     }
@@ -131,7 +189,7 @@
           {
             "id": "briefing",
             "type": "show_text",
-            "text": "Stay signed in on separate devices. At the Crew Gate, two different members must finish one lane each.",
+            "text": "Stay signed in on separate devices. At the Crew Gate, three different members must finish one lane each, including the fresh-photo lane.",
             "next": "finish-start"
           },
           { "id": "finish-start", "type": "complete" }
@@ -144,7 +202,6 @@
       "title": "Crew Gate",
       "basePoints": 30,
       "required": true,
-      "prerequisites": ["start"],
       "flow": {
         "startNodeId": "gate-instructions",
         "nodes": [
@@ -157,7 +214,7 @@
           {
             "id": "crew-gate",
             "type": "verify_organizer",
-            "prompt": "Complete both linked lanes. This gate opens only after two distinct members provide valid evidence.",
+            "prompt": "Complete all three linked lanes. This gate opens only after three distinct members provide valid evidence.",
             "next": "finish-crew-gate"
           },
           { "id": "finish-crew-gate", "type": "complete" }
@@ -170,10 +227,50 @@
           "cost": 0,
           "content": {
             "type": "text",
-            "text": "Use two signed-in team devices. One member cannot claim both lanes. Ask the organizer if a marker is damaged."
+            "text": "Use three signed-in team devices. One member cannot claim multiple lanes. Ask the organizer if a marker is damaged."
           },
           "relevance": {
             "nodeId": "crew-gate",
+            "unlockAfterSeconds": 30,
+            "expireWhenSolved": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "crew-gate-checkpoint-b",
+      "title": "Crew Gate — North/South",
+      "basePoints": 30,
+      "required": true,
+      "flow": {
+        "startNodeId": "gate-instructions-b",
+        "nodes": [
+          {
+            "id": "gate-instructions-b",
+            "type": "show_text",
+            "text": "Choose separate lanes. Your south-lane code is {{laneCode}}. Once the first lane is confirmed, the other member has 90 seconds.",
+            "next": "crew-gate-b"
+          },
+          {
+            "id": "crew-gate-b",
+            "type": "verify_organizer",
+            "prompt": "Complete all three linked lanes. This gate opens only after three distinct members provide valid evidence.",
+            "next": "finish-crew-gate-b"
+          },
+          { "id": "finish-crew-gate-b", "type": "complete" }
+        ]
+      },
+      "hints": [
+        {
+          "id": "crew-gate-help-b",
+          "title": "Lane reminder",
+          "cost": 0,
+          "content": {
+            "type": "text",
+            "text": "Use three signed-in team devices. One member cannot claim multiple lanes. Ask the organizer if a marker is damaged."
+          },
+          "relevance": {
+            "nodeId": "crew-gate-b",
             "unlockAfterSeconds": 30,
             "expireWhenSolved": true
           }
@@ -185,7 +282,6 @@
       "title": "Finish",
       "basePoints": 0,
       "required": true,
-      "prerequisites": ["crew-gate-checkpoint"],
       "flow": {
         "startNodeId": "finish-message",
         "nodes": [

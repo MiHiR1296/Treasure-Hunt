@@ -3,7 +3,7 @@ import { handle, jsonBody, textField } from '@/lib/server/http';
 import { HttpError } from '@/lib/server/security';
 import { PEER_RECOGNITION_SUBTYPES, type PeerRecognitionCategory, type PeerRecognitionSubtype } from '@/lib/v3/types';
 import { privateRecognition, saveRecognitionVote } from '@/lib/server/v3/recognition';
-import { requireV3Session, v3RequestSource } from '@/lib/server/v3/security';
+import { isV3Uuid, requireV3Session, requireV3Uuid, v3RequestSource } from '@/lib/server/v3/security';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
     const session = await requireV3Session(request, 'team');
     const runId = request.nextUrl.searchParams.get('runId');
     const scope = request.nextUrl.searchParams.get('scope') === 'all' ? 'all' : 'run';
-    if (!runId || !/^[0-9a-f-]{36}$/i.test(runId)) throw new HttpError(400, 'Choose a completed run.');
+    if (!isV3Uuid(runId)) throw new HttpError(400, 'Choose a completed run.');
     return privateRecognition(session.teamId, session.memberId, runId, scope);
   });
 }
@@ -34,9 +34,9 @@ export async function POST(request: NextRequest) {
     return saveRecognitionVote({
       teamId: session.teamId,
       memberId: session.memberId,
-      runId: textField(body, 'runId'),
-      requestId: textField(body, 'requestId'),
-      recipientMemberId: textField(body, 'recipientMemberId'),
+      runId: requireV3Uuid(textField(body, 'runId'), 'Choose a valid completed run.'),
+      requestId: requireV3Uuid(textField(body, 'requestId'), 'A valid request ID is required.'),
+      recipientMemberId: requireV3Uuid(textField(body, 'recipientMemberId'), 'Choose a valid teammate.'),
       category,
       subtype,
       requestSource: v3RequestSource(request),

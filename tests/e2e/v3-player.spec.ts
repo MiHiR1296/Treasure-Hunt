@@ -14,6 +14,10 @@ const boardSlug = `${huntId}-board`;
 const huntTitle = `Mobile replay hunt ${suffix}`;
 const boardTitle = `Mobile replay board ${suffix}`;
 const teamName = `Mobile Falcons ${suffix}`;
+const organizerRateLimitKeys = [
+  'organizer-signin:source:unavailable',
+  'organizer-signin:target:admin',
+].map(value => createHash('sha256').update(value).digest('hex'));
 
 const definition: V3Definition = {
   schemaVersion: 3,
@@ -73,14 +77,15 @@ const definition: V3Definition = {
         start: { durationMinutes: 1 },
         finale: { durationMinutes: 1 },
       },
-      travelEstimates: [],
+      travelEstimates: [{ from: 'start', to: 'finale', durationMinutes: 0 }],
     },
     challengePools: {},
     variableGenerators: {},
     fairnessPolicy: {
+      minimumDistinctPlans: 1,
       durationToleranceMinutes: 0,
       maxResolvedRoutes: 10,
-      requireTravelEstimates: false,
+      requireTravelEstimates: true,
       walkingSpeedMetersPerMinute: 72,
       minutesPerDifficultyPoint: 1.5,
     },
@@ -121,6 +126,10 @@ const definition: V3Definition = {
 async function seedHunt() {
   const schema = await readFile(resolve(process.cwd(), 'database/v3.sql'), 'utf8');
   await getPool().query(schema);
+  // This suite deliberately exercises several independent organizer browser
+  // sessions. Clear only its known global login buckets in the disposable
+  // database so repeated local runs cannot inherit an earlier run's throttle.
+  await getPool().query('delete from hunt_v3.rate_limits where key=any($1::text[])', [organizerRateLimitKeys]);
   const fairness = validateFairness(definition);
   expect(fairness.valid, JSON.stringify(fairness.issues)).toBeTruthy();
   const contentHash = createHash('sha256').update(JSON.stringify(definition)).digest('hex');
@@ -192,6 +201,7 @@ async function removeSeededHunt() {
     await client.query('delete from hunt_v3.hunt_versions where hunt_id=$1', [huntId]);
     await client.query('delete from hunt_v3.hunts where id=$1', [huntId]);
     await client.query('delete from hunt_v3.rate_limits where key like $1', [`%${huntId}%`]);
+    await client.query('delete from hunt_v3.rate_limits where key=any($1::text[])', [organizerRateLimitKeys]);
     await client.query('commit');
   } catch (error) {
     await client.query('rollback');
@@ -248,6 +258,8 @@ test('mobile crew registers, replays, celebrates, shares, and stays private on t
   await page.getByRole('button', { name: 'Create crew', exact: true }).click();
 
   await expect(page.getByRole('heading', { name: new RegExp(`^T-\\d{3,} · ${teamName}$`) })).toBeVisible();
+  await expect(page.getByText('Awaiting organizer approval', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Your team is waiting for approval.', exact: true })).toBeVisible();
   await expect(page.getByText(/^(?:Alice, Bob|Bob, Alice)$/)).toBeVisible();
   await expect(page.getByText('1/2 checked in', { exact: true })).toBeVisible();
   const sessionResponse = await page.request.get('/api/v3/session');
@@ -272,9 +284,52 @@ test('mobile crew registers, replays, celebrates, shares, and stays private on t
     await teammateContext.close();
   }
 
+  const approvalContext: BrowserContext = await browser.newContext({ baseURL: origin, viewport: { width: 1440, height: 1000 } });
+  const approvalPage = await approvalContext.newPage();
+  approvalPage.setDefaultTimeout(10_000);
+  try {
+    await approvalPage.goto('/v3/admin');
+    await approvalPage.getByLabel('Organizer password').fill('browser-test-password-only');
+    await approvalPage.getByRole('button', { name: 'Open command centre', exact: true }).click();
+    await approvalPage.getByLabel('Event').selectOption(huntId);
+    await expect(approvalPage.getByText(/self-serve registration proves a team PIN, not one human per team/i)).toBeVisible();
+    const teamRow = approvalPage.getByRole('row').filter({ hasText: teamCode });
+    await expect(teamRow.getByText('Approval pending', { exact: true })).toBeVisible();
+    await teamRow.getByRole('button', { name: 'Approve', exact: true }).click();
+    await expect(approvalPage.getByRole('heading', { name: 'Approve this team?', exact: true })).toBeVisible();
+    await approvalPage.getByLabel('Required audit reason').fill('Roster and identity confirmed in the mobile journey');
+    await approvalPage.getByRole('button', { name: 'Approve team', exact: true }).click();
+    await expect(approvalPage.getByText(`${teamCode} approved for competition.`, { exact: true })).toBeVisible();
+  } finally {
+    await approvalContext.close();
+  }
+
   await page.reload();
   await expect(page.getByText('2/2 checked in', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Start Run 1', exact: true }).click();
+
+  const recoveryContext: BrowserContext = await browser.newContext({ baseURL: origin, viewport: { width: 1440, height: 1000 } });
+  const recoveryPage = await recoveryContext.newPage();
+  recoveryPage.setDefaultTimeout(10_000);
+  try {
+    await recoveryPage.goto('/v3/admin');
+    await recoveryPage.getByLabel('Organizer password').fill('browser-test-password-only');
+    await recoveryPage.getByRole('button', { name: 'Open command centre', exact: true }).click();
+    await recoveryPage.getByLabel('Event').selectOption(huntId);
+    const activeTeamRow = recoveryPage.getByRole('row').filter({ hasText: teamCode });
+    await expect(activeTeamRow.getByText('Run 1', { exact: true })).toBeVisible();
+    await activeTeamRow.getByRole('button', { name: 'Recover', exact: true }).click();
+    const recoveryDialog = recoveryPage.getByRole('dialog', { name: 'Audited run recovery' });
+    await expect(recoveryDialog).toBeVisible();
+    await expect(recoveryDialog).toContainText('open-trail');
+    await expect(recoveryDialog.getByRole('button', { name: 'Add 5 minutes', exact: true })).toBeVisible();
+    await expect(recoveryDialog.getByRole('button', { name: 'Reset current task', exact: true })).toHaveCount(0);
+    await expect(recoveryDialog.getByRole('button', { name: 'Approve organizer gate', exact: true })).toHaveCount(0);
+    await recoveryDialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  } finally {
+    await recoveryContext.close();
+  }
+
   await completeShortRun(page, 1);
 
   await expect(page.getByRole('heading', { name: 'Want to beat your best?', exact: true })).toBeVisible();
@@ -335,11 +390,15 @@ test('mobile crew registers, replays, celebrates, shares, and stays private on t
 
     await publicPage.goto(`/board/${boardSlug}`);
     await expect(publicPage.getByRole('heading', { name: boardTitle, exact: true })).toBeVisible();
-    const teamRow = publicPage.getByRole('row').filter({ hasText: teamName });
-    await expect(teamRow).toBeVisible();
-    await expect(teamRow).toContainText(teamCode);
-    await expect(teamRow.getByRole('cell').nth(2)).toHaveText('20');
-    await expect(teamRow.getByRole('cell').nth(3)).toHaveText('2');
+    const teamResult = publicPage.getByRole('article', { name: new RegExp(teamCode) });
+    await expect(teamResult).toBeVisible();
+    await expect(teamResult).toContainText(teamName);
+    await expect(teamResult.getByText('Points', { exact: true })).toBeVisible();
+    await expect(teamResult.getByText('20', { exact: true })).toBeVisible();
+    await expect(teamResult.getByText('Runs', { exact: true })).toBeVisible();
+    await expect(teamResult.getByText('2', { exact: true })).toBeVisible();
+    await expect(teamResult.getByText('Time', { exact: true })).toBeVisible();
+    await expect(teamResult.getByText(/^completed$/i)).toBeVisible();
     await expect(publicPage.getByText('Alice', { exact: true })).toHaveCount(0);
     await expect(publicPage.getByText('Bob', { exact: true })).toHaveCount(0);
     await expect(publicPage.getByText('Helping Hand', { exact: true })).toHaveCount(0);

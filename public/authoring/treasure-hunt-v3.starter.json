@@ -5,7 +5,7 @@
   "title": "Replace with your hunt title",
   "description": "A balanced V3 starter with one seeded route stop, equal challenge variants, replay, private recognition, and no production secrets.",
   "settings": {
-    "mode": "open",
+    "mode": "sequential",
     "map": "none",
     "rules": "Play fairly, stay with your team, respect each location, and ask the organizer for help when needed.",
     "minTeamSize": 2,
@@ -70,7 +70,12 @@
         "park": { "durationMinutes": 3 },
         "finale": { "durationMinutes": 1 }
       },
-      "travelEstimates": []
+      "travelEstimates": [
+        { "from": "start", "to": "library", "durationMinutes": 2 },
+        { "from": "library", "to": "finale", "durationMinutes": 2 },
+        { "from": "start", "to": "park", "durationMinutes": 2 },
+        { "from": "park", "to": "finale", "durationMinutes": 2 }
+      ]
     },
     "challengePools": {
       "library": {
@@ -125,13 +130,14 @@
       "code": {
         "type": "code",
         "alphabet": "ABCDEFGHJKLMNPQRSTUVWXYZ23456789",
-        "length": 4
+        "length": 7
       }
     },
     "fairnessPolicy": {
-      "durationToleranceMinutes": 1,
+      "minimumDistinctPlans": 4,
+      "durationToleranceMinutes": 0,
       "maxResolvedRoutes": 10000,
-      "requireTravelEstimates": false,
+      "requireTravelEstimates": true,
       "walkingSpeedMetersPerMinute": 72,
       "minutesPerDifficultyPoint": 1.5
     }
@@ -168,7 +174,7 @@
       "id": "library-observation",
       "title": "Library Observation",
       "basePoints": 20,
-      "required": false,
+      "required": true,
       "flow": {
         "startNodeId": "observe-colour",
         "nodes": [
@@ -179,6 +185,13 @@
             "answers": ["{{colour}}"],
             "caseSensitive": false,
             "recordAnswerAttempts": true,
+            "next": "prove-library-observation"
+          },
+          {
+            "id": "prove-library-observation",
+            "type": "verify_image",
+            "prompt": "Take a fresh photo of your team beside today's marker.",
+            "referenceImages": [],
             "next": "finish-library-observation"
           },
           { "id": "finish-library-observation", "type": "complete" }
@@ -202,7 +215,7 @@
       "id": "library-riddle",
       "title": "Library Riddle",
       "basePoints": 20,
-      "required": false,
+      "required": true,
       "flow": {
         "startNodeId": "solve-word",
         "nodes": [
@@ -216,6 +229,13 @@
               "answers": ["library"],
               "caseSensitive": false
             },
+            "next": "prove-library-riddle"
+          },
+          {
+            "id": "prove-library-riddle",
+            "type": "verify_image",
+            "prompt": "Take a fresh team photo at the library clue location.",
+            "referenceImages": [],
             "next": "finish-library-riddle"
           },
           { "id": "finish-library-riddle", "type": "complete" }
@@ -227,14 +247,21 @@
       "id": "park-code",
       "title": "Park Code",
       "basePoints": 20,
-      "required": false,
+      "required": true,
       "flow": {
-        "startNodeId": "enter-code",
+        "startNodeId": "prove-park-code",
         "nodes": [
+          {
+            "id": "prove-park-code",
+            "type": "verify_image",
+            "prompt": "Take a fresh team photo beside today's park marker.",
+            "referenceImages": [],
+            "next": "enter-code"
+          },
           {
             "id": "enter-code",
             "type": "verify_code",
-            "prompt": "Enter the four-character run code shown at Start.",
+            "prompt": "Enter the seven-character run code shown at Start.",
             "code": "{{code}}",
             "caseSensitive": false,
             "next": "finish-park-code"
@@ -248,7 +275,7 @@
       "id": "park-choice",
       "title": "Park Choice",
       "basePoints": 20,
-      "required": false,
+      "required": true,
       "flow": {
         "startNodeId": "pick-answer",
         "nodes": [
@@ -265,6 +292,13 @@
               ],
               "correctOptionId": "park-option"
             },
+            "next": "prove-park-choice"
+          },
+          {
+            "id": "prove-park-choice",
+            "type": "verify_image",
+            "prompt": "Take a fresh team photo at the park clue location.",
+            "referenceImages": [],
             "next": "finish-park-choice"
           },
           { "id": "finish-park-choice", "type": "complete" }

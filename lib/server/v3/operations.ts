@@ -1,22 +1,26 @@
 import { createHmac, randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { executeControl } from '../../engine';
-import type { GameState, ScoreEntry } from '../../engine/types';
-import { elapsedMilliseconds, endReviewClockPause, pauseRunClock, resumeRunClock } from '../../engine/session';
+import type { PuzzleDefinition } from '../../engine/puzzles';
+import type { GameState, InteractiveNode, ScoreEntry } from '../../engine/types';
+import { discardReviewClockPause, elapsedMilliseconds, endReviewClockPause, pauseRunClock, resumeRunClock } from '../../engine/session';
 import type { ResolvedRunPlan, V3Definition } from '../../v3/types';
 import { getPool, transaction } from '../db';
 import { canonicalJson, digest, hashPin, HttpError, verifyPin } from '../security';
 import { formatTeamCode, normalizedKey, validateMemberName, validateOptionalTeamName } from './names';
 import { publicLeaderboard } from './leaderboards';
+import { lockV3Hunt, lockV3Team } from './locking';
 import { materializeRunDefinition, materializeRunParallelMechanics } from './runtime';
 import { recalculateRecognition } from './recognition';
-import { stateProgress, updateLiveRollup } from './runs';
+import { stateProgress, terminalizeExpiredV3Runs, updateLiveRollup } from './runs';
+import { isV3Uuid } from './security';
 
 const OBSERVED_FAIRNESS_MIN_SAMPLES = 4;
 const OBSERVED_FAIRNESS_SCORE_GAP = 10;
 const OBSERVED_FAIRNESS_SCORE_RATIO = 0.1;
 const OBSERVED_FAIRNESS_TIME_GAP_MS = 5 * 60_000;
 const OBSERVED_FAIRNESS_TIME_RATIO = 0.2;
+const TEAM_DISQUALIFICATION_REASON = 'Team disqualified by organizer';
 
 export interface ObservedFairnessGroup {
   kind: 'route' | 'variant';
@@ -150,14 +154,32 @@ export async function liveOperations(huntId?: string, search = '') {
   const selected = huntId || hunts[0]?.id;
   if (!selected) return { measuredAt: new Date().toISOString(), hunts, teams: [], alerts: { help: 0, photos: 0, stalled: 0, fairness: 0 } };
   if (!hunts.some(hunt => hunt.id === selected)) throw new HttpError(404, 'Hunt not found.');
+  await terminalizeExpiredV3Runs(selected);
   const term = search.normalize('NFKC').trim().slice(0, 100);
   const measuredAt = new Date((await getPool().query('select clock_timestamp() as at')).rows[0].at).toISOString();
   const { rows: teams } = await getPool().query(
-    `select t.id,t.canonical_code,t.display_name,t.name_status,t.status,t.created_at,
+    `select t.id,t.canonical_code,t.display_name,t.name_status,t.status,t.approval_status,t.competition_revision,t.created_at,
       coalesce(m.members,'[]'::jsonb) as members,coalesce(m.member_count,0) as member_count,
       coalesce(m.checked_in_count,0) as checked_in_count,
       live.active_run_id,live.best_run_id,live.run_number,live.run_count,live.current_checkpoint_id,
       live.score,live.elapsed_ms,live.progress,live.run_status,live.route_variant,live.challenge_variant,
+      (active.engine_state->>'revision')::int as active_run_revision,
+      (active.engine_state ? 'timer') as active_run_timed,
+      active.engine_state->'checkpoints'->(active.engine_state->>'activeCheckpointId')->>'activeNodeId' as active_node_id,
+      (select checkpoint.value->>'title'
+        from jsonb_array_elements(coalesce(active_version.definition->'checkpoints','[]'::jsonb)) checkpoint(value)
+        where checkpoint.value->>'id'=active.engine_state->>'activeCheckpointId' limit 1) as active_checkpoint_label,
+      (select node.value->>'type'
+        from jsonb_array_elements(coalesce(active_version.definition->'checkpoints','[]'::jsonb)) checkpoint(value)
+        cross join lateral jsonb_array_elements(coalesce(checkpoint.value->'flow'->'nodes','[]'::jsonb)) node(value)
+        where checkpoint.value->>'id'=active.engine_state->>'activeCheckpointId'
+          and node.value->>'id'=(active.engine_state->'checkpoints'->(active.engine_state->>'activeCheckpointId')->>'activeNodeId')
+        limit 1) as active_node_type,
+      exists(
+        select 1 from jsonb_array_elements(coalesce(active_version.definition->'settings'->'parallelMechanics','[]'::jsonb)) mechanic(value)
+        where mechanic.value->>'checkpointId'=active.engine_state->>'activeCheckpointId'
+          and mechanic.value->>'nodeId'=(active.engine_state->'checkpoints'->(active.engine_state->>'activeCheckpointId')->>'activeNodeId')
+      ) as active_parallel_mechanic,
       coalesce(live.alerts,'[]'::jsonb) as cached_alerts,
       (displayed.route_plan->'routeCheckpointIds')::text as fairness_route_key,
       coalesce((select array_agg(
@@ -173,10 +195,12 @@ export async function liveOperations(huntId?: string, search = '') {
           where not (pause.value ? 'endedAt'))) as active_clock_paused,
       best.score as best_score,best.elapsed_ms as best_elapsed_ms,best.run_number as best_run_number,
       coalesce(help.open_help,0) as open_help,coalesce(photo.pending_photos,0) as pending_photos,
+      coalesce(duplicate_names.members,'[]'::jsonb) as duplicate_member_names,
       (live.run_status='active' and coalesce(activity.last_activity_at,live.last_activity_at,t.updated_at)<clock_timestamp()-interval '10 minutes') as stalled
       from hunt_v3.teams t
       left join hunt_v3.live_team_rollups live on live.team_id=t.id
       left join hunt_v3.runs active on active.id=live.active_run_id
+      left join hunt_v3.hunt_versions active_version on active_version.hunt_id=active.hunt_id and active_version.version=active.hunt_version
       left join hunt_v3.runs displayed on displayed.id=coalesce(live.active_run_id,live.best_run_id)
       left join lateral (
         select max(event.occurred_at) as last_activity_at from hunt_v3.run_events event where event.run_id=active.id
@@ -189,6 +213,17 @@ export async function liveOperations(huntId?: string, search = '') {
       ) m on true
       left join lateral (select count(*)::int as open_help from hunt_v3.help_requests request where request.team_id=t.id and request.status='open') help on true
       left join lateral (select count(*)::int as pending_photos from hunt_v3.media item where item.team_id=t.id and item.kind='photo' and item.review_status='pending' and item.submitted_at is not null) photo on true
+      left join lateral (
+        select jsonb_agg(jsonb_build_object('name',candidate.name,'teamCount',candidate.team_count) order by candidate.name) as members
+        from (
+          select min(member.name) as name,(count(distinct peer.team_id)+1)::int as team_count
+          from hunt_v3.team_members member
+          join hunt_v3.team_members peer on peer.name_key=member.name_key and peer.team_id<>member.team_id and peer.status<>'removed'
+          join hunt_v3.teams peer_team on peer_team.id=peer.team_id and peer_team.hunt_id=t.hunt_id and peer_team.status<>'archived'
+          where member.team_id=t.id and member.status<>'removed' and t.status<>'archived'
+          group by member.name_key
+        ) candidate
+      ) duplicate_names on true
       where t.hunt_id=$1 and ($2='' or t.canonical_code ilike '%'||$2||'%' or coalesce(t.display_name,'') ilike '%'||$2||'%'
         or exists(select 1 from hunt_v3.team_members member where member.team_id=t.id and member.name ilike '%'||$2||'%'))
       order by coalesce(live.last_activity_at,t.updated_at) desc,t.canonical_code limit 500`,
@@ -257,6 +292,8 @@ export async function liveOperations(huntId?: string, search = '') {
       label: team.display_name ? `${team.canonical_code} · ${team.display_name}` : team.canonical_code,
       nameStatus: team.name_status,
       status: team.status,
+      approvalStatus: team.approval_status,
+      competitionRevision: Number(team.competition_revision),
       members: team.members,
       memberCount: team.member_count,
       checkedInCount: team.checked_in_count,
@@ -273,6 +310,12 @@ export async function liveOperations(huntId?: string, search = '') {
           : 0),
       progress: team.progress === null ? 0 : Number(team.progress),
       runStatus: team.run_status,
+      runRevision: team.active_run_revision === null ? null : Number(team.active_run_revision),
+      timed: Boolean(team.active_run_timed),
+      currentNodeId: team.active_node_id,
+      currentNodeType: team.active_node_type,
+      parallelMechanic: Boolean(team.active_parallel_mechanic),
+      currentCheckpointLabel: team.active_checkpoint_label,
       routeVariant: team.route_variant,
       challengeVariant: team.challenge_variant,
       bestRun: team.best_run_id ? { id: team.best_run_id, runNumber: team.best_run_number, score: team.best_score, elapsedMilliseconds: Number(team.best_elapsed_ms) } : null,
@@ -281,6 +324,11 @@ export async function liveOperations(huntId?: string, search = '') {
         ...(team.stalled ? [{ type: 'stalled', label: 'Stalled 10+ min' }] : []),
         ...(team.open_help ? [{ type: 'help', label: `${team.open_help} help request${team.open_help === 1 ? '' : 's'}` }] : []),
         ...(team.pending_photos ? [{ type: 'photo', label: `${team.pending_photos} photo${team.pending_photos === 1 ? '' : 's'} to review` }] : []),
+        ...(Array.isArray(team.duplicate_member_names) && team.duplicate_member_names.length ? [{
+          type: 'warning',
+          label: 'Possible duplicate member name',
+          detail: `${team.duplicate_member_names.map((item: { name?: string; teamCount?: number }) => `${item.name || 'Unnamed member'} (${item.teamCount || 2} teams)`).join(', ')}. Matching names are a review signal, not proof that the same person registered twice.`,
+        }] : []),
         ...fairnessAlertsFor(team),
         ...(Array.isArray(team.cached_alerts) ? team.cached_alerts : []),
       ],
@@ -295,6 +343,7 @@ export async function liveOperations(huntId?: string, search = '') {
 }
 
 export async function eventAnalytics(huntId: string) {
+  await terminalizeExpiredV3Runs(huntId);
   const hunt = (await getPool().query('select id,title,registration_mode from hunt_v3.hunts where id=$1', [huntId])).rows[0];
   if (!hunt) throw new HttpError(404, 'Hunt not found.');
   const [counts, improvements, checkpoints, routes, variants, contributions, recognition, ties, registration] = await Promise.all([
@@ -542,10 +591,11 @@ export async function createOrganizerTeam(input: {
   )).rows[0];
   if (existingReceipt) return replay(existingReceipt);
   const initialHunt = (await getPool().query(
-    'select registration_mode,settings from hunt_v3.hunts where id=$1',
+    'select registration_mode,registration_open,settings from hunt_v3.hunts where id=$1',
     [input.huntId],
   )).rows[0];
   if (!initialHunt) throw new HttpError(404, 'Hunt not found.');
+  if (!initialHunt.registration_open) throw new HttpError(409, 'Team creation is closed for this event.');
   if (initialHunt.registration_mode === 'self_serve') throw new HttpError(409, 'Use player self-registration for this hunt, or change its registration mode first.');
   if (initialHunt.registration_mode === 'rostered' && names.length === 0) {
     throw new HttpError(400, 'Enter 1 to 200 roster members.');
@@ -563,6 +613,7 @@ export async function createOrganizerTeam(input: {
   const result = await transaction(async client => {
     const hunt = (await client.query('select * from hunt_v3.hunts where id=$1 for update', [input.huntId])).rows[0];
     if (!hunt) throw new HttpError(404, 'Hunt not found.');
+    if (!hunt.registration_open) throw new HttpError(409, 'Team creation is closed for this event.');
     if (hunt.registration_mode === 'self_serve') throw new HttpError(409, 'Use player self-registration for this hunt, or change its registration mode first.');
     if (hunt.registration_mode !== initialHunt.registration_mode) throw new HttpError(409, 'Registration mode changed. Refresh and try again.');
     if (hunt.registration_mode === 'rostered' && names.length === 0) throw new HttpError(400, 'Enter 1 to 200 roster members.');
@@ -607,11 +658,523 @@ export async function createOrganizerTeam(input: {
   return result;
 }
 
+export type TeamCompetitionAction = 'approve' | 'disqualify' | 'restore';
+
+export async function changeTeamCompetitionStatus(input: {
+  huntId: string;
+  teamId: string;
+  action: TeamCompetitionAction;
+  reason: string;
+  expectedRevision: number;
+  requestId: string;
+  actor: string;
+  sessionHash: string;
+}) {
+  if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(input.teamId) ||
+    !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(input.requestId)) {
+    throw new HttpError(400, 'Valid team and request IDs are required.');
+  }
+  if (!['approve', 'disqualify', 'restore'].includes(input.action)) {
+    throw new HttpError(400, 'Choose approve, disqualify, or restore.');
+  }
+  if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 1) {
+    throw new HttpError(400, 'A current team revision is required.');
+  }
+  const reason = input.reason.normalize('NFKC').trim();
+  if (!reason || reason.length > 500) throw new HttpError(400, 'Give a reason for this team status change.');
+  const scopeKey = `admin:team-competition:${input.teamId}`;
+  const payloadHash = digest(canonicalJson({
+    operation: 'team_competition_status',
+    huntId: input.huntId,
+    teamId: input.teamId,
+    action: input.action,
+    reason,
+    expectedRevision: input.expectedRevision,
+  }));
+
+  return transaction(async client => {
+    const replayReceipt = async () => {
+      const receipt = (await client.query(
+        `select operation,payload_hash,response from hunt_v3.command_receipts
+          where scope_key=$1 and request_id=$2`,
+        [scopeKey, input.requestId],
+      )).rows[0];
+      if (!receipt) return null;
+      if (receipt.operation !== 'team_competition_status' || receipt.payload_hash !== payloadHash) {
+        throw new HttpError(409, 'This request ID was already used with different team-control details.');
+      }
+      return { ...receipt.response, replayed: true } as Record<string, unknown>;
+    };
+    const replay = await replayReceipt();
+    if (replay) return replay;
+
+    // Competition controls can touch every run and the frozen board. An
+    // UPDATE lock on the hunt makes that multi-row operation one serialized
+    // incident-response decision and establishes hunt -> team -> run.
+    if (!await lockV3Hunt(client, input.huntId, 'update')) {
+      throw new HttpError(404, 'Hunt not found.');
+    }
+    const team = (await client.query(
+      `select id,hunt_id,canonical_code,status,approval_status,competition_revision
+        from hunt_v3.teams where id=$1 and hunt_id=$2 for update`,
+      [input.teamId, input.huntId],
+    )).rows[0];
+    if (!team) throw new HttpError(404, 'Team not found for this hunt.');
+    const concurrentReplay = await replayReceipt();
+    if (concurrentReplay) return concurrentReplay;
+    if (Number(team.competition_revision) !== input.expectedRevision) {
+      throw new HttpError(409, 'This team changed. Refresh before updating it.');
+    }
+
+    let nextStatus = String(team.status);
+    let nextApprovalStatus = String(team.approval_status);
+    if (input.action === 'approve') {
+      if (team.status !== 'active') throw new HttpError(409, 'Restore this team before approving it.');
+      if (team.approval_status !== 'pending') throw new HttpError(409, 'This team is already approved.');
+      nextApprovalStatus = 'approved';
+    } else if (input.action === 'disqualify') {
+      if (team.status !== 'active') throw new HttpError(409, 'Only an active team can be disqualified.');
+      nextStatus = 'disqualified';
+    } else {
+      if (team.status !== 'disqualified') throw new HttpError(409, 'Only a disqualified team can be restored.');
+      nextStatus = 'active';
+    }
+
+    const openSessions = input.action === 'disqualify'
+      ? Number((await client.query(
+        'select count(*)::int as count from hunt_v3.sessions where team_id=$1 and revoked_at is null',
+        [input.teamId],
+      )).rows[0].count)
+      : 0;
+    const updated = (await client.query(
+      `update hunt_v3.teams set status=$1,approval_status=$2,
+        competition_revision=competition_revision+1 where id=$3
+        returning status,approval_status,competition_revision`,
+      [nextStatus, nextApprovalStatus, input.teamId],
+    )).rows[0];
+
+    let invalidatedRuns = 0;
+    let newlyInvalidatedOfficialRuns = 0;
+    if (input.action === 'disqualify') {
+      const invalidated = (await client.query(
+        `with targets as materialized (
+          select id,practice,eligible from hunt_v3.runs
+          where team_id=$1 order by run_number,id for update
+        ), changed as (
+          update hunt_v3.runs run set
+            status=case when run.status in ('waiting','active') then 'disqualified' else run.status end,
+            eligible=false,
+            ineligibility_reason=case when targets.eligible then $2 else run.ineligibility_reason end
+          from targets where run.id=targets.id
+          returning run.id,targets.practice,targets.eligible
+        ) select count(*)::int as invalidated_runs,
+          count(*) filter(where not practice and eligible)::int as newly_invalidated_official_runs
+          from changed`,
+        [input.teamId, TEAM_DISQUALIFICATION_REASON],
+      )).rows[0];
+      invalidatedRuns = Number(invalidated.invalidated_runs);
+      newlyInvalidatedOfficialRuns = Number(invalidated.newly_invalidated_official_runs);
+      const latestRun = (await client.query(
+        'select id from hunt_v3.runs where team_id=$1 order by run_number desc limit 1',
+        [input.teamId],
+      )).rows[0];
+      if (latestRun) await updateLiveRollup(client, latestRun.id);
+    }
+    const restoration = input.action === 'restore'
+      ? (await client.query(
+        `select
+          count(*) filter(where not practice and not eligible and ineligibility_reason=$2)::int as replacement_count,
+          exists(select 1 from hunt_v3.runs practice_run where practice_run.team_id=$1 and practice_run.practice) as blocked_by_practice
+          from hunt_v3.runs where team_id=$1`,
+        [input.teamId, TEAM_DISQUALIFICATION_REASON],
+      )).rows[0]
+      : undefined;
+    const officialReplacementBlockedByPractice = Boolean(restoration?.blocked_by_practice);
+    const replacementOfficialRunsAvailable = officialReplacementBlockedByPractice
+      ? 0
+      : Number(restoration?.replacement_count ?? 0);
+
+    // A team status change must invalidate the short-lived anonymous board
+    // cache. Frozen/final boards are rebuilt on disqualification so a removed
+    // competitor cannot remain visible in an announcement snapshot.
+    if (input.action === 'disqualify') {
+      // Keep the global lock order run -> public board. Finalization also
+      // sweeps timed runs before locking the board, so concurrent incident
+      // response cannot form a run/board deadlock cycle.
+      await terminalizeExpiredV3Runs(input.huntId, client);
+    }
+    const board = (await client.query(
+      `update hunt_v3.public_boards set updated_at=clock_timestamp() where hunt_id=$1
+        returning enabled,event_status`,
+      [input.huntId],
+    )).rows[0];
+    if (input.action === 'disqualify' && board?.enabled && ['frozen', 'final'].includes(board.event_status)) {
+      const sourceCutoff = (await client.query('select clock_timestamp() as at')).rows[0].at as Date;
+      await snapshotPublicBoard(client, input.huntId, board.event_status === 'final', input.actor, sourceCutoff, true);
+    }
+
+    const response = {
+      ok: true,
+      action: input.action,
+      teamId: input.teamId,
+      status: updated.status,
+      approvalStatus: updated.approval_status,
+      competitionRevision: Number(updated.competition_revision),
+      invalidatedRuns,
+      newlyInvalidatedOfficialRuns,
+      replacementOfficialRunsAvailable,
+      officialReplacementBlockedByPractice,
+      revokedSessions: openSessions,
+    };
+    await client.query(
+      `insert into hunt_v3.admin_events(
+        action,actor,session_token_hash,hunt_id,team_id,reason,before_state,after_state,details)
+        values($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [`team_${input.action === 'approve' ? 'approved' : input.action === 'disqualify' ? 'disqualified' : 'restored'}`,
+        input.actor, input.sessionHash, input.huntId, input.teamId, reason,
+        { status: team.status, approvalStatus: team.approval_status, competitionRevision: Number(team.competition_revision) },
+        { status: response.status, approvalStatus: response.approvalStatus, competitionRevision: response.competitionRevision },
+        { invalidatedRuns, newlyInvalidatedOfficialRuns, replacementOfficialRunsAvailable, officialReplacementBlockedByPractice, revokedSessions: openSessions }],
+    );
+    await client.query(
+      `insert into hunt_v3.command_receipts(
+        scope_key,request_id,operation,team_id,payload_hash,response)
+        values($1,$2,'team_competition_status',$3,$4,$5)`,
+      [scopeKey, input.requestId, input.teamId, payloadHash, response],
+    );
+    return { ...response, replayed: false };
+  });
+}
+
+export type RunGameplayControl = 'approve_current' | 'reset_current' | 'extend_session';
+
+function puzzleRecoveryAllowance(puzzle: PuzzleDefinition) {
+  switch (puzzle.type) {
+    case 'multiple_choice': return 1;
+    case 'quiz': return puzzle.questions.length + 1;
+    case 'text': return 6;
+    case 'jigsaw': return puzzle.pieces.length * 3;
+    case 'matching': return puzzle.left.length + Math.ceil(puzzle.left.length / 2);
+    case 'sequence': return (puzzle.items.length * (puzzle.items.length - 1)) / 2 + Math.ceil(puzzle.items.length / 2);
+    case 'rotation': return puzzle.tiles.length * 3;
+    case 'sudoku': return Math.max(3, puzzle.givens.flat().filter(value => value === 0).length * 3);
+    case 'word_search': return puzzle.words.length * 4 + 2;
+    case 'crossword': return Math.min(1_000, puzzle.entries.reduce((total, entry) => total + entry.answer.length, 0) * 2 + 4);
+  }
+}
+
+function recoveryAttemptScopes(input: {
+  teamId: string;
+  runId: string;
+  checkpointId: string;
+  node: InteractiveNode;
+  parallelMechanics: ReturnType<typeof materializeRunParallelMechanics>;
+}) {
+  const scopes: Array<{ scope: string; additionalAttempts: number; label: string }> = [];
+  if (['verify_qr', 'verify_code', 'verify_answer'].includes(input.node.type)) {
+    scopes.push({
+      scope: `run-verifier:aggregate:${input.teamId}:${input.runId}:${input.checkpointId}:${input.node.id}`,
+      additionalAttempts: 6,
+      label: 'current verifier',
+    });
+  } else if (input.node.type === 'puzzle') {
+    scopes.push({
+      scope: `run-puzzle-submit:aggregate:${input.teamId}:${input.runId}:${input.checkpointId}:${input.node.id}`,
+      additionalAttempts: puzzleRecoveryAllowance(input.node.puzzle),
+      label: 'current puzzle',
+    });
+  }
+  for (const mechanic of input.parallelMechanics) for (const lane of mechanic.lanes) {
+    if (lane.type !== 'code' && lane.type !== 'qr') continue;
+    scopes.push({
+      scope: `parallel-lane:aggregate:${input.teamId}:${input.runId}:${mechanic.id}:${lane.id}`,
+      additionalAttempts: 6,
+      label: `parallel lane ${mechanic.id}/${lane.id}`,
+    });
+  }
+  return scopes;
+}
+
+function gameplaySnapshot(state: GameState) {
+  const checkpointId = state.activeCheckpointId;
+  return {
+    revision: state.revision,
+    status: state.status,
+    checkpointId,
+    nodeId: checkpointId ? state.checkpoints[checkpointId]?.activeNodeId ?? null : null,
+    score: state.score,
+    deadlineAt: state.timer?.deadlineAt ?? null,
+  };
+}
+
+/**
+ * Narrow organizer recovery for a run's current authoritative action. The
+ * browser supplies only a run identity and revision; checkpoint/node identity
+ * is resolved again after the run row is locked.
+ */
+export async function controlRunGameplay(input: {
+  huntId: string;
+  teamId: string;
+  runId: string;
+  requestId: string;
+  expectedRevision: number;
+  control: RunGameplayControl;
+  reason: string;
+  seconds?: number;
+  actor: string;
+  sessionHash: string;
+}) {
+  if (![input.teamId, input.runId, input.requestId].every(isV3Uuid)) {
+    throw new HttpError(400, 'Valid team, run, and request IDs are required.');
+  }
+  if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0) {
+    throw new HttpError(400, 'A current run revision is required.');
+  }
+  if (!['approve_current', 'reset_current', 'extend_session'].includes(input.control)) {
+    throw new HttpError(400, 'Choose a supported run recovery action.');
+  }
+  const reason = input.reason.normalize('NFKC').trim();
+  if (!reason || reason.length > 500) throw new HttpError(400, 'Give a reason for this run recovery action.');
+  const seconds = input.control === 'extend_session' ? input.seconds : undefined;
+  if (input.control === 'extend_session' && (!Number.isSafeInteger(seconds) || Number(seconds) < 60 || Number(seconds) > 3600)) {
+    throw new HttpError(400, 'Extend a timed run by 1 to 60 minutes.');
+  }
+  const scopeKey = `admin:run-control:${input.runId}`;
+  const payloadHash = digest(canonicalJson({
+    operation: 'run_gameplay_control',
+    huntId: input.huntId,
+    teamId: input.teamId,
+    runId: input.runId,
+    expectedRevision: input.expectedRevision,
+    control: input.control,
+    reason,
+    ...(seconds === undefined ? {} : { seconds }),
+  }));
+
+  return transaction(async client => {
+    if (!await lockV3Hunt(client, input.huntId)) {
+      throw new HttpError(404, 'Hunt not found.');
+    }
+    if (!await lockV3Team(client, input.huntId, input.teamId)) {
+      throw new HttpError(404, 'Team not found for this hunt.');
+    }
+    const run = (await client.query(
+      `select run.*,version.definition,hunt.status as hunt_status,
+        team.status as team_status,team.approval_status
+        from hunt_v3.runs run
+        join hunt_v3.teams team on team.id=run.team_id and team.hunt_id=run.hunt_id
+        join hunt_v3.hunts hunt on hunt.id=run.hunt_id
+        join hunt_v3.hunt_versions version on version.hunt_id=run.hunt_id and version.version=run.hunt_version
+        where run.id=$1 and run.team_id=$2 and run.hunt_id=$3
+        for update of run`,
+      [input.runId, input.teamId, input.huntId],
+    )).rows[0] as ({
+      id: string;
+      team_id: string;
+      hunt_id: string;
+      status: string;
+      engine_state: GameState;
+      route_plan: ResolvedRunPlan;
+      definition: V3Definition;
+      hunt_status: string;
+      team_status: string;
+      approval_status: string;
+    } | undefined);
+    if (!run) throw new HttpError(404, 'Run not found for this team and hunt.');
+
+    const receipt = (await client.query(
+      `select operation,payload_hash,response from hunt_v3.command_receipts
+        where scope_key=$1 and request_id=$2`,
+      [scopeKey, input.requestId],
+    )).rows[0];
+    if (receipt) {
+      if (receipt.operation !== 'run_gameplay_control' || receipt.payload_hash !== payloadHash) {
+        throw new HttpError(409, 'This recovery request ID was already used with different details.');
+      }
+      return receipt.response as Record<string, unknown>;
+    }
+    if (run.team_status !== 'active' || run.approval_status !== 'approved') {
+      throw new HttpError(409, 'This team is not eligible for gameplay recovery.');
+    }
+    if (!['live', 'paused'].includes(run.hunt_status)) {
+      throw new HttpError(409, 'Gameplay recovery is unavailable before the event starts or after it ends.');
+    }
+    if (run.status !== 'active' || run.engine_state.status !== 'active') {
+      throw new HttpError(409, 'Only an active run can receive gameplay recovery.');
+    }
+    if (run.engine_state.revision !== input.expectedRevision) {
+      throw new HttpError(409, 'This run changed. Refresh before applying organizer recovery.');
+    }
+
+    const definition = materializeRunDefinition(run.definition, run.route_plan);
+    const checkpointId = run.engine_state.activeCheckpointId;
+    const nodeId = checkpointId ? run.engine_state.checkpoints[checkpointId]?.activeNodeId : null;
+    const checkpoint = checkpointId ? definition.checkpoints.find(candidate => candidate.id === checkpointId) : undefined;
+    const node = checkpoint?.flow.nodes.find(candidate => candidate.id === nodeId);
+    if (!checkpointId || !nodeId || !checkpoint || !node || !('type' in node)) {
+      throw new HttpError(409, 'This run has no current action to recover.');
+    }
+    const interactiveNode = node as InteractiveNode;
+    const parallelMechanics = materializeRunParallelMechanics(run.definition, run.route_plan)
+      .filter(mechanic => mechanic.checkpointId === checkpointId && mechanic.nodeId === nodeId);
+    if (input.control === 'approve_current' && interactiveNode.type !== 'verify_organizer') {
+      throw new HttpError(409, 'Only the current organizer-verification gate can be approved here.');
+    }
+    if (input.control === 'approve_current' && parallelMechanics.length) {
+      throw new HttpError(409, 'This gate is controlled by linked teammate lanes and cannot be bypassed by a generic approval.');
+    }
+    const resettable = ['verify_qr', 'verify_code', 'verify_answer', 'puzzle'].includes(interactiveNode.type) || parallelMechanics.length > 0;
+    if (input.control === 'reset_current' && !resettable) {
+      throw new HttpError(409, 'The current action has no resettable competitive attempt budget.');
+    }
+
+    const now = new Date((await client.query('select clock_timestamp() as at')).rows[0].at).toISOString();
+    const pendingMedia = input.control === 'reset_current' ? (await client.query(
+      `select id from hunt_v3.media
+        where run_id=$1 and team_id=$2 and checkpoint_id=$3 and node_id=$4
+          and review_status='pending' for update`,
+      [run.id, run.team_id, checkpointId, nodeId],
+    )).rows as Array<{ id: string }> : [];
+    let controlState = run.engine_state;
+    for (const media of pendingMedia) controlState = discardReviewClockPause(controlState, media.id);
+    const control = input.control === 'extend_session'
+      ? { type: 'extend_session' as const, seconds: Number(seconds), expectedRevision: input.expectedRevision, reason }
+      : {
+        type: input.control === 'approve_current' ? 'approve_action' as const : 'reset_action' as const,
+        checkpointId,
+        nodeId,
+        expectedRevision: input.expectedRevision,
+        reason,
+      };
+    const result = executeControl(definition, controlState, control, now);
+    const completedAt = result.state.completedAt ?? null;
+    const elapsedMs = completedAt && result.state.startedAt
+      ? elapsedMilliseconds(result.state, result.state.startedAt, completedAt)
+      : null;
+    const recognitionClosesAt = completedAt && run.definition.settings.recognition.enabled
+      ? new Date(Date.parse(completedAt) + run.definition.settings.recognition.votingWindowMinutes * 60_000).toISOString()
+      : null;
+    const updated = await client.query(
+      `update hunt_v3.runs set engine_state=$1,status=$2,progress=$3,current_checkpoint_id=$4,
+        completed_at=$5,elapsed_ms=$6,recognition_closes_at=$7,updated_at=$8
+        where id=$9 and status='active' returning id`,
+      [result.state, result.state.status === 'completed' ? 'completed' : 'active', stateProgress(result.state),
+        result.state.activeCheckpointId, completedAt, elapsedMs, recognitionClosesAt, now, run.id],
+    );
+    if (!updated.rowCount) throw new HttpError(409, 'The run ended while this recovery action was being saved.');
+
+    let ordinal = Number((await client.query(
+      'select coalesce(max(ordinal),0)+1 as ordinal from hunt_v3.run_events where run_id=$1 and revision=$2',
+      [run.id, result.state.revision],
+    )).rows[0].ordinal);
+    let sourceEventId: number | null = null;
+    for (const event of result.state.events.slice(run.engine_state.events.length)) {
+      const saved = (await client.query(
+        `insert into hunt_v3.run_events(
+          run_id,team_id,revision,ordinal,request_id,actor_kind,event_type,checkpoint_id,node_id,details,occurred_at)
+          values($1,$2,$3,$4,$5,'organizer',$6,$7,$8,$9,$10) returning id`,
+        [run.id, run.team_id, result.state.revision, ordinal++, input.requestId, event.type,
+          event.checkpointId ?? null, event.nodeId ?? null, event, event.at],
+      )).rows[0];
+      sourceEventId ??= Number(saved.id);
+    }
+    if (!sourceEventId) throw new Error('Organizer recovery produced no audit event.');
+
+    const attemptScopes = input.control === 'reset_current' ? recoveryAttemptScopes({
+      teamId: run.team_id,
+      runId: run.id,
+      checkpointId,
+      node: interactiveNode,
+      parallelMechanics,
+    }) : [];
+    if (input.control === 'reset_current') {
+      await client.query(
+        `insert into hunt_v3.run_events(
+          run_id,team_id,revision,ordinal,request_id,actor_kind,event_type,checkpoint_id,node_id,details,occurred_at)
+          values($1,$2,$3,$4,$5,'organizer','attempt_budget_reset',$6,$7,$8,$9)`,
+        [run.id, run.team_id, result.state.revision, ordinal++, input.requestId, checkpointId, nodeId,
+          { resetBoundaryRevision: result.state.revision, scopeCount: attemptScopes.length }, now],
+      );
+      if (pendingMedia.length) {
+        await client.query(
+          `update hunt_v3.media set review_status='rejected',review_reason=$1,reviewed_at=$2,
+            expires_at=case when retention='after_review' then $2::timestamptz else expires_at end
+            where id=any($3::uuid[]) and review_status='pending'`,
+          [`Organizer reset the current task: ${reason}`, now, pendingMedia.map(media => media.id)],
+        );
+      }
+    }
+    const ledger = result.state.ledger.slice(run.engine_state.ledger.length) as ScoreEntry[];
+    for (const entry of ledger) if (entry.amount) await client.query(
+      `insert into hunt_v3.score_ledger(
+        run_id,team_id,source_event_id,source_key,category,amount,counts_for_ranking,reason,details,created_at)
+        values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      [run.id, run.team_id, sourceEventId, entry.id, entry.kind, entry.amount,
+        entry.countsForRanking !== false, entry.reason ?? entry.kind, entry, entry.at],
+    );
+
+    const beforeState = gameplaySnapshot(run.engine_state);
+    const afterState = gameplaySnapshot(result.state);
+    const adminEvent = (await client.query(
+      `insert into hunt_v3.admin_events(
+        action,actor,session_token_hash,hunt_id,team_id,run_id,reason,before_state,after_state,details)
+        values('run_gameplay_recovery',$1,$2,$3,$4,$5,$6,$7,$8,$9) returning id`,
+      [input.actor, input.sessionHash, run.hunt_id, run.team_id, run.id, reason, beforeState, afterState,
+        { control: input.control, checkpointId, nodeId, seconds: seconds ?? null,
+          attemptAllowances: attemptScopes.map(scope => ({ label: scope.label, additionalAttempts: scope.additionalAttempts })),
+          rejectedPendingMedia: pendingMedia.length }],
+    )).rows[0];
+    for (const allowance of [...attemptScopes].sort((left, right) => left.scope.localeCompare(right.scope))) {
+      const allowanceScopeKey = digest(allowance.scope);
+      await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))', [allowanceScopeKey]);
+      await client.query(
+        `insert into hunt_v3.run_attempt_allowances(
+          scope_key,request_id,hunt_id,team_id,run_id,checkpoint_id,node_id,additional_attempts,
+          reason,organizer_actor,admin_event_id,created_at)
+          values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+        [allowanceScopeKey, input.requestId, run.hunt_id, run.team_id, run.id, checkpointId, nodeId,
+          allowance.additionalAttempts, reason, input.actor, adminEvent.id, now],
+      );
+    }
+    if (result.state.status === 'completed' && run.definition.settings.recognition.enabled) {
+      await recalculateRecognition(client, run.team_id, run.id);
+    }
+    await updateLiveRollup(client, run.id);
+    const response = {
+      ok: true,
+      runId: run.id,
+      teamId: run.team_id,
+      huntId: run.hunt_id,
+      control: input.control,
+      revision: result.state.revision,
+      status: result.state.status,
+      currentCheckpointId: result.state.activeCheckpointId,
+      currentNodeId: result.state.activeCheckpointId
+        ? result.state.checkpoints[result.state.activeCheckpointId]?.activeNodeId ?? null
+        : null,
+      additionalAttemptScopes: attemptScopes.length,
+    };
+    await client.query(
+      `insert into hunt_v3.command_receipts(
+        scope_key,request_id,operation,team_id,run_id,payload_hash,response)
+        values($1,$2,'run_gameplay_control',$3,$4,$5,$6)`,
+      [scopeKey, input.requestId, run.team_id, run.id, payloadHash, response],
+    );
+    return response;
+  });
+}
+
 export async function renameTeam(teamId: string, displayName: string | null, reason: string, actor: string) {
   const name = validateOptionalTeamName(displayName);
   if (!reason.trim() || reason.length > 500) throw new HttpError(400, 'Give a reason for the team-name change.');
   return transaction(async client => {
-    const team = (await client.query('select * from hunt_v3.teams where id=$1 for update', [teamId])).rows[0];
+    const identity = (await client.query('select hunt_id from hunt_v3.teams where id=$1', [teamId])).rows[0];
+    if (!identity) throw new HttpError(404, 'Team not found.');
+    if (!await lockV3Hunt(client, identity.hunt_id)) throw new HttpError(404, 'Hunt not found.');
+    const team = (await client.query(
+      'select * from hunt_v3.teams where id=$1 and hunt_id=$2 for update',
+      [teamId, identity.hunt_id],
+    )).rows[0];
     if (!team) throw new HttpError(404, 'Team not found.');
     await client.query(
       `update hunt_v3.teams set display_name=$1,name_key=$2,name_status=$3 where id=$4`,
@@ -627,24 +1190,62 @@ export async function renameTeam(teamId: string, displayName: string | null, rea
 }
 
 export async function setHuntLifecycle(huntId: string, status: string, expectedRevision: number, actor: string) {
-  const transitions: Record<string, string[]> = { ready: ['live', 'archived'], live: ['paused', 'ended'], paused: ['live', 'ended', 'archived'], ended: ['live', 'archived'], archived: ['ready'] };
+  const transitions: Record<string, string[]> = { ready: ['live', 'archived'], live: ['paused', 'ended'], paused: ['live', 'ended'], ended: [], archived: [] };
   if (!Object.hasOwn(transitions, status)) throw new HttpError(400, 'Choose a supported hunt status.');
   return transaction(async client => {
-    const hunt = (await client.query('select status,lifecycle_revision from hunt_v3.hunts where id=$1 for update', [huntId])).rows[0];
+    const hunt = (await client.query(
+      'select status,registration_open,lifecycle_revision from hunt_v3.hunts where id=$1 for update',
+      [huntId],
+    )).rows[0];
     if (!hunt) throw new HttpError(404, 'Hunt not found.');
     if (hunt.lifecycle_revision !== expectedRevision) throw new HttpError(409, 'This hunt changed. Refresh before updating it.');
     if (hunt.status !== status && !transitions[hunt.status]?.includes(status)) throw new HttpError(409, `Cannot move directly from ${hunt.status} to ${status}.`);
     if (hunt.status !== status) {
       const now = new Date((await client.query('select clock_timestamp() as at')).rows[0].at).toISOString();
+      // Run events and audit rows carry team ownership FKs. Lock all parent
+      // teams before any child run so lifecycle transitions keep the same
+      // hunt -> team -> run order as gameplay and competition controls.
+      await client.query(
+        'select id from hunt_v3.teams where hunt_id=$1 order by id for share',
+        [huntId],
+      );
       const runs = await client.query(
         `select run.id,run.team_id,run.engine_state from hunt_v3.runs run
-          where run.hunt_id=$1 and run.status='active' order by run.team_id,run.run_number for update of run`,
-        [huntId],
+          where run.hunt_id=$1 and run.status=any($2::text[])
+          order by run.team_id,run.run_number for update of run`,
+        [huntId, status === 'ended' ? ['waiting', 'active'] : ['active']],
       );
       for (const run of runs.rows) {
         const before = run.engine_state as GameState;
-        const shouldPause = hunt.status === 'live' && (status === 'paused' || status === 'ended');
-        const shouldResume = status === 'live' && (hunt.status === 'paused' || hunt.status === 'ended');
+        if (status === 'ended') {
+          const elapsedMs = before.startedAt ? elapsedMilliseconds(before, before.startedAt, now) : 0;
+          const ended = await client.query(
+            `update hunt_v3.runs set status='abandoned',eligible=false,elapsed_ms=$1,
+              ineligibility_reason=coalesce(ineligibility_reason,'Hunt ended by organizer'),updated_at=$2
+              where id=$3 and status in ('waiting','active') returning id`,
+            [elapsedMs, now, run.id],
+          );
+          if (!ended.rowCount) continue;
+          const ordinal = Number((await client.query(
+            'select coalesce(max(ordinal),0)+1 as ordinal from hunt_v3.run_events where run_id=$1 and revision=$2',
+            [run.id, before.revision],
+          )).rows[0].ordinal);
+          await client.query(
+            `insert into hunt_v3.run_events(
+              run_id,team_id,revision,ordinal,actor_kind,event_type,details,occurred_at)
+              values($1,$2,$3,$4,'organizer','run_ended_by_organizer',$5,$6)`,
+            [run.id, run.team_id, before.revision, ordinal, { reason: 'hunt_lifecycle_ended', elapsedMs }, now],
+          );
+          await client.query(
+            `insert into hunt_v3.admin_events(action,actor,hunt_id,team_id,run_id,reason,details)
+              values('run_ended_by_organizer',$1,$2,$3,$4,'Hunt ended by organizer',$5)`,
+            [actor, huntId, run.team_id, run.id, { elapsedMs }],
+          );
+          await updateLiveRollup(client, run.id);
+          continue;
+        }
+        const shouldPause = hunt.status === 'live' && status === 'paused';
+        const shouldResume = status === 'live' && hunt.status === 'paused';
         const after = shouldPause ? pauseRunClock(before, now)
           : shouldResume ? resumeRunClock(before, now) : before;
         if (after === before) continue;
@@ -664,9 +1265,21 @@ export async function setHuntLifecycle(huntId: string, status: string, expectedR
         }
         await updateLiveRollup(client, run.id);
       }
-      await client.query('update hunt_v3.hunts set status=$1,lifecycle_revision=lifecycle_revision+1 where id=$2', [status, huntId]);
+      await client.query(
+        `update hunt_v3.hunts set status=$1,
+          registration_open=case when status='ready' and $1='live' then false else registration_open end,
+          lifecycle_revision=lifecycle_revision+1 where id=$2`,
+        [status, huntId],
+      );
     }
-    await client.query(`insert into hunt_v3.admin_events(action,actor,hunt_id,before_state,after_state) values('hunt_status_changed',$1,$2,$3,$4)`, [actor, huntId, { status: hunt.status }, { status }]);
+    await client.query(
+      `insert into hunt_v3.admin_events(action,actor,hunt_id,before_state,after_state)
+        values('hunt_status_changed',$1,$2,$3,$4)`,
+      [actor, huntId, { status: hunt.status, registrationOpen: hunt.registration_open }, {
+        status,
+        registrationOpen: hunt.status === 'ready' && status === 'live' ? false : hunt.registration_open,
+      }],
+    );
     return { ok: true };
   });
 }
@@ -678,7 +1291,16 @@ export async function updatePublicBoard(client: PoolClient, input: {
   const allowed = new Set(['rank', 'team_code', 'team_name', 'points', 'progress', 'completion_status', 'runs', 'time']);
   if (!input.columns.length || input.columns.some(column => !allowed.has(column))) throw new HttpError(400, 'Choose supported public-board columns.');
   if (!input.enabled && input.status !== 'live') throw new HttpError(409, 'Enable the public board before freezing it.');
-  await client.query('set transaction isolation level repeatable read');
+  // A final snapshot uses READ COMMITTED deliberately: its first statement may
+  // wait behind an in-flight gameplay holder of the hunt barrier, and the next
+  // statement must take a fresh snapshot that includes that committed action.
+  // Frozen snapshots are operational/approximate and retain repeatable-read.
+  if (input.status !== 'final') await client.query('set transaction isolation level repeatable read');
+  if (!await lockV3Hunt(client, input.huntId, input.status === 'final' ? 'update' : 'key_share')) {
+    throw new HttpError(404, 'Hunt not found.');
+  }
+  const preSwept = input.status !== 'live';
+  if (preSwept) await terminalizeExpiredV3Runs(input.huntId, client);
   const source = (await client.query(
     'select clock_timestamp() as at from hunt_v3.public_boards where hunt_id=$1',
     [input.huntId],
@@ -707,11 +1329,51 @@ export async function updatePublicBoard(client: PoolClient, input: {
       requestedStatus: input.status,
     }],
   );
-  if (input.status !== 'live') return snapshotPublicBoard(client, input.huntId, input.status === 'final', input.actor, sourceCutoff);
+  if (input.status !== 'live') return snapshotPublicBoard(client, input.huntId, input.status === 'final', input.actor, sourceCutoff, preSwept);
   return { ok: true, url: input.enabled ? `/board/${result.rows[0].slug}` : null };
 }
 
-async function snapshotPublicBoard(client: PoolClient, huntId: string, final: boolean, actor: string, sourceCutoff: Date) {
+async function assertFinalBoardReady(client: PoolClient, huntId: string) {
+  const readiness = (await client.query(
+    `select hunt.status,
+      (select count(*)::int from hunt_v3.runs run
+        where run.hunt_id=hunt.id and run.status in ('waiting','active')) as open_runs,
+      (select count(*)::int from hunt_v3.media media
+        where media.hunt_id=hunt.id and media.kind='photo'
+          and media.review_status='pending' and media.submitted_at is not null) as pending_photo_reviews
+      from hunt_v3.hunts hunt where hunt.id=$1`,
+    [huntId],
+  )).rows[0];
+  if (!readiness) throw new HttpError(404, 'Hunt not found.');
+  const issues: Array<{ path: string; message: string }> = [];
+  if (readiness.status !== 'ended') {
+    issues.push({ path: 'hunt.status', message: `End the hunt before publishing a final board (current status: ${readiness.status}).` });
+  }
+  if (Number(readiness.open_runs) > 0) {
+    issues.push({ path: 'runs.status', message: `${readiness.open_runs} run${Number(readiness.open_runs) === 1 ? ' is' : 's are'} still waiting or active.` });
+  }
+  if (Number(readiness.pending_photo_reviews) > 0) {
+    issues.push({
+      path: 'media.reviewStatus',
+      message: `${readiness.pending_photo_reviews} submitted photo${Number(readiness.pending_photo_reviews) === 1 ? ' awaits' : 's await'} organizer review.`,
+    });
+  }
+  if (issues.length) {
+    throw new HttpError(409, 'The final board is not ready. Resolve the listed blockers and try again.', { issues });
+  }
+}
+
+async function snapshotPublicBoard(
+  client: PoolClient,
+  huntId: string,
+  final: boolean,
+  actor: string,
+  sourceCutoff: Date,
+  preSwept = false,
+) {
+  if (!await lockV3Hunt(client, huntId, final ? 'update' : 'key_share')) throw new HttpError(404, 'Hunt not found.');
+  if (!preSwept) await terminalizeExpiredV3Runs(huntId, client);
+  if (final) await assertFinalBoardReady(client, huntId);
   const board = (await client.query('select slug,enabled from hunt_v3.public_boards where hunt_id=$1 for update', [huntId])).rows[0];
   if (!board?.enabled) throw new HttpError(409, 'Enable the public board before freezing it.');
   // Project live rows on this transaction's stable snapshot. If projection or
@@ -748,7 +1410,8 @@ async function snapshotPublicBoard(client: PoolClient, huntId: string, final: bo
 
 export async function freezePublicBoard(huntId: string, final: boolean, actor: string) {
   return transaction(async client => {
-    await client.query('set transaction isolation level repeatable read');
+    if (!final) await client.query('set transaction isolation level repeatable read');
+    if (!await lockV3Hunt(client, huntId, final ? 'update' : 'key_share')) throw new HttpError(404, 'Hunt not found.');
     const source = (await client.query(
       'select clock_timestamp() as at from hunt_v3.public_boards where hunt_id=$1',
       [huntId],
@@ -807,6 +1470,21 @@ export async function overrideRecognition(input: {
   if (!headline && !data && !peer && !explanation) throw new HttpError(400, 'Change at least one visible recognition field.');
   if (!input.reason.trim() || input.reason.trim().length < 3 || input.reason.length > 500) throw new HttpError(400, 'Give a reason for this recognition override.');
   return transaction(async client => {
+    const identity = (await client.query(
+      `select run.hunt_id,result.team_id from hunt_v3.recognition_results result
+        join hunt_v3.runs run on run.id=result.run_id
+        where result.run_id=$1 and result.member_id=$2
+        order by result.revision desc,result.id desc limit 1`,
+      [input.runId, input.memberId],
+    )).rows[0];
+    if (!identity) throw new HttpError(404, 'Calculated recognition result not found.');
+    if (!await lockV3Hunt(client, identity.hunt_id)) throw new HttpError(404, 'Hunt not found.');
+    if (!await lockV3Team(client, identity.hunt_id, identity.team_id)) throw new HttpError(404, 'Team not found.');
+    const lockedRun = await client.query(
+      'select id from hunt_v3.runs where id=$1 and team_id=$2 and hunt_id=$3 for share',
+      [input.runId, identity.team_id, identity.hunt_id],
+    );
+    if (!lockedRun.rowCount) throw new HttpError(404, 'Run not found.');
     const result = (await client.query(
       `select result.*,run.hunt_id from hunt_v3.recognition_results result join hunt_v3.runs run on run.id=result.run_id
         where result.run_id=$1 and result.member_id=$2 order by result.revision desc,result.id desc limit 1 for update of result`,
@@ -871,7 +1549,7 @@ export async function pendingPhotoReviews(huntId: string) {
 }
 
 export async function reviewPhoto(input: { mediaId: string; approved: boolean; reason: string; requestId: string; actor: string }) {
-  if (!/^[0-9a-f-]{36}$/i.test(input.mediaId) || !/^[0-9a-f-]{36}$/i.test(input.requestId)) throw new HttpError(400, 'Choose a valid photo review.');
+  if (!isV3Uuid(input.mediaId) || !isV3Uuid(input.requestId)) throw new HttpError(400, 'Choose a valid photo review.');
   if (!input.reason.trim() || input.reason.length > 500) throw new HttpError(400, 'Give a short review reason.');
   const scopeKey = `admin:photo:${input.mediaId}`;
   const payloadHash = digest(canonicalJson({ approved: input.approved, reason: input.reason.trim() }));
@@ -881,13 +1559,15 @@ export async function reviewPhoto(input: { mediaId: string; approved: boolean; r
       if (receipt.payload_hash !== payloadHash) throw new HttpError(409, 'This review request ID was already used.');
       return receipt.response;
     }
-    const identity = (await client.query('select team_id,run_id from hunt_v3.media where id=$1', [input.mediaId])).rows[0];
+    const identity = (await client.query('select hunt_id,team_id,run_id from hunt_v3.media where id=$1', [input.mediaId])).rows[0];
     if (!identity) throw new HttpError(404, 'Photo not found.');
+    if (!await lockV3Hunt(client, identity.hunt_id)) throw new HttpError(404, 'Hunt not found.');
+    if (!await lockV3Team(client, identity.hunt_id, identity.team_id)) throw new HttpError(404, 'Team not found.');
     const run = (await client.query(
       `select run.*,version.definition from hunt_v3.runs run
         join hunt_v3.hunt_versions version on version.hunt_id=run.hunt_id and version.version=run.hunt_version
-        where run.id=$1 and run.team_id=$2 for update of run`,
-      [identity.run_id, identity.team_id],
+        where run.id=$1 and run.team_id=$2 and run.hunt_id=$3 for update of run`,
+      [identity.run_id, identity.team_id, identity.hunt_id],
     )).rows[0] as ({ id: string; team_id: string; hunt_id: string; status: string; engine_state: GameState; route_plan: ResolvedRunPlan; definition: V3Definition } | undefined);
     if (!run) throw new HttpError(404, 'Run not found.');
     const media = (await client.query('select * from hunt_v3.media where id=$1 for update', [input.mediaId])).rows[0];
@@ -895,7 +1575,7 @@ export async function reviewPhoto(input: { mediaId: string; approved: boolean; r
     if (!media.submitted_at) throw new HttpError(409, 'This photo has not been submitted for organizer review.');
     if (run.status !== 'active') {
       const now = new Date((await client.query('select clock_timestamp() as at')).rows[0].at).toISOString();
-      const adjustedState = endReviewClockPause(run.engine_state, media.id, now);
+      const adjustedState = discardReviewClockPause(run.engine_state, media.id);
       await client.query(
         `update hunt_v3.media set review_status='rejected',review_reason=$1,reviewed_at=$2,
           expires_at=case when retention='after_review' then $2::timestamptz else expires_at end where id=$3`,
@@ -948,11 +1628,20 @@ export async function reviewPhoto(input: { mediaId: string; approved: boolean; r
         run.engine_state.checkpoints[mechanic.checkpointId]?.activeNodeId !== mechanic.nodeId) {
         throw new HttpError(409, 'The team moved on from this linked task.');
       }
+      const activeTaskStartedAt = run.engine_state.checkpoints[mechanic.checkpointId]?.nodes[mechanic.nodeId]?.startedAt;
+      if (!activeTaskStartedAt || new Date(media.task_started_at).getTime() !== Date.parse(activeTaskStartedAt)) {
+        throw new HttpError(409, 'This linked photo belongs to an earlier copy of the task. Ask the team to upload it again.');
+      }
       const submission = await client.query(
         `select 1 from hunt_v3.run_events
           where run_id=$1 and actor_member_id=$2 and event_type='parallel_photo_submitted'
             and checkpoint_id=$3 and node_id=$4
             and details->>'mediaId'=$5 and details->>'mechanicId'=$6 and details->>'laneId'=$7
+            and revision>=coalesce((
+              select max(reset.revision) from hunt_v3.run_events reset
+              where reset.run_id=$1 and reset.event_type='attempt_budget_reset'
+                and reset.checkpoint_id=$3 and reset.node_id=$4
+            ),0)
           limit 1`,
         [run.id, media.member_id, mechanic.checkpointId, mechanic.nodeId, media.id, mechanic.id, lane.id],
       );
@@ -976,12 +1665,14 @@ export async function reviewPhoto(input: { mediaId: string; approved: boolean; r
         [input.approved ? 'approved' : 'rejected', input.reason.trim(), now, media.id],
       );
       let adjustedState = run.engine_state;
-      // Approval/rejection ends the server-only wait. Until the browser submits
-      // an approved lane again (or replaces a rejection), player action is the
-      // blocker, so no parallel review interval may remain open.
+      // A review decision makes player action the blocker again, so no parallel
+      // interval may remain open. Only an approved evidence source earns the
+      // elapsed review credit; rejected or merely overlapping evidence does not.
       for (const pause of run.engine_state.clockPauses ?? []) {
         if (!pause.endedAt && pause.reason === 'review' && pause.sourceId) {
-          adjustedState = endReviewClockPause(adjustedState, pause.sourceId, now);
+          adjustedState = input.approved && pause.sourceId === media.id
+            ? endReviewClockPause(adjustedState, pause.sourceId, now)
+            : discardReviewClockPause(adjustedState, pause.sourceId);
         }
       }
       if (adjustedState !== run.engine_state) {
@@ -1010,11 +1701,14 @@ export async function reviewPhoto(input: { mediaId: string; approved: boolean; r
     const state = run.engine_state;
     const checkpoint = state.checkpoints[media.checkpoint_id];
     const node = checkpoint?.nodes[media.node_id];
-    if (state.activeCheckpointId !== media.checkpoint_id || checkpoint?.activeNodeId !== media.node_id || node?.pendingPhotoId !== media.id) {
+    if (state.activeCheckpointId !== media.checkpoint_id || checkpoint?.activeNodeId !== media.node_id || node?.pendingPhotoId !== media.id ||
+      !node.startedAt || new Date(media.task_started_at).getTime() !== Date.parse(node.startedAt)) {
       throw new HttpError(409, 'The team moved on or replaced this photo. Refresh the review queue.');
     }
     const now = new Date((await client.query('select clock_timestamp() as at')).rows[0].at).toISOString();
-    const adjustedState = endReviewClockPause(state, media.id, now);
+    const adjustedState = input.approved
+      ? endReviewClockPause(state, media.id, now)
+      : discardReviewClockPause(state, media.id);
     const command = {
       type: input.approved ? 'approve_action' as const : 'reject_photo' as const,
       checkpointId: media.checkpoint_id,

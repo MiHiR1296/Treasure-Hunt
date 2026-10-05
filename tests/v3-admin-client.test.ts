@@ -66,12 +66,22 @@ test('flattened live rows use the active run ID instead of the team ID', () => {
       runNumber: 2,
       runStatus: 'active',
       score: 45,
+      runRevision: 7,
+      activeRunTimed: true,
+      currentNodeId: 'organizer-gate',
+      currentNodeType: 'verify_organizer',
+      parallelMechanic: false,
     }],
   });
 
   assert.equal(response.teams[0]?.teamId, '11111111-1111-1111-1111-111111111111');
   assert.equal(response.teams[0]?.activeRun?.id, '22222222-2222-2222-2222-222222222222');
   assert.equal(response.teams[0]?.activeRun?.status, 'active');
+  assert.equal(response.teams[0]?.activeRun?.revision, 7);
+  assert.equal(response.teams[0]?.activeRun?.timed, true);
+  assert.equal(response.teams[0]?.activeRun?.currentNodeId, 'organizer-gate');
+  assert.equal(response.teams[0]?.activeRun?.currentNodeType, 'verify_organizer');
+  assert.equal(response.teams[0]?.activeRun?.parallelMechanic, false);
 });
 
 test('analytics preserves the completion instant that makes an exact tie exact', () => {

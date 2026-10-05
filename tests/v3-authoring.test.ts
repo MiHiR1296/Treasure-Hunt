@@ -24,6 +24,34 @@ test('V3 authoring executes the strict nested JSON Schema with field paths', asy
   assert.ok(issues.some(issue => issue.path === 'hunt.settings.leaderboardPolicy.timeVisibility'));
 });
 
+test('V3 authoring rejects progression controls that runtime route plans replace', async () => {
+  const nonSequential = await starter();
+  nonSequential.settings.mode = 'open';
+  assert.ok(validateV3Definition(nonSequential, { externalAuthoring: false }).issues.some(issue =>
+    issue.path === 'hunt.settings.mode' && issue.message.includes('sequential')));
+
+  const optionalCheckpoint = await starter();
+  optionalCheckpoint.checkpoints[1].required = false;
+  assert.ok(validateV3Definition(optionalCheckpoint, { externalAuthoring: false }).issues.some(issue =>
+    issue.path === 'hunt.checkpoints[1].required'));
+
+  const authoredDependency = await starter();
+  authoredDependency.checkpoints[1].prerequisites = ['start'];
+  assert.ok(validateV3Definition(authoredDependency, { externalAuthoring: false }).issues.some(issue =>
+    issue.path === 'hunt.checkpoints[1].prerequisites'));
+});
+
+test('V3 publication bounds capped official attempts but preserves unlimited official replay', async () => {
+  const oversizedCap = await starter();
+  oversizedCap.settings.runPolicy = { mode: 'capped', maxOfficialRuns: 999 };
+  assert.ok(validateV3Definition(oversizedCap).issues.some(issue =>
+    issue.path === 'hunt.settings.runPolicy.maxOfficialRuns' && issue.message.includes('validated structural plan')));
+
+  const unlimited = await starter();
+  unlimited.settings.runPolicy = { mode: 'unlimited' };
+  assert.deepEqual(validateV3Definition(unlimited).issues, [], 'unlimited official replay remains a supported organizer choice');
+});
+
 test('V3 publication binds ranking impact to score sources and rejects duplicate resolved checkpoints', async () => {
   const bonus = await starter();
   bonus.checkpoints[0].timeBonus = { withinSeconds: 30, points: 5, rankingImpact: 'excluded' };
@@ -74,6 +102,123 @@ test('V3 verifier authoring rejects low-entropy code fields', async () => {
   const invalid = await starter();
   invalid.settings.variableGenerators.code.length = 2;
   assert.ok(validateV3Definition(invalid).issues.some(issue => issue.path === 'hunt.settings.variableGenerators.code.length'));
+
+  const tinyOutcomeSpace = await starter();
+  tinyOutcomeSpace.settings.variableGenerators.code = { type: 'code', alphabet: '01', length: 6 };
+  assert.ok(validateV3Definition(tinyOutcomeSpace).issues.some(issue =>
+    issue.path === 'hunt.settings.variableGenerators.code' && issue.message.includes('outcome space')));
+
+  const normalizedHomoglyphs = await starter();
+  normalizedHomoglyphs.settings.variableGenerators.code = { type: 'code', alphabet: 'AＡ𝐀𝔸', length: 12 };
+  assert.ok(validateV3Definition(normalizedHomoglyphs).issues.some(issue =>
+    issue.path === 'hunt.settings.variableGenerators.code' && issue.message.includes('outcome space')),
+  'Unicode lookalikes that NFKC collapses cannot contribute fake entropy');
+
+  const foldedCase = await starter();
+  foldedCase.settings.variableGenerators.code = {
+    type: 'code', alphabet: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz', length: 5,
+  };
+  assert.ok(validateV3Definition(foldedCase).issues.some(issue =>
+    issue.path === 'hunt.settings.variableGenerators.code' && issue.message.includes('outcome space')),
+  'default case-insensitive comparison counts upper/lowercase pairs once');
+
+  const unevenFoldedCase = await starter();
+  unevenFoldedCase.settings.variableGenerators.code = { type: 'code', alphabet: 'AaB', length: 32 };
+  assert.ok(validateV3Definition(unevenFoldedCase).issues.some(issue =>
+    issue.path === 'hunt.settings.variableGenerators.code' && issue.message.includes('outcome space')),
+  'comparison-colliding symbols cannot overstate min-entropy through a biased folded alphabet');
+
+  const staticCode = await starter();
+  const codeNode = staticCode.checkpoints.find((checkpoint: any) => checkpoint.id === 'park-code').flow.nodes
+    .find((node: any) => node.type === 'verify_code');
+  codeNode.code = '1234';
+  assert.ok(validateV3Definition(staticCode).issues.some(issue =>
+    issue.path.endsWith('.code') && issue.message.includes('at least 8')));
+
+  const shareableCode = await starter();
+  const shareableNode = shareableCode.checkpoints.find((checkpoint: any) => checkpoint.id === 'park-code').flow.nodes
+    .find((node: any) => node.type === 'verify_code');
+  shareableNode.code = 'LONG-BUT-SHAREABLE';
+  assert.ok(validateV3Definition(shareableCode).issues.some(issue =>
+    issue.message.includes('can be shared across teams')),
+  'length prevents guessing but does not prevent a solved code being forwarded to another team');
+
+  const fakeDirective = await starter();
+  const fakeDirectiveNode = fakeDirective.checkpoints.find((checkpoint: any) => checkpoint.id === 'park-code').flow.nodes
+    .find((node: any) => node.type === 'verify_code');
+  fakeDirectiveNode.code = '@server:generate:not-a-qr-field';
+  assert.ok(validateV3Definition(fakeDirective).issues.some(issue =>
+    issue.path.endsWith('.code') && issue.message.includes('only for QR tokens')));
+});
+
+test('V3 parallel publication requires photo evidence for shareable static codes', async () => {
+  const invalid = await starter();
+  invalid.settings.minTeamSize = 3;
+  invalid.checkpoints[0].flow.nodes[0] = {
+    id: 'welcome', type: 'verify_organizer', prompt: 'Complete both lanes.', next: 'finish-start',
+  };
+  invalid.settings.parallelMechanics = [{
+    id: 'opening-split', checkpointId: 'start', nodeId: 'welcome', timeWindowSeconds: 60,
+    lanes: [
+      { id: 'one', label: 'First code', type: 'code', code: 'STATIC-CODE-ONE' },
+      { id: 'two', label: 'Second code', type: 'code', code: 'STATIC-CODE-TWO' },
+    ],
+  }];
+  assert.ok(validateV3Definition(invalid).issues.some(issue =>
+    issue.path === 'hunt.settings.parallelMechanics[0].lanes' && issue.message.includes('can be shared')));
+
+  invalid.settings.parallelMechanics[0].lanes.push({ id: 'proof', label: 'Fresh proof', type: 'photo' });
+  assert.deepEqual(validateV3Definition(invalid).issues, []);
+
+  const generated = await starter();
+  generated.checkpoints[0].flow.nodes[0] = {
+    id: 'welcome', type: 'verify_organizer', prompt: 'Complete both lanes.', next: 'finish-start',
+  };
+  generated.settings.parallelMechanics = [{
+    id: 'opening-split', checkpointId: 'start', nodeId: 'welcome', timeWindowSeconds: 60,
+    lanes: [
+      { id: 'one', label: 'First run code', type: 'code', code: '{{code}}' },
+      { id: 'two', label: 'Second run code', type: 'code', code: 'SECOND-{{code}}' },
+    ],
+  }];
+  assert.deepEqual(validateV3Definition(generated).issues, [],
+    'materializing a generated code must not reclassify it as a reusable static lane');
+});
+
+test('V3 publication rejects puzzle spaces that normal UI moves can exhaust', async () => {
+  const cases = [
+    {
+      type: 'jigsaw', rows: 2, columns: 2,
+      pieces: ['a', 'b', 'c', 'd'].map(id => ({ id, imageUrl: `/images/${id}.png` })),
+      solution: ['a', 'b', 'c', 'd'],
+    },
+    {
+      type: 'matching',
+      left: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }],
+      right: [{ id: 'one', label: 'One' }, { id: 'two', label: 'Two' }],
+      solution: [{ leftId: 'a', rightId: 'one' }, { leftId: 'b', rightId: 'two' }],
+    },
+    {
+      type: 'sequence',
+      items: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }],
+      solution: ['a', 'b'],
+    },
+    {
+      type: 'rotation', columns: 1,
+      tiles: [{ id: 'only', imageUrl: '/images/only.png', correctRotation: 90 }],
+    },
+  ];
+  for (const puzzle of cases) {
+    const invalid = await starter();
+    invalid.checkpoints[0].flow.nodes[0] = {
+      id: 'welcome', type: 'puzzle', prompt: 'Solve carefully.', puzzle, next: 'finish-start',
+    };
+    assert.ok(validateV3Definition(invalid).issues.some(issue =>
+      issue.path.startsWith('hunt.checkpoints[0].flow.nodes[0].puzzle')),
+    `${puzzle.type} should not publish with an exhaustible search space`);
+    assert.ok(validateV3Definition(invalid, { externalAuthoring: false }).issues.some(issue =>
+      issue.path === 'hunt.checkpoints[0].flow.nodes[0].puzzle' && issue.message.includes('need at least')));
+  }
 });
 
 test('V3 publication proves every generated value used by text, URLs, and parallel codes', async () => {

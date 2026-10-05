@@ -125,6 +125,19 @@ export function beginReviewClockPause(original: GameState, sourceId: string, sta
 }
 
 /**
+ * Remove a provisional moderation wait without crediting it to ranking time or
+ * a countdown deadline. Rejected evidence must not turn organizer review time
+ * into a free competitive pause.
+ */
+export function discardReviewClockPause(original: GameState, sourceId: string): GameState {
+  const pauseIndex = original.clockPauses?.findIndex(pause => !pause.endedAt && pause.reason === 'review' && pause.sourceId === sourceId) ?? -1
+  if (pauseIndex < 0) return original
+  const state = structuredClone(original)
+  state.clockPauses!.splice(pauseIndex, 1)
+  return state
+}
+
+/**
  * Close the provisional moderation wait. Only the portion not already covered
  * by another pause extends a countdown deadline, so organizer/review overlap
  * cannot grant time twice.
