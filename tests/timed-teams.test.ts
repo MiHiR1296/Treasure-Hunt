@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createInitialState, executeCommand, executeControl, getPlayerView, validateHunt } from '../lib/engine';
 import { EngineError, type HuntDefinition, type GameState } from '../lib/engine/types';
-import { assertStartWindow, elapsedMilliseconds, pauseSession, playability, resumeSession, timerRemaining } from '../lib/engine/session';
+import { assertStartWindow, beginReviewClockPause, discardReviewClockPause, elapsedMilliseconds, endReviewClockPause, pauseSession, playability, resumeSession, timerRemaining } from '../lib/engine/session';
 import { assignRoutes } from '../lib/server/routes';
 import { validateRosterNames, parseCommand } from '../lib/engine/validation';
 import { resultsCsv } from '../lib/engine/reporting';
@@ -103,6 +103,38 @@ test('pause clips all elapsed intervals and does not revive already expired time
   assert.equal(elapsedMilliseconds(state, at(40), at(90)), 10000);
   assert.equal(elapsedMilliseconds(state, at(10), at(40)), 20000);
   assert.deepEqual(pauseSession(state, at(170)), state);
+});
+
+test('keyed review waits freeze clocks without blocking play and credit overlapping waits exactly once', () => {
+  const h = hunt();
+  let state = createInitialState(h, 'team', at());
+  state = beginReviewClockPause(state, 'photo-a', at(100));
+  assert.deepEqual(beginReviewClockPause(state, 'photo-a', at(101)), state, 'one media submission opens at most one interval');
+  state = beginReviewClockPause(state, 'photo-b', at(110));
+  assert.equal(playability(h, state, 'live', at(170)).allowed, true, 'moderation freezes time but not independent gameplay');
+  assert.equal(timerRemaining(state, at(999)), 20, 'the countdown remains frozen at the first unresolved review');
+  assert.equal(getPlayerView(h, state, at(170)).timer?.paused, true, 'the public countdown does not visually tick during review');
+
+  state = endReviewClockPause(state, 'photo-b', at(150));
+  assert.equal(state.timer?.deadlineAt, at(160), 'closing the nested review credits its 40-second interval');
+  state = endReviewClockPause(state, 'photo-a', at(180));
+  assert.equal(state.timer?.deadlineAt, at(200), 'reverse-order closure credits only the uncovered union');
+  assert.equal(elapsedMilliseconds(state, at(), at(180)), 100000);
+  assert.equal(getPlayerView(h, state, at(180)).timer?.paused, false);
+  assert.deepEqual(endReviewClockPause(state, 'photo-a', at(190)), state, 'closing the same review twice is idempotent');
+});
+
+test('discarding a rejected review wait resumes clocks without granting time credit', () => {
+  const h = hunt();
+  let state = createInitialState(h, 'team', at());
+  const deadline = state.timer!.deadlineAt;
+  state = beginReviewClockPause(state, 'rejected-photo', at(30));
+  assert.equal(timerRemaining(state, at(90)), 90, 'pending moderation provisionally freezes the countdown');
+  state = discardReviewClockPause(state, 'rejected-photo');
+  assert.equal(state.timer!.deadlineAt, deadline, 'rejection does not extend the deadline');
+  assert.equal(timerRemaining(state, at(90)), 30);
+  assert.equal(elapsedMilliseconds(state, at(), at(90)), 90_000, 'the rejected wait remains competitive elapsed time');
+  assert.deepEqual(discardReviewClockPause(state, 'rejected-photo'), state, 'discarding the same wait twice is idempotent');
 });
 
 test('extension adds allowance, reopen starts from now, neither deducts elapsed time or waiting', () => {

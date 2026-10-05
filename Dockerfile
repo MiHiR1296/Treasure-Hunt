@@ -16,7 +16,8 @@ COPY --from=build --chown=node:node /app/public ./public
 COPY --from=build --chown=node:node /app/scripts ./scripts
 COPY --from=build --chown=node:node /app/lib ./lib
 COPY --from=build --chown=node:node /app/database ./database
+COPY --from=build --chown=node:node /app/docs ./docs
 RUN mkdir -p /app/.data/media && chown -R node:node /app/.data
 USER node
 EXPOSE 3000
-CMD ["sh", "-c", "node scripts/v2-migrate.mjs && npm start"]
+CMD ["npm", "run", "start:cloud"]

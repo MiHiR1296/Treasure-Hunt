@@ -32,9 +32,12 @@ export default function ChoicePuzzles({ definition, state, disabled, onChange, d
     const answered = new Map(state.responses.map(answer => [answer.questionId, answer]))
     const question = definition.questions.find(candidate => !answered.has(candidate.id))
     const thresholdMet = state.correctCount >= definition.minimumCorrect
+    const bonusCopy = definition.bonusRankingImpact === 'excluded'
+      ? 'Finish now or answer another question for extra points that do not change leaderboard score.'
+      : 'Finish now or answer another question for a bonus.'
     if (!question) return <div className="space-y-4"><p className="font-semibold">Your team answered every question.</p><p className="text-sm text-stone-600">{state.correctCount} correct answers. The configured threshold is {definition.minimumCorrect}.</p>{thresholdMet && <button type="button" disabled={locked} onClick={() => void submit({ finish: true })} className={`${puzzleButton} w-full`}>Finish quiz and continue</button>}<PuzzleSaveMessage busy={busy} error={error} /></div>
     return <div className="space-y-4">
-      <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950"><p className="font-bold">{state.correctCount} of {definition.minimumCorrect} correct needed</p><p className="mt-1">{thresholdMet ? 'You have met the threshold. Finish now or answer another question for a bonus.' : `Answer any ${definition.minimumCorrect} correctly. Question ${state.responses.length + 1} of ${definition.questions.length}; a wrong answer closes only this question.`}</p></div>
+      <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950"><p className="font-bold">{state.correctCount} of {definition.minimumCorrect} correct needed</p><p className="mt-1">{thresholdMet ? `You have met the threshold. ${bonusCopy}` : `Answer any ${definition.minimumCorrect} correctly. Question ${state.responses.length + 1} of ${definition.questions.length}; a wrong answer closes only this question.`}</p></div>
       {thresholdMet && <button type="button" disabled={locked} onClick={() => void submit({ finish: true })} className={`${puzzleButton} w-full`}>Finish now and continue</button>}
       <p className="whitespace-pre-wrap leading-relaxed">{question.prompt}</p>
       <div className="space-y-3">{question.options.map(option => <button type="button" key={option.id} disabled={locked} onClick={() => void submit({ questionId: question.id, optionId: option.id, skip: false })} className={`${puzzleButton} w-full text-left bg-white`}>{option.label}</button>)}</div>

@@ -1,45 +1,52 @@
-# Treasure Hunt Engine
+# Treasure Hunt Engine V3
 
-A configurable, web-first engine for real-world treasure hunts. Organizers design checkpoints from reusable actions; participants open a link, join a team, and see one task at a time.
+A mobile-first engine for replayable, real-world team treasure hunts. V3 keeps a team as a stable identity and records every attempt as an immutable run with its own seed, route, variables, score, timing, contribution evidence, and result.
 
-**Hosted demo:** [Play](https://hunt.mrbtstudio.com/v2) · [Organizer console](https://hunt.mrbtstudio.com/v2/admin). The demo runs independently of the organizer's computer in its own Vercel Hobby project, with the existing Supabase Free database and private media storage. The custom domain's DNS, HTTPS, gameplay and uploads were verified on 2026-09-19; the earlier Render service is suspended. The portfolio remains separate, with no navigation links between the two applications. See [Vercel hosting and domain setup](docs/v2/vercel-hosting.md).
+V3 is a clean runtime replacement for V2. The final V2 implementation remains available from the `v2-final` archive branch/tag; new production events use the private `hunt_v3` PostgreSQL schema and the `/v3` interfaces.
 
-V2 supports:
+## What V3 includes
 
-- Direct node-and-socket checkpoint flow editing, reusable templates, incomplete drafts, visual validation, immutable published versions and isolated player previews.
-- QR and backup codes, answers, approximate GPS areas, maps, camera guidance, private photo uploads with organizer review, and live recovery paths.
-- Ten puzzle modules: jigsaw, Sudoku, word search, crossword, rotation, text, multiple choice, threshold quiz, matching and sequence. Crosswords retain the active Across/Down clue while a team types. The same modules can unlock hints. The organiser can generate verified word-search, Sudoku, and crossword candidates; see [puzzle generators](docs/v2/puzzle-generators.md).
-- Independent text/image/audio/video/map/camera/puzzle hints with costs, availability rules, and optional step/word/crossword-answer targeting that stops offering obsolete hints.
-- Sequential, open and prerequisite-based hunts; choices, conditions, variables, deterministic weighted routes, scoring rules and optional checkpoints.
-- Shared team progress, revisioned puzzle saves, optional organizer-only answer-attempt history, safe request retries, score ledger, authenticated organizer controls, help requests, activity, analytics and configurable leaderboard.
-- Optional roster lobbies and personal timers, pause-aware deadlines and reasoned extensions; legacy hunts retain their existing immediate-start behavior.
-- Preassigned independently distributed routes for new hunts, forced-route isolated previews, sticky answer-aware hint expiry, and private paginated Results/review/export tools.
-- Controlled branding: colors, logo, cover/background images, typography, button shapes, checkpoint badges and reduced-motion-aware success effects.
-- Feedback beside answers, floating progress/points confirmations and optional success sound, with quiet puzzle saves and reloads.
-- Standard Node/PostgreSQL hosting, Docker, persistent media, optional HTTPS reverse proxy, backup/restore tools and V1 content import.
+- Self-serve, organizer-assigned, and rostered registration with canonical team codes and visible crew rosters.
+- Deterministic run seeds, replay policies, run-scoped variables, challenge pools, constrained routes, and publication-time score/duration fairness checks.
+- Organizer-selectable play style: casual hunts default to automatic self-serve approval, join-anytime participation with fixed contribution eligibility, and GPS-only completion; staffed and prize events can require approval, freeze the starting roster, and add photo and/or organizer location checks. Aggregate attempt budgets remain team-wide in every mode.
+- Best-run scoreboards, an optional replay board, and an organizer-controlled public board that exposes team-level data only.
+- Private, server-backed crew contributions and optional teammate recognition, with a named organizer audit and reasoned overrides.
+- Parallel multi-member mechanics backed by authenticated member identities and idempotent commands.
+- A live organizer console for lifecycle controls, rosters, team search, alerts, photo review, public-board snapshots, and run-aware analytics.
+- Mobile result, replay, and share-card flows. Native Web Share is used where available, with image-download and caption-copy fallbacks.
+- A versioned JSON Schema and external AI authoring kit. Imported content always remains an editable draft until it passes validation, preview, fairness checks, and organizer publication.
 
-Photo verification currently uses an organizer's judgement, optionally preceded by GPS. Camera guidance provides reference overlays and direction; automated landmark recognition remains an extension described in the [product plan](docs/v2/product-plan.md).
+Private answers, seeds, unused variants, recognition votes, player names, and organizer configuration are redacted from player and public-board responses.
 
 ## Start locally
 
-Use Node 22 and PostgreSQL 17. Copy `.env.example` to `.env`; configure `DATABASE_URL`, a unique `ORGANIZER_PASSWORD` of at least 12 characters, and `APP_ORIGIN=http://localhost:3000`.
+Use Node 22 and PostgreSQL 17. Copy `.env.example` to `.env`, then set `DATABASE_URL`, a unique `ORGANIZER_PASSWORD` of at least 12 characters, and `APP_ORIGIN=http://localhost:3000`.
 
 ```sh
 npm ci
 npm run db:migrate
-npm run db:seed
 npm run dev
 ```
 
-Open [the six-checkpoint demo](http://localhost:3000/v2?hunt=kalyan-demo) or [the organizer console](http://localhost:3000/v2/admin). The organizer signs in with the password you configured. See the [showcase walkthrough](docs/v2/showcase.md) for answers, QR materials, remote testing and landmark setup. Existing demo installations can publish the expanded showcase with `npm run db:seed -- --upgrade`; active teams keep their existing version.
+Open the [player experience](http://localhost:3000/v3) or [organizer command centre](http://localhost:3000/v3/admin). A new database begins without a published hunt: sign in to the organizer console, download or copy the authoring kit, import `public/authoring/treasure-hunt-v3.starter.json`, preview it, and publish when validation passes.
 
-For a self-contained Docker server, set `POSTGRES_PASSWORD`, `ORGANIZER_PASSWORD`, and `APP_ORIGIN` in `.env`, then:
+For a self-contained local Docker installation:
 
 ```sh
 docker compose up --build
 ```
 
-Publish the example or a template from the organizer console, or run `docker compose exec web npm run db:seed` for the six-checkpoint demo. PostgreSQL and uploaded media use persistent volumes. Phones need an HTTPS URL for browser camera/location; a localhost desktop link is not public phone access. Follow [self-hosting](docs/v2/self-hosting.md) for a tunnel, domain HTTPS, generic cloud, backups and restoration.
+PostgreSQL and private media use named persistent volumes. Normal phone browsers require a public HTTPS origin for camera, location, and share-sheet testing; localhost is suitable for desktop development only.
+
+## Authoring
+
+- [AI authoring kit](docs/v3-authoring-kit.md)
+- [Versioned JSON Schema](public/authoring/treasure-hunt-v3.schema.json)
+- [Starter hunt](public/authoring/treasure-hunt-v3.starter.json)
+- [Annotated parallel-mechanics example](public/authoring/treasure-hunt-v3.annotated-example.json)
+- [Adversarial integrity and release gate](docs/v3-adversarial-release-gate.md)
+
+The kit is intentionally provider-independent. It never includes production seeds, QR secrets, or production-only identifiers.
 
 ## Verify changes
 
@@ -50,31 +57,20 @@ npm run lint
 npm run build
 ```
 
-Use a dedicated test database for transactional and browser checks:
+Use a dedicated local test database for persistence and browser checks:
 
 ```sh
-npx playwright install chrome webkit
-DATABASE_URL=postgresql://user:password@127.0.0.1:5432/hunt_test npm run db:migrate
-DATABASE_URL=postgresql://user:password@127.0.0.1:5432/hunt_test npm run test:integration
-DATABASE_URL=postgresql://user:password@127.0.0.1:5432/hunt_test npm run test:e2e
-DATABASE_URL=postgresql://user:password@127.0.0.1:5432/hunt_test STRESS_ROUNDS=60 npm run test:stress
+DATABASE_URL=postgresql://user:password@127.0.0.1:5432/treasure_hunt_v3_test npm run db:migrate
+DATABASE_URL=postgresql://user:password@127.0.0.1:5432/treasure_hunt_v3_test npm run test:integration
+DATABASE_URL=postgresql://user:password@127.0.0.1:5432/treasure_hunt_v3_test npm run test:e2e
 ```
 
-Database tests explicitly skip without `DATABASE_URL`; a skipped suite does not verify persistence. Test guards reject remote/non-test database targets. Browser tests start their own server at `127.0.0.1:3100`; keep that port free. The default matrix runs Chrome with Android emulation, Playwright WebKit with iPhone emulation, and organizer/timed-team tests in desktop Chrome. Select one with `npm run test:e2e -- --project=android-chrome`, `--project=iphone-webkit` or `--project=desktop-chrome`, using the same test database environment. On Linux, add `--with-deps` to browser installation when system libraries are missing. Stress results measure the local service/PostgreSQL workload, not physical phones or production HTTP latency.
+The default end-to-end command is deliberately scoped to the supported V3 player journey in Android Chrome and iPhone WebKit. Historical V2 browser specs remain only as archive evidence and are not part of the V3 release gate. Database tests reject remote/non-test targets and skip when `DATABASE_URL` is absent; a skipped suite is not persistence verification. Emulated browsers do not prove physical camera, GPS, or native share-sheet behavior, so Android and iPhone verification remains a separate release gate.
 
-The browser suite covers shared progress, retries, keyboard puzzle entry, narrow/landscape layouts, custom theme contrast, reduced-motion preference, camera cleanup and isolated printable QR sheets. The virtual QR camera fixture runs only in Chrome. Emulated browsers and simulated camera frames do not prove physical phone sensors or public-network access; those results are recorded separately in the [acceptance register](docs/v2/acceptance.md).
+## Production operations
 
-## Project guide
+The container default runs `npm run start:cloud`, which validates the HTTPS origin and private media storage, applies the V3 schema, starts Next.js, and runs the bounded V3 media-retention worker. Render uses `/api/v3/health`; Vercel invokes `/api/v3/maintenance` with `CRON_SECRET`.
 
-- [Architecture and data contracts](docs/v2/architecture.md)
-- [Timed teams, route preview, hints, draft cleanup and Results guide](docs/v2/timed-teams.md)
-- [Creating action, puzzle, verification and hint modules](docs/v2/extensions.md)
-- [Self-hosting and operations](docs/v2/self-hosting.md)
-- [Vercel demo and MRBT subdomain](docs/v2/vercel-hosting.md)
-- [Earlier Render hosting and cloud migration](docs/v2/cloud-hosting.md)
-- [Demo and templates](docs/v2/showcase.md)
-- [Lokgram pilot hunt content brief](docs/v2/lokgram-pilot.md)
-- [V1 import and retirement](docs/v2/migration.md)
-- [All 92 product requirements and success evidence](docs/v2/acceptance.md)
+See the [V3 architecture and data contracts](docs/v3-architecture.md) and the [cutover, backup, restore, and rollback runbook](docs/v3-cutover.md). Before the first V3 cutover, take and verify a fresh database backup and a private-media backup. Do not treat a successful migration as a backup. Deployment must follow the branch, pull-request, external-review, and exact-SHA approval rules in [AGENTS.md](AGENTS.md).
 
-V1 routes and direct browser Supabase integration are disabled by default. Historical troubleshooting documents are archived under `docs/legacy`; their permissive SQL is not a V2 setup guide. V2 uses its private `hunt_v2` schema. Disabling legacy routes does not change an existing remote V1 database's permissions; see the migration guide before retiring it.
+Historical V2 architecture, hosting, and acceptance documentation remains under `docs/v2/` for archive reference only.

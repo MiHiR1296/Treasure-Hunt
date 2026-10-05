@@ -6,8 +6,8 @@ export function validatePuzzle(value: unknown): string[] {
   const fail = (message: string) => { errors.push(message) }
   if (!record(value) || typeof value.type !== 'string') return ['Puzzle must be an object with a supported type.']
   const fields: Record<string, string[]> = {
-    jigsaw: ['rows', 'columns', 'pieces', 'solution'], sudoku: ['size', 'givens'], word_search: ['grid', 'words', 'minimumWords', 'bonusPerExtraWord'], crossword: ['rows', 'columns', 'entries'],
-    rotation: ['columns', 'tiles'], text: ['prompt', 'answers', 'caseSensitive'], multiple_choice: ['prompt', 'options', 'correctOptionId'], quiz: ['questions', 'minimumCorrect', 'bonusPerAdditionalCorrect'], matching: ['left', 'right', 'solution'], sequence: ['items', 'solution'],
+    jigsaw: ['rows', 'columns', 'pieces', 'solution'], sudoku: ['size', 'givens'], word_search: ['grid', 'words', 'minimumWords', 'bonusPerExtraWord', 'bonusRankingImpact'], crossword: ['rows', 'columns', 'entries'],
+    rotation: ['columns', 'tiles'], text: ['prompt', 'answers', 'caseSensitive'], multiple_choice: ['prompt', 'options', 'correctOptionId'], quiz: ['questions', 'minimumCorrect', 'bonusPerAdditionalCorrect', 'bonusRankingImpact'], matching: ['left', 'right', 'solution'], sequence: ['items', 'solution'],
   }
   if (!Object.hasOwn(fields, value.type)) return ['Unsupported puzzle type.']
   if (Object.keys(value).some(key => key !== 'type' && !fields[value.type as string].includes(key))) fail('Puzzle contains unsupported fields.')
@@ -46,6 +46,7 @@ export function validatePuzzle(value: unknown): string[] {
         for (const target of words) if (!containsWord(grid as string[][], target)) fail(`Word ${target} does not appear in a straight line in the grid.`)
         if (value.minimumWords !== undefined && !integer(value.minimumWords, 1, words.length)) fail('Words required to continue must be between 1 and the number of hidden words.')
         if (value.bonusPerExtraWord !== undefined && !integer(value.bonusPerExtraWord, 0, 100)) fail('The bonus for each extra word must be between 0 and 100 points.')
+        if (value.bonusRankingImpact !== undefined && !['competitive', 'excluded'].includes(value.bonusRankingImpact as string)) fail('Word-search bonusRankingImpact must be competitive or excluded.')
       }
       break
     }
@@ -99,6 +100,7 @@ export function validatePuzzle(value: unknown): string[] {
       if (ids.size !== questions.length) fail('Quiz question IDs must be unique.')
       if (!integer(value.minimumCorrect, 1, questions.length)) fail('Quiz minimumCorrect must be between 1 and the number of questions.')
       if (value.bonusPerAdditionalCorrect !== undefined && !integer(value.bonusPerAdditionalCorrect, 0, 1000000)) fail('Quiz bonusPerAdditionalCorrect must be a non-negative whole number.')
+      if (value.bonusRankingImpact !== undefined && !['competitive', 'excluded'].includes(value.bonusRankingImpact as string)) fail('Quiz bonusRankingImpact must be competitive or excluded.')
       break
     }
     case 'matching': {

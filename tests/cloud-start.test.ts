@@ -16,9 +16,9 @@ async function fixture(t: TestContext, options: { migrationFailure?: boolean; wo
   await mkdir(path.join(root, 'node_modules/next/dist/bin'), { recursive: true });
   await mkdir(path.join(root, 'media'));
   await writeFile(path.join(root, 'package.json'), '{"type":"module"}');
-  await copyFile(new URL('../scripts/v2-cloud-start.mjs', import.meta.url), path.join(root, 'scripts/v2-cloud-start.mjs'));
+  await copyFile(new URL('../scripts/v3-cloud-start.mjs', import.meta.url), path.join(root, 'scripts/v3-cloud-start.mjs'));
   await copyFile(new URL('../lib/server/media-storage.mjs', import.meta.url), path.join(root, 'lib/server/media-storage.mjs'));
-  await writeFile(path.join(root, 'scripts/v2-migrate.mjs'), `
+  await writeFile(path.join(root, 'scripts/v3-migrate.mjs'), `
     import { writeFileSync } from 'node:fs';
     writeFileSync('migration-started', 'yes');
     process.exit(${options.migrationFailure ? 1 : 0});
@@ -31,10 +31,10 @@ async function fixture(t: TestContext, options: { migrationFailure?: boolean; wo
     ${name === 'worker' && options.workerFailure ? "setInterval(() => { if (existsSync('web-started')) process.exit(7); }, 20);" : 'setInterval(() => {}, 1000);'}
   `;
   await writeFile(path.join(root, 'node_modules/next/dist/bin/next'), child('web'));
-  await writeFile(path.join(root, 'scripts/v2-maintenance.mjs'), child('worker'));
+  await writeFile(path.join(root, 'scripts/v3-maintenance.mjs'), child('worker'));
   const env = { ...process.env };
   for (const key of ['APP_ORIGIN', 'RENDER_EXTERNAL_URL', 'RAILWAY_PROJECT_ID', 'RAILWAY_PUBLIC_DOMAIN', 'RAILWAY_VOLUME_MOUNT_PATH']) delete env[key];
-  const processUnderTest = spawn(process.execPath, ['scripts/v2-cloud-start.mjs'], {
+  const processUnderTest = spawn(process.execPath, ['scripts/v3-cloud-start.mjs'], {
     cwd: root,
     env: { ...env, DATABASE_URL: 'postgresql://unused.invalid/hunt', ORGANIZER_PASSWORD: 'fixture-password-only',
       APP_ORIGIN: 'https://hunt.example.test', MEDIA_STORAGE: 'filesystem', MEDIA_DIRECTORY: path.join(root, 'media'), ...options.env },
@@ -71,7 +71,7 @@ test('cloud startup migrates, runs both processes and shuts down both on SIGTERM
 test('cloud startup refuses to serve after a failed migration', { timeout: 10_000 }, async t => {
   const f = await fixture(t, { migrationFailure: true });
   assert.equal((await f.closed)[0], 1);
-  assert.match(f.output(), /Database migration failed/);
+  assert.match(f.output(), /V3 database migration failed/);
   await assert.rejects(readFile(path.join(f.root, 'web-started')), { code: 'ENOENT' });
   await assert.rejects(readFile(path.join(f.root, 'worker-started')), { code: 'ENOENT' });
 });
@@ -79,7 +79,7 @@ test('cloud startup refuses to serve after a failed migration', { timeout: 10_00
 test('a failed retention worker stops the web process and fails the cloud service', { timeout: 10_000 }, async t => {
   const f = await fixture(t, { workerFailure: true });
   assert.equal((await f.closed)[0], 1);
-  assert.match(f.output(), /media retention worker stopped unexpectedly/);
+  assert.match(f.output(), /V3 media retention worker stopped unexpectedly/);
   assert.equal(await f.waitFor('web-stopped'), 'yes');
 });
 

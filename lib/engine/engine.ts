@@ -24,6 +24,13 @@ function assertState(definition: HuntDefinition, state: GameState): void {
 }
 function event(state: GameState, value: Omit<GameEvent, 'id'>): void { state.events.push({ id: `event-${state.events.length + 1}`, ...value }) }
 function score(state: GameState, entry: Omit<ScoreEntry, 'id'>, semanticId?: string): void {
+  const rankingEntry = entry.countsForRanking !== false
+  const cacheScore = state.ledger.reduce((sum, item) =>
+    sum + ((item.countsForRanking !== false) === rankingEntry ? item.amount : 0), 0)
+  const nextCacheScore = cacheScore + entry.amount
+  if (!Number.isSafeInteger(nextCacheScore) || nextCacheScore < -2_147_483_648 || nextCacheScore > 2_147_483_647) {
+    throw new EngineError('score_limit', 'This score change exceeds the event score limit. Ask the organizer to review the hunt scoring.')
+  }
   const base = semanticId ?? `score-${state.ledger.length + 1}`
   let id = base, generation = 1
   while (state.ledger.some(item => item.id === id)) id = `${base}:${++generation}`
@@ -103,7 +110,7 @@ function activateNode(definition: HuntDefinition, state: GameState, checkpoint: 
     nodeProgress.status = 'completed'; nodeProgress.completedAt = now; progress.status = 'completed'; progress.activeNodeId = null; progress.completedAt = now
     for (const candidate of Object.values(progress.nodes)) if (candidate.status === 'pending') candidate.status = 'skipped'
     score(state, { kind: 'checkpoint_completed', checkpointId: checkpoint.id, amount: checkpoint.basePoints, at: now }, `completion:${checkpoint.id}`)
-    if (checkpoint.timeBonus && elapsedMilliseconds(state, progress.startedAt!, now) <= checkpoint.timeBonus.withinSeconds * 1000) score(state, { kind: 'time_bonus', checkpointId: checkpoint.id, amount: checkpoint.timeBonus.points, at: now }, `time:${checkpoint.id}`)
+    if (checkpoint.timeBonus && elapsedMilliseconds(state, progress.startedAt!, now) <= checkpoint.timeBonus.withinSeconds * 1000) score(state, { kind: 'time_bonus', checkpointId: checkpoint.id, amount: checkpoint.timeBonus.points, ...(checkpoint.timeBonus.rankingImpact === 'excluded' ? { countsForRanking: false } : {}), at: now }, `time:${checkpoint.id}`)
     event(state, { type: 'checkpoint_completed', checkpointId: checkpoint.id, nodeId: node.id, at: now })
     afterCheckpoint(definition, state, now, budget); return
   }
@@ -113,7 +120,7 @@ function activateNode(definition: HuntDefinition, state: GameState, checkpoint: 
     // Resetting an earlier action cannot farm automatic bonuses. A full checkpoint
     // restart explicitly compensates these awards before allowing a fresh award.
     const awarded = state.ledger.some(item => item.kind === 'action_points' && item.checkpointId === checkpoint.id && item.nodeId === node.id && !state.ledger.some(refund => refund.reverses === item.id))
-    if (!awarded) { score(state, { kind: 'action_points', checkpointId: checkpoint.id, nodeId: node.id, amount: node.amount, at: now, reason: node.label }); event(state, { type: 'points_changed', checkpointId: checkpoint.id, nodeId: node.id, at: now, amount: node.amount, reason: node.label }) }
+    if (!awarded) { score(state, { kind: 'action_points', checkpointId: checkpoint.id, nodeId: node.id, amount: node.amount, ...(node.rankingImpact === 'excluded' ? { countsForRanking: false } : {}), at: now, reason: node.label }); event(state, { type: 'points_changed', checkpointId: checkpoint.id, nodeId: node.id, at: now, amount: node.amount, reason: node.label }) }
     next = node.next
   }
   if (node.type === 'branch') next = conditionMatches(node.condition, state, now) ? node.ifTrue : node.ifFalse
@@ -133,11 +140,16 @@ function activateNode(definition: HuntDefinition, state: GameState, checkpoint: 
   nodeProgress.status = 'completed'; nodeProgress.completedAt = now; nextNodeId = next
   }
 }
-export function createInitialState(definition: HuntDefinition, teamId: string, now: string, options: { waiting?: boolean; routeAssignments?: GameState['routeAssignments'] } = {}): GameState {
+export function createInitialState(definition: HuntDefinition, teamId: string, now: string, options: {
+  waiting?: boolean
+  routeAssignments?: GameState['routeAssignments']
+  /** Server-resolved run variables must exist before the first automatic node traverses. */
+  initialVariables?: GameState['variables']
+} = {}): GameState {
   assertDefinition(definition)
   if (typeof teamId !== 'string' || !teamId.trim() || teamId.length > 200) throw new EngineError('invalid_team', 'A team is required.')
   const at = timestamp(now)
-  const state: GameState = { schemaVersion: 1, definitionId: definition.id, definitionVersion: definition.version, teamId, revision: 0, status: 'active', activeCheckpointId: null, checkpoints: {}, hintUsage: {}, ledger: [], events: [], score: 0, variables: {}, fallbacks: {}, startedAt: at }
+  const state: GameState = { schemaVersion: 1, definitionId: definition.id, definitionVersion: definition.version, teamId, revision: 0, status: 'active', activeCheckpointId: null, checkpoints: {}, hintUsage: {}, ledger: [], events: [], score: 0, variables: copy(options.initialVariables ?? {}), fallbacks: {}, startedAt: at }
   for (const checkpoint of definition.checkpoints) state.checkpoints[checkpoint.id] = initialProgress(checkpoint)
   if (options.routeAssignments) state.routeAssignments = copy(options.routeAssignments)
   if (options.waiting) { state.status = 'waiting'; delete state.startedAt; return state }
@@ -180,7 +192,7 @@ function applyPuzzleRewards(state: GameState, checkpointId: string, now: string,
     const semanticId = `puzzle:${checkpointId}:${owner}:${reward.id}`
     const activeAward = state.ledger.some(entry => (entry.id === semanticId || entry.id.startsWith(`${semanticId}:`)) && !state.ledger.some(refund => refund.reverses === entry.id))
     if (activeAward) continue
-    score(state, { kind: reward.kind ?? 'action_points', checkpointId, ...identity, amount: reward.amount, at: now, reason: reward.label }, semanticId)
+    score(state, { kind: reward.kind ?? 'action_points', checkpointId, ...identity, amount: reward.amount, ...(reward.countsForRanking === false ? { countsForRanking: false } : {}), at: now, reason: reward.label }, semanticId)
     event(state, { type: 'points_changed', checkpointId, ...identity, amount: reward.amount, at: now, reason: reward.label })
   }
 }
@@ -210,7 +222,7 @@ export const actionRegistry: Readonly<Record<InteractiveNode['type'], ActionModu
       const accepted = command.value === node.token || (node.backupCode !== undefined && normalize(command.value) === normalize(node.backupCode))
       if (accepted) return { accepted: true, next: node.next, message: 'You found it!', attempt: true, response: command.value === node.token ? 'QR scanned' : 'Printed phrase accepted' }
       const index = context.definition.dudQrs?.findIndex(dud => dud.token === command.value) ?? -1, dud = context.definition.dudQrs?.[index]
-      if (dud?.points && !context.state.ledger.some(entry => entry.id === `dud:${index}`)) score(context.state, { kind: 'dud_discovery', checkpointId: context.checkpoint.id, amount: dud.points, at: context.now, reason: dud.message }, `dud:${index}`)
+      if (dud?.points && !context.state.ledger.some(entry => entry.id === `dud:${index}`)) score(context.state, { kind: 'dud_discovery', checkpointId: context.checkpoint.id, amount: dud.points, ...(dud.rankingImpact === 'excluded' ? { countsForRanking: false } : {}), at: context.now, reason: dud.message }, `dud:${index}`)
       return { accepted: false, dud: !!dud, message: dud?.message ?? 'That is not the code for this task. Keep looking and try again.', attempt: true }
     }, toPlayer: node => ({ id: node.id, type: node.type, prompt: node.prompt, backupCodeEnabled: node.backupCode !== undefined }),
   }),
@@ -244,7 +256,8 @@ export const actionRegistry: Readonly<Record<InteractiveNode['type'], ActionModu
       if (retained.length || discoveries.length) saved.puzzleDiscoveries = [...retained, ...discoveries.map(item => ({ itemId: item.id, solvedAt: context.now }))]
       applyPuzzleRewards(context.state, context.checkpoint.id, context.now, update.rewards, { nodeId: node.id })
       const bonus = update.rewards.reduce((sum, reward) => sum + reward.amount, 0)
-      return { accepted: true, next: saved.puzzle.completed ? node.next : undefined, message: saved.puzzle.completed ? 'Puzzle solved!' : update.message ?? (bonus ? `Ingredient found — +${bonus} bonus points!` : 'Your puzzle progress is saved. Keep going.'), audit: saved.puzzle.completed ? 'puzzle_completed' : 'puzzle_saved', ...(saved.puzzle.completed ? { response: puzzleResponse(node.puzzle, saved.puzzle.state) } : {}) }
+      const excludedBonus = update.rewards.length > 0 && update.rewards.every(reward => reward.countsForRanking === false)
+      return { accepted: true, next: saved.puzzle.completed ? node.next : undefined, message: saved.puzzle.completed ? 'Puzzle solved!' : update.message ?? (bonus ? excludedBonus ? `Ingredient found — +${bonus} extra points (not leaderboard score)!` : `Ingredient found — +${bonus} bonus points!` : 'Your puzzle progress is saved. Keep going.'), audit: saved.puzzle.completed ? 'puzzle_completed' : 'puzzle_saved', ...(saved.puzzle.completed ? { response: puzzleResponse(node.puzzle, saved.puzzle.state) } : {}) }
     }, toPlayer: (node, context) => ({ id: node.id, type: node.type, prompt: node.prompt, puzzle: publicPuzzle(node.puzzle), progress: copy(context.state.checkpoints[context.checkpoint.id].nodes[node.id].puzzle ?? newPuzzle(node.puzzle)) }),
   }),
   verify_organizer: action('verify_organizer', { commands: [], execute: () => invalidAction(), toPlayer: node => ({ id: node.id, type: node.type, prompt: node.prompt }) }),
@@ -320,7 +333,10 @@ export function executeCommand(definition: HuntDefinition, original: GameState, 
   if (command.type === 'start_session') {
     if (original.status !== 'waiting') return { state: original, feedback: { status: 'already_applied', message: 'Your team has already started. The timer has not restarted.', scannerShouldStop: false } }
     if (command.expectedRevision !== original.revision) throw new EngineError('stale_roster', 'The roster changed. Refresh before starting.')
-    const state = createInitialState(definition, original.teamId, at, { routeAssignments: original.routeAssignments })
+    const state = createInitialState(definition, original.teamId, at, {
+      routeAssignments: original.routeAssignments,
+      initialVariables: original.variables,
+    })
     state.events = [...copy(original.events), ...state.events].map((entry, index) => ({ ...entry, id: `event-${index + 1}` }))
     state.revision = original.revision + 1
     state.startingRoster = copy(original.startingRoster ?? [])
@@ -418,8 +434,8 @@ export function executeControl(definition: HuntDefinition, original: GameState, 
     const usage = state.hintUsage[control.hintId]
     if (!usage || usage.checkpointId !== checkpoint.id) throw new EngineError('invalid_override', 'That hint has not been used at this checkpoint.')
     const charge = [...state.ledger].reverse().find(entry => entry.kind === 'hint_used' && entry.hintId === control.hintId && !state.ledger.some(refund => refund.reverses === entry.id))
-    if (charge) score(state, { kind: 'refund', checkpointId: checkpoint.id, hintId: control.hintId, amount: -charge.amount, reverses: charge.id, reason, at })
-    for (const award of state.ledger.filter(entry => entry.kind === 'action_points' && entry.hintId === control.hintId && !state.ledger.some(refund => refund.reverses === entry.id))) score(state, { kind: 'refund', checkpointId: checkpoint.id, hintId: control.hintId, amount: -award.amount, reverses: award.id, reason, at })
+    if (charge) score(state, { kind: 'refund', checkpointId: checkpoint.id, hintId: control.hintId, amount: -charge.amount, ...(charge.countsForRanking === false ? { countsForRanking: false } : {}), reverses: charge.id, reason, at })
+    for (const award of state.ledger.filter(entry => entry.kind === 'action_points' && entry.hintId === control.hintId && !state.ledger.some(refund => refund.reverses === entry.id))) score(state, { kind: 'refund', checkpointId: checkpoint.id, hintId: control.hintId, amount: -award.amount, ...(award.countsForRanking === false ? { countsForRanking: false } : {}), reverses: award.id, reason, at })
     if (usage.puzzle) { state.hintPuzzleRevisions ??= {}; state.hintPuzzleRevisions[control.hintId] = usage.puzzle.revision + 1 }
     delete state.hintUsage[control.hintId]
     return { state, feedback: feedback('The organizer reset this hint and refunded its cost.') }
@@ -434,7 +450,7 @@ export function executeControl(definition: HuntDefinition, original: GameState, 
     // Reopening reverses earned completion/automatic bonuses but preserves hint
     // charges, wrong attempts and their complete audit history.
     if (isSettled(progress)) {
-      for (const entry of [...state.ledger]) if (entry.checkpointId === checkpoint.id && ['checkpoint_completed', 'time_bonus', 'action_points', 'skip_penalty'].includes(entry.kind) && !state.ledger.some(refund => refund.reverses === entry.id)) score(state, { kind: 'refund', checkpointId: checkpoint.id, amount: -entry.amount, reverses: entry.id, reason, at })
+      for (const entry of [...state.ledger]) if (entry.checkpointId === checkpoint.id && ['checkpoint_completed', 'time_bonus', 'action_points', 'skip_penalty'].includes(entry.kind) && !state.ledger.some(refund => refund.reverses === entry.id)) score(state, { kind: 'refund', checkpointId: checkpoint.id, amount: -entry.amount, ...(entry.countsForRanking === false ? { countsForRanking: false } : {}), reverses: entry.id, reason, at })
       const nodeHistory = Object.fromEntries(Object.entries(progress.nodes).flatMap(([nodeId, nodeProgress]) => {
         const discoveries = knownPuzzleDiscoveries(checkpoint.flow.nodes.find(node => node.id === nodeId)!, nodeProgress)
         const history = {
@@ -541,7 +557,7 @@ export function getPlayerView(definition: HuntDefinition, state: GameState, now:
   const view: PlayerView = {
     hunt: { id: definition.id, title: definition.title, ...(definition.description !== undefined ? { description: definition.description } : {}), ...(settings ? { settings } : {}), ...(definition.theme ? { theme: copy(definition.theme) } : {}) },
     teamId: state.teamId, revision: state.revision, status: state.status, score: state.score, serverNow: at,
-    ...(state.timer ? { timer: { deadlineAt: state.timer.deadlineAt, durationSeconds: state.timer.durationSeconds, remainingSeconds: timerRemaining(state, at)!, paused: state.timer.pauses.some(p => !p.endedAt) } } : {}),
+    ...(state.timer ? { timer: { deadlineAt: state.timer.deadlineAt, durationSeconds: state.timer.durationSeconds, remainingSeconds: timerRemaining(state, at)!, paused: [...state.timer.pauses, ...(state.clockPauses ?? [])].some(p => !p.endedAt) } } : {}),
     progress: { completed: Object.values(state.checkpoints).filter(cp => cp.status === 'completed').length, total: definition.checkpoints.length, requiredCompleted: required.filter(cp => isSettled(state.checkpoints[cp.id])).length, requiredTotal: required.length },
     checkpoint: null, node: null, hints: [],
     checkpoints: definition.checkpoints.map((cp, index) => ({ id: cp.id, title: visibleTitle(cp, index), status: state.checkpoints[cp.id].status, required: cp.required !== false, ...(cp.group ? { group: cp.group } : {}), ...(cp.location && (definition.settings?.map === 'all' || (definition.settings?.map === 'visited' && state.checkpoints[cp.id].startedAt)) ? { location: copy(cp.location) } : {}) })),
